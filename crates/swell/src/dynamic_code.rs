@@ -142,7 +142,7 @@ struct EvalCaller {
     new_target: Option<ObjectRef>,
 }
 
-/// The environments of an eval code's frame (PerformEval, steps 16 to 18).
+/// The environments of an eval code's frame (PerformEval, steps 17 to 19).
 #[derive(Clone, Copy)]
 struct EvalEnvironments {
     /// The LexicalEnvironment.
@@ -263,8 +263,8 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// PerformEval (`#sec-performeval`) of `source` up to its evaluation, steps 2 to 11 and the
-    /// parse of steps 9 to 15: HostGetCodeForEval of an object, the return of a value that is no
+    /// PerformEval (`#sec-performeval`) of `source` up to its evaluation, steps 2 to 14, the
+    /// parse step 12 among them: HostGetCodeForEval of an object, the return of a value that is no
     /// String, HostEnsureCanCompileStrings, then the parse and compile step of eval code in the
     /// current realm (`compilation`: `DirectEval` with `strict_caller` and the activation the
     /// hook runs under, or `IndirectEval`; `function` the function GetThisEnvironment answers for
@@ -297,7 +297,7 @@ impl<H: Host> Agent<H> {
         started
     }
 
-    /// Steps 4 to 15 of PerformEval for the String `string`, made from `source`, the eval context
+    /// Steps 4 to 14 of PerformEval for the String `string`, made from `source`, the eval context
     /// derived from the caller's strictness and its function ([`Agent::eval_context`]).
     ///
     /// privateIdentifiers (`#sec-evaldeclarationinstantiation`, steps 4 to 7, which PerformEval
@@ -490,7 +490,7 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The frame of eval code (PerformEval, steps 16 to 26), not yet pushed: the current realm,
+    /// The frame of eval code (PerformEval, steps 17 to 27), not yet pushed: the current realm,
     /// the environments `envs`, from `caller` the `this` (the caller's ThisBinding), the function
     /// GetThisEnvironment answers and the NewTarget (decision 3, item 5; the evalContext's own
     /// Function component is null, and nothing reads it but through GetThisEnvironment), and
@@ -549,9 +549,9 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// The environments of PerformEval, steps 16 to 18, for the eval code `compiled`, from the
+    /// The environments of PerformEval, steps 17 to 19, for the eval code `compiled`, from the
     /// caller's LexicalEnvironment `lexical` and VariableEnvironment `variable`. The new
-    /// declarative record of step 16 is made only when a binding lives in it (decision 3,
+    /// declarative record of step 17 is made only when a binding lives in it (decision 3,
     /// "Lexical bindings", item 5): with a `let` or `const` binding that lives in a record
     /// ([`swell_compiler::bytecode::Code::eval_scope`]), a record of those slots, uninitialized,
     /// whose [[OuterEnv]] is `lexical`; for strict code always, its VariableEnvironment too, where

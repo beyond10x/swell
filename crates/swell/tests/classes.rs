@@ -597,7 +597,7 @@ fn a_method_recursion_stops_at_frame_depth() {
 /// mode code", the computed keys included. In a class written in non-strict code, a key that
 /// assigns an undeclared name throws a `ReferenceError` (PutValue, `#sec-putvalue`, step 3.a),
 /// a failed [[Set]] throws a `TypeError` (step 5.d), and a direct `eval` in a key is strict
-/// (PerformEval, `#sec-performeval`, step 10), so its `var` stays in the eval's own
+/// (PerformEval, `#sec-performeval`, steps 13 and 19), so its `var` stays in the eval's own
 /// environment. Found by the adversary's first pass.
 #[test]
 fn computed_keys_are_strict_code() {
@@ -690,7 +690,7 @@ enum StrictOperation {
     /// `#sec-declarative-environment-records-setmutablebinding-n-v-s`, step 4).
     FunctionNameAssignment,
     /// A direct `eval` that assigns an undeclared name: strict eval code (PerformEval, step
-    /// 10), a `ReferenceError`.
+    /// 13), a `ReferenceError`.
     EvalAssignment,
     /// A direct `eval` that declares a `var`: strict eval code, so the `var` stays in the
     /// eval's own environment.
@@ -781,7 +781,7 @@ fn every_strict_write_in_a_computed_key_throws() {
 
 /// `#sec-strict-mode-code`: a direct `eval` in the computed key of every kind of class element
 /// in non-strict code, at the top of a script and in a non-strict function (24 results), is
-/// strict eval code (PerformEval, step 10): its assignment to an undeclared name throws a
+/// strict eval code (PerformEval, steps 13 and 19): its assignment to an undeclared name throws a
 /// `ReferenceError` and its `var` stays in its own environment.
 #[test]
 fn a_direct_eval_in_a_computed_key_is_strict_eval_code() {

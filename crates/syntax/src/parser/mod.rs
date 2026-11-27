@@ -184,7 +184,7 @@ pub(crate) fn parse(source: &[u16], max: u32, m: &Meter<'_>) -> Result<Parsed, S
 }
 
 /// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
-/// step 9, `ParseText(x, Script)`) in the eval context `context` (steps 6 and 7): the code is
+/// step 12.a, `ParseText(x, Script)`) in the eval context `context` (steps 7 to 11): the code is
 /// strict from its start when the caller is strict, and from its directive prologue on when
 /// that holds a Use Strict Directive; `new.target` stands at its top when `in_function` is set;
 /// a SuperProperty when `in_method` is set, and a SuperCall too when `in_derived_constructor`

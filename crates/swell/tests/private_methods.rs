@@ -1926,8 +1926,9 @@ fn an_early_error_before_a_private_name_counts_no_refusal() {
 }
 
 /// A direct eval outside every class with an undeclared private name is the early
-/// `SyntaxError` the standard gives (`#sec-performeval`, step 12: privateIdentifiers is empty
-/// when the running PrivateEnvironment is null), counted as no refusal: the cases
+/// `SyntaxError` the standard gives (`#sec-evaldeclarationinstantiation`, steps 4 to 6:
+/// privateIdentifiers is empty when the privateEnv PerformEval passes, the running
+/// PrivateEnvironment, is null; step 7 throws), counted as no refusal: the cases
 /// `built-ins/eval/private-identifiers-not-empty.js` and
 /// `language/statements/class/elements/privatename-not-valid-eval-earlyerr-7.js` and `-8.js` of
 /// `story-element-syntax.cases.txt`, which counted a refusal at the head before this rule.

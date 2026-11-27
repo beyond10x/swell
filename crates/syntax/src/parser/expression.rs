@@ -96,7 +96,7 @@ const TEMPLATE_AFTER_OPTIONAL_CHAIN: &str = "template literal after an optional 
 
 /// `new.target` where no function that is not an arrow function encloses it, and not in eval
 /// code whose context has `in_function` (`#sec-scripts-static-semantics-early-errors`; PerformEval,
-/// step 6, `#sec-performeval`).
+/// steps 11 and 12.e, `#sec-performeval`).
 const NEW_TARGET_OUTSIDE_FUNCTION: &str = "new.target outside a function";
 
 /// A UnaryExpression (`delete`, `void`, `typeof`, `+`, `-`, `~`, `!` or `await` and its operand)

@@ -146,9 +146,9 @@ pub fn compile_script_with(script: &Script, ledger: &mut dyn Ledger) -> Result<C
 /// LexicalEnvironment to the private record that holds its Private Name, and the slot there. A
 /// private reference of the eval code that no class of the eval code declares resolves to it
 /// with the hops counted as the eval code's own records (the record of its top level, or the
-/// empty one PerformEval makes for strict code without one, step 16) plus the caller's hops,
-/// and compiles to `GetPrivate`, `SetPrivate` and `PrivateIn` as other code does. None for an
-/// indirect `eval`. The list is read during the step and not kept.
+/// empty one PerformEval makes for strict code without one, `#sec-performeval`, steps 17 and
+/// 19) plus the caller's hops, and compiles to `GetPrivate`, `SetPrivate` and `PrivateIn` as
+/// other code does. None for an indirect `eval`. The list is read during the step and not kept.
 pub fn compile_eval_with(
     script: &Script,
     in_derived_constructor: bool,
@@ -1625,13 +1625,13 @@ mod tests {
     }
 
     /// The private names of the caller of a direct `eval` (`#sec-evaldeclarationinstantiation`,
-    /// privateIdentifiers; `story:private-names-in-eval-code`): a private reference the eval code does not declare
-    /// resolves to the caller's position, its hops counted as the eval code's own records (a
-    /// block's record; the record of its top-level bindings; for strict code without that one
-    /// the empty record PerformEval makes, step 16) plus the caller's hops; a name a class of the
-    /// eval code declares hides the caller's. Caller: `#x` at 2 hops slot 0, `#y` at 3 hops
-    /// slot 1. The answer is every (hops, slot) of `GetPrivate`, `SetPrivate` and `PrivateIn`
-    /// in the code and its functions.
+    /// privateIdentifiers; `story:private-names-in-eval-code`): a private reference the eval
+    /// code does not declare resolves to the caller's position, its hops counted as the eval
+    /// code's own records (a block's record; the record of its top-level bindings; for strict
+    /// code without that one the empty record PerformEval makes, `#sec-performeval`, steps 17
+    /// and 19) plus the caller's hops; a name a class of the eval code declares hides the
+    /// caller's. Caller: `#x` at 2 hops slot 0, `#y` at 3 hops slot 1. The answer is every
+    /// (hops, slot) of `GetPrivate`, `SetPrivate` and `PrivateIn` in the code and its functions.
     #[test]
     fn eval_private_names_count_the_callers_hops() {
         use swell_syntax::ledger::Unlimited;

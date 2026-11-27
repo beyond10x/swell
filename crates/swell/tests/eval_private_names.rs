@@ -569,8 +569,8 @@ wrong.join(" ;; ");"##
     )
 }
 
-/// Every shape of eval code between a private reference and the caller's
-/// record (`#sec-performeval` step 16, `#sec-evaldeclarationinstantiation`): top-level `let`,
+/// Every shape of eval code between a private reference and the caller's record
+/// (`#sec-performeval`, steps 17 and 19, `#sec-evaldeclarationinstantiation`): top-level `let`,
 /// `const`, `var`, function and class declarations, captured or not; a function declaration of
 /// eval code beside a captured `let` (its closure is the eval code's own record); blocks,
 /// `for (let ...)`, `switch`, `catch` with and without a binding, a generator after a `yield`,
@@ -878,109 +878,341 @@ fn walk_cost_beyond_the_table() {
     );
 }
 
-/// The class of [`step_budget_sweep`] and [`a_loop_of_500_evals_with_100_names_keeps_nothing`]:
-/// 100 private names, a method whose direct eval stands under 64 blocks, and a loop of evals.
+/// The blocks around the direct eval of [`sweep_setup`]'s method `m`.
+const SWEEP_BLOCKS: u64 = 64;
+
+/// The private names of [`sweep_setup`]'s class `C`.
+const SWEEP_NAMES: u64 = 100;
+
+/// The slots of a record the walk reads without a step for each (`object::property::SMALL`).
+const SWEEP_SMALL: u64 = 8;
+
+/// The String of the sweeps' direct eval: the class's outermost and innermost private name.
+const SWEEP_TEXT: &str = "this.#p99 + this.#p0";
+
+/// The class of the step budget sweeps ([`sweep_phases`]) and of
+/// [`a_loop_of_500_evals_with_100_names_keeps_nothing`]: [`SWEEP_NAMES`] private names, a method
+/// `m(t)` whose direct eval of `t` stands under [`SWEEP_BLOCKS`] blocks, and a loop of evals.
 fn sweep_setup() -> String {
-    let fields: String = (0..100).map(|k| format!("#p{k} = {k}; ")).collect();
-    let open: String = (0..64)
+    let fields: String = (0..SWEEP_NAMES).map(|k| format!("#p{k} = {k}; ")).collect();
+    let open: String = (0..SWEEP_BLOCKS)
         .map(|k| format!("{{ let b{k} = {k}; (() => b{k}); "))
         .collect();
-    let close = "}".repeat(64);
+    let close = "}".repeat(SWEEP_BLOCKS as usize);
     format!(
-        "class C {{ {fields}m() {{ {open}return eval(\"this.#p99 + this.#p0\"); {close} }} loop(n) {{ var s = 0; for (var i = 0; i < n; i++) s += eval(\"this.#p1\"); return s; }} }}\nvar c;\n0;"
+        "class C {{ {fields}m(t) {{ {open}return eval(t); {close} }} loop(n) {{ var s = 0; for (var i = 0; i < n; i++) s += eval(\"this.#p1\"); return s; }} }}\nvar c;\n0;"
     )
 }
 
-/// The step budget lowered one step at a time across the walk, the parse
-/// and the compile of one direct eval in a class of 100 private names under 64 blocks: each run
-/// ends in `Terminated(StepBudget)` or answers the field, and a second run at the same budget
-/// leaves `heap_bytes()` after a collection where the first left it (nothing of a stopped walk,
-/// parse or compile is kept). The default build only (a fresh agent per budget); in three tests
-/// of one third of the budgets each (`part` 0, 1, 2), so that each stays in its time.
-fn step_budget_sweep(part: u64) {
-    const RUN: &str = "c = new C(); c.m();";
-    // The walk (157 steps), the parse of the eval text and the run of the eval code.
-    const SWEEP: u64 = 171;
-    if cfg!(feature = "collect-every-safe-point") {
-        return;
-    }
-    let setup = sweep_setup();
-    let (setup_steps, total) = {
-        let mut agent = agent().unwrap();
-        let r = realm(&mut agent);
-        let mut steps = |source: &str| {
-            let script = parse(&mut agent, &r, source);
-            assert!(matches!(
-                agent.evaluate_script(&script).unwrap(),
-                HostOutcome::Normal(_)
-            ));
-            agent.last_entry_steps().unwrap()
-        };
-        (steps(&setup), steps(RUN))
-    };
-    assert!(setup_steps + 10 < total - SWEEP, "{setup_steps} {total}");
-    println!("setup {setup_steps} steps, run {total}");
-    let mut ended = 0;
-    let mut answered = 0;
-    let third = SWEEP / 3;
-    let first = total - SWEEP + part * third;
-    let last = if part == 2 { total } else { first + third - 1 };
-    let budgets = first..=last;
-    for budget in budgets {
-        let mut l = limits();
-        l.steps_per_entry = budget;
-        let mut agent = agent_with(l).unwrap();
-        let r = realm(&mut agent);
-        assert_eq!(
-            eval_text(&mut agent, &r, &setup),
-            Outcome::Normal("0".to_string())
-        );
-        let run = parse(&mut agent, &r, RUN);
-        let mut readings = Vec::new();
-        for _ in 0..2 {
-            match agent.evaluate_script(&run).unwrap() {
-                HostOutcome::Terminated(Termination::StepBudget) => ended += 1,
-                HostOutcome::Normal(value) => {
-                    assert_eq!(
-                        support::script::describe(&mut agent, &r, HostOutcome::Normal(value)),
-                        Outcome::Normal("99".to_string()),
-                        "{budget}"
-                    );
-                    answered += 1;
-                }
-                other => panic!("{budget}: {other:?}"),
+/// The run of the sweeps: a new `C`, then its method `m` with `text` as the String of its direct
+/// eval.
+fn sweep_run(text: &str) -> String {
+    format!("c = new C(); c.m({text:?});")
+}
+
+/// The steps the entry of `source` spends in `agent`, which answers it.
+fn entry_steps(
+    agent: &mut swell::Agent<support::host::TestHost>,
+    r: &swell::Realm,
+    source: &str,
+) -> u64 {
+    let script = parse(agent, r, source);
+    assert!(
+        matches!(
+            agent.evaluate_script(&script).unwrap(),
+            HostOutcome::Normal(_)
+        ),
+        "{source}"
+    );
+    agent.last_entry_steps().unwrap()
+}
+
+/// Where the run of [`SWEEP_TEXT`] ([`sweep_run`]) stops at the step budget `budget`, in a
+/// fresh agent that ran `setup`: `Some(steps)` for a stop, `None` for the answer. A charge that
+/// would pass the budget is not spent, so `steps` is the budget itself where the run stops at a
+/// step of one, and less inside a charge of several steps (all the budgets of one charge stop
+/// where it begins). With `twice`, the run runs a second time in the same agent, after a
+/// collection, and the second stops where the first did and leaves `heap_bytes()` after a
+/// collection where the first left it: nothing of a stopped walk, parse, compile or run is kept.
+fn sweep_stop(setup: &str, budget: u64, twice: bool) -> Option<u64> {
+    let mut l = limits();
+    l.steps_per_entry = budget;
+    let mut agent = agent_with(l).unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &r, setup),
+        Outcome::Normal("0".to_string())
+    );
+    let run = parse(&mut agent, &r, &sweep_run(SWEEP_TEXT));
+    let mut stops = Vec::new();
+    let mut readings = Vec::new();
+    for _ in 0..if twice { 2 } else { 1 } {
+        match agent.evaluate_script(&run).unwrap() {
+            HostOutcome::Terminated(Termination::StepBudget) => {
+                stops.push(Some(agent.last_entry_steps().unwrap()));
             }
+            HostOutcome::Normal(value) => {
+                assert_eq!(
+                    support::script::describe(&mut agent, &r, HostOutcome::Normal(value)),
+                    Outcome::Normal("99".to_string()),
+                    "{budget}"
+                );
+                stops.push(None);
+            }
+            other => panic!("{budget}: {other:?}"),
+        }
+        if twice {
             assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
             readings.push(agent.heap_bytes().unwrap());
         }
+    }
+    if twice {
         assert_eq!(
             readings[0], readings[1],
             "{budget}: a stopped eval kept bytes"
         );
+        assert_eq!(stops[0], stops[1], "{budget}: the two runs stopped apart");
     }
-    println!("total {total}: {ended} runs ended at the budget, {answered} answered");
-    assert!(ended > 0, "{ended} {answered}");
-    if part == 2 {
-        assert!(answered > 0, "{ended} {answered}");
+    stops[0]
+}
+
+/// The phases of the run of [`SWEEP_TEXT`] as step budgets, read from the run: each is the
+/// first budget that stops in it.
+struct SweepPhases {
+    setup: String,
+    /// The walk's step at the innermost record: the steps spent before the walk.
+    walk: u64,
+    /// The compares of the class's record (one charge, a step per slot past the first
+    /// [`SWEEP_SMALL`]).
+    compares: u64,
+    /// The walk's step at the records outside the class's record.
+    outside: u64,
+    /// The parse's charge (one charge, a step per code unit of [`SWEEP_TEXT`]).
+    parse: u64,
+    /// The run of the eval code, compiled after the parse (the compile charges no step), and
+    /// the rest of the run of `m`.
+    run: u64,
+    /// The steps of the whole run: the first budget that answers.
+    total: u64,
+}
+
+impl SweepPhases {
+    /// The five ranges of budgets of the sweeps, in their order: the inner half of the block
+    /// records of the walk, its outer half with the method's record and the class's record, the
+    /// compares of the class's record with the records outside it, the parse's charge, and the
+    /// run of the eval code to the answer.
+    fn ranges(&self) -> [core::ops::RangeInclusive<u64>; 5] {
+        let half = self.walk + SWEEP_BLOCKS / 2;
+        [
+            self.walk..=half - 1,
+            half..=self.compares - 1,
+            self.compares..=self.parse - 1,
+            self.parse..=self.run - 1,
+            self.run..=self.total,
+        ]
     }
 }
 
-/// [`step_budget_sweep`], the lowest third of the budgets (the walk).
-#[test]
-fn step_budget_across_the_walk_keeps_nothing() {
-    step_budget_sweep(0);
+/// [`SweepPhases`] of the run, from step counts of the run (the default build):
+///
+/// - `total`: the steps of the run of [`SWEEP_TEXT`];
+/// - the walk's steps: a run with `'#'` as the eval String less one with `"1"` (no `#`, no
+///   walk), less what the two texts cost apart from the walk (an indirect eval of each);
+/// - the parse's charge: the stops read down from the end of the run, one charge at a time (a
+///   budget inside a charge stops where it begins, so the next budget down is the one below
+///   it), up to the first charge of as many steps as [`SWEEP_TEXT`] has code units;
+/// - the walk ends where the parse begins, so it begins the walk's steps lower, and the stops
+///   read further down give the compares of the class's record.
+///
+/// It asserts what the phases are: [`SWEEP_BLOCKS`] block records, the method's record and the
+/// class's record before the compares; the compares as one charge of a step per slot past the
+/// first [`SWEEP_SMALL`] of the class's [`SWEEP_NAMES`]; one record outside it (the global
+/// environment's); and that the five ranges join without a gap from the walk's first record to
+/// the answer.
+fn sweep_phases() -> SweepPhases {
+    let setup = sweep_setup();
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &r, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    let total = entry_steps(&mut agent, &r, &sweep_run(SWEEP_TEXT));
+    let direct = entry_steps(&mut agent, &r, &sweep_run("'#'"))
+        - entry_steps(&mut agent, &r, &sweep_run("1"));
+    let indirect = entry_steps(&mut agent, &r, "(0, eval)(\"'#'\");")
+        - entry_steps(&mut agent, &r, "(0, eval)(\"1\");");
+    let walk_steps = direct - indirect;
+    let length = SWEEP_TEXT.encode_utf16().count() as u64;
+    let floor = total - walk_steps - 400;
+    // Down from the end: the top budget of each charge, and where that charge begins.
+    let mut top = total - 1;
+    let parse = loop {
+        let start = sweep_stop(&setup, top, false).unwrap();
+        if top - start + 1 == length {
+            break start;
+        }
+        assert!(start > floor, "no charge of {length} steps above {floor}");
+        top = start - 1;
+    };
+    let walk = parse - walk_steps;
+    let mut charges = Vec::new();
+    let mut top = parse - 1;
+    while top >= walk {
+        let start = sweep_stop(&setup, top, false).unwrap();
+        if start < top {
+            charges.push((start, top));
+        }
+        if charges.len() == 1 {
+            break;
+        }
+        top = start - 1;
+    }
+    assert_eq!(charges.len(), 1, "no charge of several steps in the walk");
+    let (compares, last) = charges[0];
+    let phases = SweepPhases {
+        setup,
+        walk,
+        compares,
+        outside: last + 1,
+        parse,
+        run: parse + length,
+        total,
+    };
+    println!(
+        "run {total} steps: walk {walk}, compares {compares}, outside {}, parse {parse}, run {}",
+        phases.outside, phases.run
+    );
+    assert_eq!(
+        compares - walk,
+        SWEEP_BLOCKS + 2,
+        "the records before the compares"
+    );
+    assert_eq!(
+        phases.outside - compares,
+        SWEEP_NAMES - SWEEP_SMALL,
+        "the compares of the class's record"
+    );
+    assert_eq!(
+        parse - phases.outside,
+        1,
+        "the records outside the class's record"
+    );
+    let ranges = phases.ranges();
+    assert_eq!(*ranges[0].start(), walk);
+    assert_eq!(*ranges[4].end(), total);
+    for pair in ranges.windows(2) {
+        assert!(!pair[0].is_empty(), "{ranges:?}");
+        assert_eq!(pair[0].end() + 1, *pair[1].start(), "{ranges:?}");
+    }
+    phases
 }
 
-/// [`step_budget_sweep`], the middle third of the budgets (the end of the walk).
-#[test]
-fn step_budget_across_the_end_of_the_walk_keeps_nothing() {
-    step_budget_sweep(1);
+/// The step budget swept over the range `part` of [`SweepPhases::ranges`] (the default build;
+/// the collect build returns at once): every budget's run in a fresh agent ends in
+/// `Terminated(StepBudget)` or answers the field ([`sweep_stop`], twice: a second run stops at
+/// the same place and nothing of the first is kept), and `expect(phases, budget, stop)` holds.
+/// A budget inside a charge of several steps stops where its charge begins: after two budgets
+/// that stop in one charge, the sweep halves its way to the charge's top budget, and the
+/// budgets between two that stop in one charge stop there too (the steps before the charge
+/// fit both; the charge fits neither). So every budget of the range is a stop of the sweep.
+fn step_budget_sweep(part: usize, expect: impl Fn(&SweepPhases, u64, Option<u64>)) {
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let phases = sweep_phases();
+    let range = phases.ranges()[part].clone();
+    let (first, last) = (*range.start(), *range.end());
+    let stop_at = |budget: u64| {
+        let stop = sweep_stop(&phases.setup, budget, true);
+        expect(&phases, budget, stop);
+        stop
+    };
+    let mut runs = 0;
+    let mut budget = first;
+    while budget <= last {
+        runs += 1;
+        match stop_at(budget) {
+            Some(start) if start < budget => {
+                let (mut low, mut high) = (budget, last);
+                while low < high {
+                    let mid = low + (high - low).div_ceil(2);
+                    runs += 1;
+                    if stop_at(mid) == Some(start) {
+                        low = mid;
+                    } else {
+                        high = mid - 1;
+                    }
+                }
+                budget = low + 1;
+            }
+            _ => budget += 1,
+        }
+    }
+    println!(
+        "budgets {first} to {last}: {runs} runs of {}",
+        last - first + 1
+    );
 }
 
-/// [`step_budget_sweep`], the top third of the budgets (the parse, the compile and the run).
+/// The step budget across the walk's step at the inner half of the [`SWEEP_BLOCKS`] block
+/// records around the eval (budgets from [`SweepPhases::walk`], one step each: each budget
+/// stops at its own record). Nothing is kept.
 #[test]
-fn step_budget_across_the_parse_keeps_nothing() {
-    step_budget_sweep(2);
+fn step_budget_at_the_inner_block_records_of_the_walk_keeps_nothing() {
+    step_budget_sweep(0, |_, budget, stop| {
+        assert_eq!(stop, Some(budget), "a record's step of one");
+    });
+}
+
+/// The step budget across the walk's step at the outer half of the block records, the method's
+/// record and the class's record (one step each, up to [`SweepPhases::compares`]). Nothing is
+/// kept.
+#[test]
+fn step_budget_at_the_outer_block_records_and_the_class_record_of_the_walk_keeps_nothing() {
+    step_budget_sweep(1, |_, budget, stop| {
+        assert_eq!(stop, Some(budget), "a record's step of one");
+    });
+}
+
+/// The step budget across the compares of the class's record (from [`SweepPhases::compares`]:
+/// one charge of a step per slot past the first [`SWEEP_SMALL`], so each of its budgets stops
+/// where it begins) and the walk's step at the record outside it (to [`SweepPhases::parse`]).
+/// Nothing is kept.
+#[test]
+fn step_budget_at_the_compares_of_the_class_record_keeps_nothing() {
+    step_budget_sweep(2, |phases, budget, stop| {
+        let expected = if budget < phases.outside {
+            phases.compares
+        } else {
+            budget
+        };
+        assert_eq!(stop, Some(expected), "{budget}");
+    });
+}
+
+/// The step budget across the parse's charge (from [`SweepPhases::parse`]: one charge of a step
+/// per code unit of [`SWEEP_TEXT`], so each of its budgets stops where it begins). Nothing is
+/// kept.
+#[test]
+fn step_budget_at_the_parse_charge_keeps_nothing() {
+    step_budget_sweep(3, |phases, budget, stop| {
+        assert_eq!(stop, Some(phases.parse), "{budget}");
+    });
+}
+
+/// The step budget across the run of the eval code after its compile (the compile charges no
+/// step) and the rest of the run (from [`SweepPhases::run`]): each budget below
+/// [`SweepPhases::total`] stops past the parse, and that one answers. Nothing is kept.
+#[test]
+fn step_budget_in_the_run_of_the_eval_code_keeps_nothing() {
+    step_budget_sweep(4, |phases, budget, stop| match stop {
+        Some(start) => assert!(
+            phases.run <= start && start <= budget && budget < phases.total,
+            "{budget}: {start}"
+        ),
+        None => assert_eq!(budget, phases.total),
+    });
 }
 
 /// 500 direct evals in a loop, each walking a class of 100 private names, leave `heap_bytes()`
@@ -1472,74 +1704,4 @@ fn an_interrupt_or_the_step_budget_ends_the_eval_around_the_scan() {
         needed.max(10),
         times.join(", ")
     );
-}
-
-/// [`step_budget_sweep`] over the budgets below its lowest one, from `from` to `to` steps before
-/// the end of the run: the stops at each record of the walk (one step per record, 64 blocks and
-/// the method's record, before the compares of the class's record that the sweep's lowest
-/// budget stops in). Each run ends in `Terminated(StepBudget)`, and a second run at the same
-/// budget leaves `heap_bytes()` after a collection where the first left it. The default build.
-fn step_budget_sweep_below(from: u64, to: u64) {
-    const RUN: &str = "c = new C(); c.m();";
-    if cfg!(feature = "collect-every-safe-point") {
-        return;
-    }
-    let setup = sweep_setup();
-    let (setup_steps, total) = {
-        let mut agent = agent().unwrap();
-        let r = realm(&mut agent);
-        let mut steps = |source: &str| {
-            let script = parse(&mut agent, &r, source);
-            assert!(matches!(
-                agent.evaluate_script(&script).unwrap(),
-                HostOutcome::Normal(_)
-            ));
-            agent.last_entry_steps().unwrap()
-        };
-        (steps(&setup), steps(RUN))
-    };
-    assert!(setup_steps + 10 < total - from, "{setup_steps} {total}");
-    let mut ended = 0;
-    for budget in total - from..=total - to {
-        let mut l = limits();
-        l.steps_per_entry = budget;
-        let mut agent = agent_with(l).unwrap();
-        let r = realm(&mut agent);
-        assert_eq!(
-            eval_text(&mut agent, &r, &setup),
-            Outcome::Normal("0".to_string())
-        );
-        let run = parse(&mut agent, &r, RUN);
-        let mut readings = Vec::new();
-        for _ in 0..2 {
-            match agent.evaluate_script(&run).unwrap() {
-                HostOutcome::Terminated(Termination::StepBudget) => ended += 1,
-                other => panic!("{budget}: {other:?}"),
-            }
-            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
-            readings.push(agent.heap_bytes().unwrap());
-        }
-        assert_eq!(
-            readings[0], readings[1],
-            "{budget}: a stopped eval kept bytes"
-        );
-    }
-    println!(
-        "total {total}: budgets {}..={}, {ended} runs ended at the budget",
-        total - from,
-        total - to
-    );
-}
-
-/// [`step_budget_sweep_below`], 285 to 229 steps before the end: the inner records of the walk.
-#[test]
-fn step_budget_across_the_inner_records_of_the_walk_keeps_nothing() {
-    step_budget_sweep_below(285, 229);
-}
-
-/// [`step_budget_sweep_below`], 228 to 172 steps before the end: the outer records of the walk
-/// and the start of the compares of the class's record.
-#[test]
-fn step_budget_across_the_outer_records_of_the_walk_keeps_nothing() {
-    step_budget_sweep_below(228, 172);
 }

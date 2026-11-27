@@ -2471,8 +2471,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
     /// The record of eval code's own that a walk from a site to the top of the eval code does
     /// not count, between the eval code and its caller's LexicalEnvironment: the empty
     /// declarative record strict eval code runs in when none of its top-level bindings lives in a
-    /// record (`#sec-performeval`, step 16; the engine's `eval_environments`), 1; otherwise 0, the
-    /// record of the top level being counted as any scope's.
+    /// record (`#sec-performeval`, steps 17 and 19; the engine's `eval_environments`), 1;
+    /// otherwise 0, the record of the top level being counted as any scope's.
     fn eval_own_record(&self) -> u32 {
         let counted = self
             .eval_top
