@@ -110,6 +110,31 @@ Every number below comes from the gate, `task check`, on the released commit.
   (`story:super-property-and-super-syntax`).
 - `new.target` parses and runs in functions, arrow functions, generators, `async` functions
   and direct eval code (`story:new-target-meta-property`).
+- `WeakMap` and `WeakSet` (`#sec-weakmap-objects`, `#sec-weakset-objects`), a story of the ninth
+  slice: the constructors with their adders `set` and `add` (the loop of `Map` and `Set`, a step
+  per entry), `WeakMap.prototype.delete`, `get`, `has`, `set`, `getOrInsert` and
+  `getOrInsertComputed`, `WeakSet.prototype.add`, `delete` and `has`, and their
+  `@@toStringTag`. A key is an object or a Symbol that CanBeHeldWeakly (`#sec-canbeheldweakly`):
+  a Symbol of `Symbol.for` is refused with a `TypeError` by `set`, `add` and `getOrInsert*`, a
+  well-known Symbol is accepted. The table is the keyed hash map of `heap/map.rs` with the
+  heap's hasher, each growth charged before it and credited when the object is freed; a rehash
+  of the table in place, once deleted entries used up its room, is charged nothing; the box of
+  the kind is charged with the object. The collector holds the entries weakly by linear
+  ephemeron marking: a WeakMap's trace reports the value of an entry whose key is marked and
+  puts any other entry on a pending list headed at its key's slot, which the mark phase empties
+  when the key is marked; after marking, every marked weak table drops its entries whose key is
+  not marked, so a key reachable only through the values of such entries is freed with them,
+  in one collection (`story:weak-map-and-weak-set`).
+- The set methods of `Set.prototype`, a story of the ninth slice: `union`, `intersection`,
+  `difference`, `symmetricDifference`, `isSubsetOf`, `isSupersetOf` and `isDisjointFrom`, with
+  GetSetRecord over a set-like (its `size`, `has` and `keys`). Each picks the side it iterates
+  by the clause's size comparison, walks `this` with a cursor of its table (an entry a `has`
+  callback deletes before the walk reaches it is skipped, one it adds is visited), closes the
+  set-like's iterator where the clause closes it, and answers a new plain `Set` of the current
+  realm (no species). One step per entry of `this` visited and per key read from the set-like,
+  the result's table charged to the memory budget, every callback counted against the depth
+  bounds. The own keys of `%Set.prototype%` stand in the order of the clauses
+  (`story:set-methods`).
 
 ### Changed
 
