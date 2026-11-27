@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-27T06:15:58Z",
+  "actor": "human:operator",
+  "artifact": "story:host-object-overrides",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-overrides-pass-2",
+    "review": "review-result:adversary-overrides-pass-2",
+    "outcome": "fixed"
+  }
+}
