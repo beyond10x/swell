@@ -20,7 +20,7 @@ scope:
   path: crates/syntax/src/early.rs
 - confidence: cited
   path: crates/syntax/src/lib.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
@@ -74,3 +74,36 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Private names in eval code (`story:private-names-in-eval-code`); eval in static blocks beyond what `story:class-static-blocks` tests; the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `evalfields` of wave big-2 delivered the story on `impl/evalfields` (one correction
+after the adversary's pass, tests only), merged into `wave/big-2`. Where the delivery differs
+from the text above:
+
+- The flag is set in `Agent::eval_context` (`crates/swell/src/dynamic_code.rs`), which
+  `eval_code_of` calls and which derives the other three flags, not in `eval_code_of` itself.
+- ContainsArguments is a walk of its own, `swell_syntax::early::contains_arguments`, run by
+  `parse_eval_with` on the parsed eval code before the early errors when the flag is set. Its
+  error, `arguments in eval code in a class field initializer (line:col)`, is then the one
+  error of the parse: it is answered before any other early error of the eval code and before
+  a refusal the parser held there, so such eval code counts no refusal (`message_kind` reads
+  the message as `Grammar`). A parse error stays the parse error. The walk keeps its work on a
+  stack charged to the parse's meter and credited at its end.
+- The tests are 14 under `class_field_eval::` and one in the syntax suite, not 13. The
+  adversary's pass was green (`review-result:adversary-evalfields-pass-1`: 44 sources that
+  must fail and 26 that must pass, 43 placements of the eval, 1,249 points of the step and
+  the memory budget across one eval, none of which gave a value where the clause gives the
+  SyntaxError); it left three single-line changes of the code that every test passed. The
+  correction holds each: `eval_of_arguments_in_a_method_of_a_class_with_fields_reads_its_own`
+  (the flag is not set in a method, a static method, a getter or the constructor body),
+  five more kinds of function in `arguments_in_a_function_inside_the_eval_is_allowed`, and
+  `sources::contains_arguments_of_eval_code_holds_only_the_tree` (the ledger holds the tree's
+  bytes and nothing else, also with each charge refused in turn).
+- The nested-eval test runs 1,000 levels in the default build and 100 in a collect build, with
+  `steps_per_entry` raised to 50,000,000: a name lookup charges a step per record, so 1,000
+  levels take about 1.5 million steps, and under the tests' usual limit of 1,000,000 the step
+  budget would end the run before the frame depth does.
+- `class_fields::a_direct_eval_in_an_initializer_is_refused` is removed with the refusal.
+- The story's part of test262 reads `passed 2630 bound 2630 B 2610 F 20 R 0` on the unit's
+  head. The rerun after `story:class-static-blocks` is merged is that unit's.

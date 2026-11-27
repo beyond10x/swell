@@ -231,9 +231,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   function or class takes the field's name. The initializers run as frames of the run loop
   (`InitInstance`, `Call(0)`), so the step budget, the interrupt and the frame depth reach
   them. No instruction is added. The refusal `class field is not supported before slice 8` is
-  gone. A direct `eval` in a field initializer (an arrow in one too) is refused with the
-  `SyntaxError` `eval in a class field initializer is not supported before slice 8` until
-  PerformEval's rule for an initializer is built; an indirect `eval` there runs
+  gone. A direct `eval` in a field initializer (an arrow in one too) runs since
+  `story:eval-in-class-field-initializers`; an indirect `eval` there ran before it
   (`story:public-class-fields`).
 
 - Derived classes and `super(...)` (`#sec-runtime-semantics-classdefinitionevaluation`,
@@ -259,6 +258,20 @@ Every number below comes from the gate, `task check`, on the released commit.
   `SuperCall`, `SuperCallSpread`, `SuperCallKept`, `BindThis`, `BindThisEnv`, `BindThisName`,
   `KeepThis`, `KeepThisEnv` and `UninitializeEnv`. The refusal `class heritage is not
   supported before slice 8` is gone (`story:derived-classes-and-super-call`).
+
+- `eval` in a class field initializer (`#sec-performeval`,
+  `#sec-static-semantics-containsarguments`): a direct eval whose GetThisEnvironment is a
+  field initializer's (an instance or a static field, or an arrow function in one) runs with
+  inFunction and inMethod set, inDerivedConstructor clear and inClassFieldInitializer set,
+  read from the template kind `FieldInitializer`: `new.target` in the eval code is
+  `undefined`, `super.x` reads through the initializer's home object, `super()` is a
+  `SyntaxError` (in a derived class too), `this` is the instance (the class in a static
+  field), a `var` stays in the eval's own record, and ContainsArguments of the eval code
+  (`arguments` outside every function that is not an arrow function) is the `SyntaxError`
+  `arguments in eval code in a class field initializer`, answered before any other early
+  error and before a held refusal of the eval code. An indirect eval there has every flag
+  clear. The refusal `eval in a class field initializer is not supported before slice 8` is
+  gone (`story:eval-in-class-field-initializers`).
 
 ### Changed
 
