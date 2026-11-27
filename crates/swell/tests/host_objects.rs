@@ -68,12 +68,13 @@ impl Drop for Counted {
     }
 }
 
-fn spec(brand: Brand, data: Option<Box<dyn HostData>>) -> HostObjectSpec {
+fn spec(brand: Brand, data: Option<Box<dyn HostData>>) -> HostObjectSpec<TestHost> {
     HostObjectSpec {
         prototype: Prototype::Null,
         brand,
         data,
         error_kind: None,
+        overrides: None,
     }
 }
 
@@ -365,6 +366,7 @@ fn a_prototype_is_kept_by_its_object() {
                     brand: NODE,
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();
@@ -580,12 +582,13 @@ fn define(cx: &mut Cx<'_, TestHost>, object: ObjectRef, key: PropertyKey, value:
 }
 
 /// A host object of `brand` whose prototype is `prototype`, with no data.
-fn on(prototype: Prototype, brand: Brand) -> HostObjectSpec {
+fn on(prototype: Prototype, brand: Brand) -> HostObjectSpec<TestHost> {
     HostObjectSpec {
         prototype,
         brand,
         data: None,
         error_kind: None,
+        overrides: None,
     }
 }
 

@@ -53,6 +53,7 @@ fn host_made_realm(agent: &mut Agent<TestHost>, with_this: bool) -> (Realm, Opti
             brand: Brand(brand),
             data: None,
             error_kind: None,
+            overrides: None,
         };
         let global = cx.new_host_object(spec(1)).unwrap()?;
         let this = if with_this {

@@ -22,8 +22,8 @@
 //!
 //! The other elements (`#sec-class-definitions`, ClassElement), each held at its first token:
 //! a field (FieldDefinition, `class field`, or with a private name `private field`), a private
-//! method or accessor (`private method`) and a static block (ClassStaticBlock, `class static
-//! block`). A field ends at `;`, before `}`, or where a line terminator lets a semicolon be
+//! method or accessor (`private method`) and a static block (ClassStaticBlock, held no more
+//! since `story:class-static-blocks`). A field ends at `;`, before `}`, or where a line terminator lets a semicolon be
 //! inserted (`#sec-rules-of-automatic-semicolon-insertion`); `static`, `get`, `set` and `async`
 //! name a field where no other element can start with them. The functions of item 1 of
 //! "Classes" are made here: one of kind [`FunctionKind::FieldInitializer`] per run of
@@ -642,13 +642,12 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
-    /// The `{` of the static block that started at `start`: holds `class static block` there,
-    /// numbers its function, appends the element to `target` and opens its context, in which
-    /// no `return` stands. Answers the function and the count of enclosing functions to put back.
+    /// The `{` of the static block that started at `start`: numbers its function, appends the
+    /// element to `target` and opens its context, in which no `return` stands. Answers the
+    /// function and the count of enclosing functions to put back.
     #[inline(never)]
     fn static_block_open(&mut self, target: Child, start: Span) -> R<(FunctionId, u32)> {
         self.expect(Punct::LBrace)?;
-        self.hold("class static block", 8, start);
         let id = self.element_function(FunctionKind::StaticBlock, start);
         self.push_element(
             target,

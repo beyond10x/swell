@@ -1,0 +1,94 @@
+script locals 0
+  lexical let "C"
+  0000 2:1 SetStrict true
+  0001 2:1 PushLexicalEnv 0 const "C"
+  0002 2:1 ClassPrototype
+  0003 2:1 MakeClassConstructor 0 base
+  0004 2:1 SetEnv 0 0
+  0005 2:1 Nip 1
+  0006 2:1 Dup
+  0007 2:1 MakeMethod 1
+  0008 2:1 Call 0
+  0009 2:1 Pop
+  0010 2:1 Dup
+  0011 2:1 MakeMethod 2
+  0012 2:1 Call 0
+  0013 2:1 Pop
+  0014 2:1 Dup
+  0015 2:1 MakeMethod 4
+  0016 2:1 Call 0
+  0017 2:1 Pop
+  0018 2:1 Dup
+  0019 2:1 MakeMethod 5
+  0020 2:1 Call 0
+  0021 2:1 Pop
+  0022 2:1 PopEnv
+  0023 2:1 SetStrict false
+  0024 2:1 InitGlobal "C"
+  0025 2:1 Pop
+  0026 0:0 LoadCompletion
+  0027 0:0 Return
+
+function 0 class constructor "C" length 0 locals 0 strict
+  0000 2:1 Undefined
+  0001 2:1 Return
+
+function 1 field initializer "" length 0 locals 0 strict
+  0000 2:11 This
+  0001 2:22 Number 1
+  0002 2:11 DefineField "a"
+  0003 2:11 Pop
+  0004 2:11 Undefined
+  0005 2:11 Return
+
+function 2 static block "" length 0 locals 2 strict
+  0000 2:25 PushLexicalEnv 0 "w"
+  0001 2:65 Closure 3
+  0002 2:65 SetLocal 1
+  0003 2:65 Pop
+  0004 2:42 This
+  0005 2:42 GetNamed "a"
+  0006 2:38 SetLocal 0
+  0007 2:38 Pop
+  0008 2:58 GetLocal 0
+  0009 2:62 Number 1
+  0010 2:58 Add
+  0011 2:54 SetEnv 0 0
+  0012 2:54 Pop
+  0013 2:92 This
+  0014 2:101 Undefined
+  0015 2:101 GetLocal 1
+  0016 2:101 Call 0
+  0017 2:107 This
+  0018 2:107 SuperBase
+  0019 2:107 GetSuperNamed "c"
+  0020 2:101 Add
+  0021 2:92 PutNamed "b"
+  0022 2:92 Pop
+  0023 2:25 Undefined
+  0024 2:25 Return
+
+function 3 declaration "f" length 0 locals 0 strict
+  0000 2:87 GetEnvChecked 0 0
+  0001 2:80 Return
+  0002 2:65 Undefined
+  0003 2:65 Return
+
+function 4 field initializer "" length 0 locals 0 strict
+  0000 2:118 This
+  0001 2:129 Number 2
+  0002 2:118 DefineField "d"
+  0003 2:118 Pop
+  0004 2:118 Undefined
+  0005 2:118 Return
+
+function 5 static block "" length 0 locals 0 strict
+  captured "arguments"
+  arguments unmapped env 0
+  0000 2:141 Undefined
+  0001 2:141 GetGlobal "eval"
+  0002 2:146 String "arguments"
+  0003 2:141 CallEval 1
+  0004 2:141 Pop
+  0005 2:132 Undefined
+  0006 2:132 Return

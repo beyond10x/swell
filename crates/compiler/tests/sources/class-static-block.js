@@ -1,0 +1,2 @@
+// sec-runtime-semantics-classstaticblockdefinitionevaluation: each static block is a function of its own with a var scope of its own, made as a method with home object F and called with this F in source order with the runs of static fields; it makes an arguments object only for a direct eval in its code
+class C { static a = 1; static { var v = this.a; let w = v + 1; function f() { return w; } this.b = f() + super.c; } static d = 2; static { eval("arguments"); } }

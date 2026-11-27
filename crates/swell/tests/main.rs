@@ -93,6 +93,8 @@ mod calls;
 mod class_field_eval;
 #[cfg(any(not(test_modules), test_modules = "class_fields"))]
 mod class_fields;
+#[cfg(any(not(test_modules), test_modules = "class_static_blocks"))]
+mod class_static_blocks;
 #[cfg(any(not(test_modules), test_modules = "classes"))]
 mod classes;
 #[cfg(any(not(test_modules), test_modules = "collect"))]
@@ -145,6 +147,8 @@ mod generators;
 mod hooks;
 #[cfg(any(not(test_modules), test_modules = "host_objects"))]
 mod host_objects;
+#[cfg(any(not(test_modules), test_modules = "host_overrides"))]
+mod host_overrides;
 #[cfg(any(not(test_modules), test_modules = "index_stores"))]
 mod index_stores;
 #[cfg(any(not(test_modules), test_modules = "interrupt"))]
