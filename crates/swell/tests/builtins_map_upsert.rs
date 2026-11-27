@@ -298,29 +298,47 @@ fn group_by_over_an_endless_iterable_ends_at_the_step_budget() {
 
 /// The objects the first script of the memory test makes at once in the default mode, so the
 /// objects arena has room for every object the endless script makes within the budget (as in
-/// `builtins_weak_collections`). The collect mode makes none.
+/// `builtins_weak_collections`). The collect mode makes none: each object made there costs
+/// collections of the whole heap.
 const WARM_OBJECTS: usize = 4_096;
+
+/// The elements the memory test groups at the least before the budget ends it, each its own
+/// group (an Array and an entry of the table). Measured at the eight sizes of the realm of
+/// `task test-realm-sizes` and with no padding: 419 in the default mode at each; in the collect
+/// mode 29 at 64 padding functions, where a growth of the objects arena comes first, 55 at 38,
+/// and 76 to 134 at the others.
+const MEMORY_GROUPS: u64 = 16;
 
 /// The memory budget (`docs/design/engine.md`, "Memory budget"): `Map.groupBy` over an iterable
 /// that is never done, each element its own key, so the result's table and a new group grow
 /// with every element, with a budget of the realm's reading plus 256 KiB (64 KiB in the collect
 /// mode: at 16 KiB the first script itself ended at the budget there), ends in
-/// `Terminated(MemoryBudget)`; once the host dropped the script, one `collect()`
+/// `Terminated(MemoryBudget)` after grouping at least [`MEMORY_GROUPS`] elements, with
+/// `heap_bytes()` above the reading before it; once the host dropped the script, one `collect()`
 /// brings `heap_bytes()` back within the reading before the script. Before the reading a first
 /// script defines the helpers the second calls and runs the same shape over 8 elements, which
 /// grows the arenas a script needs (in the default mode with [`WARM_OBJECTS`] objects made at
-/// once); nothing is made between the readings. The readings are printed.
+/// once); nothing is made between the readings. The readings are printed. How far into the room
+/// the reading at the end lies is not held: the run ends at the first growth the room cannot
+/// take, and where an arena of the heap doubles depends on the size of the realm (in the collect
+/// mode, at 38 and 64 padding functions, the end lay 25,544 and 15,432 bytes above the reading,
+/// under half the room). Objects made first in the collect mode, by one `JSON.parse`, did not
+/// make that hold: with 256 of them the first script ended at the budget at 128 padding
+/// functions in a room of 32 and of 48 KiB, and with 512 in a room of 64 KiB the test took 2.5 to
+/// 3.3 s of wall time.
 #[test]
 fn group_by_over_an_endless_iterable_ends_at_the_memory_budget() {
     let room: u64 = if collect_mode() { 64 << 10 } else { 256 << 10 };
     let warm = format!(
-        "{HELPERS}(function () {{ var a = []; for (var i = 0; i < {objects}; i++) a.push({{}}); }})();\n\
+        "{HELPERS}var grouped = 0;\n\
+         (function () {{ var a = []; for (var i = 0; i < {objects}; i++) a.push({{}}); }})();\n\
          Map.groupBy(closing([0, 1, 2, 3, 4, 5, 6, 7]), function (v) {{ return v; }}).size;",
         objects = if collect_mode() { 0 } else { WARM_OBJECTS }
     );
     // The helpers are the first script's globals: a script that defines them again does not
-    // parse within the room of the collect mode.
-    let endless = "Map.groupBy(endless(function (i) { return i; }), function (v) { return v; });";
+    // parse within the room of the collect mode. `grouped` counts the elements the callback saw,
+    // a Number stored in a global the first script made, so the count makes nothing.
+    let endless = "Map.groupBy(endless(function (i) { return i; }), function (v) { grouped = v + 1; return v; });";
     let warmed = |agent: &mut Agent<TestHost>, realm: &Realm| {
         assert_eq!(
             eval_text(agent, realm, &warm),
@@ -347,12 +365,24 @@ fn group_by_over_an_endless_iterable_ends_at_the_memory_budget() {
     );
     drop(script);
     let after = collected(&mut agent);
+    // Read after the last reading of the heap: the answer is a String the host reads.
+    let Outcome::Normal(grouped) = eval_text(&mut agent, &realm, "grouped;") else {
+        panic!("grouped is not readable");
+    };
+    let grouped: u64 = grouped.parse().unwrap();
     println!(
         "Map.groupBy over an endless iterable: heap_bytes(): {before} before the script, budget \
-         {}, {at_the_end} at its end, {after} after collect()",
+         {}, {at_the_end} at its end, {after} after collect(); {grouped} elements grouped",
         before + room
     );
-    assert!(at_the_end > before + room / 2, "{at_the_end}");
+    assert!(
+        at_the_end > before,
+        "{at_the_end} at the end, {before} before"
+    );
+    assert!(
+        grouped >= MEMORY_GROUPS,
+        "{grouped} elements grouped before the budget"
+    );
     assert!(after <= before, "{after} after collect(), {before} before");
 }
 
