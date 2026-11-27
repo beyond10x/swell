@@ -43,14 +43,44 @@ Run from the repository root of a managed worktree, in this order:
 
 3. The run: one pool job per (configuration, suite), one at a time. The orchestrator itself only
    waits, so it starts without the `slot` prefix; each job it starts carries it. This host admits
-   one benchmark job at a time, and a run starts only when `slot status` shows no other job of
-   this repository on the node.
+   one benchmark job at a time.
 
    ```sh
-   sh bench/run.sh all 1
+   BENCH_NODE_STATE='<command that prints the JSON of `slot state` on the build node>' \
+     sh bench/run.sh all 1
    ```
 
+   `BENCH_NODE_STATE` is a shell command the operator fills in: it prints the node's job list,
+   the JSON of `slot state` run on the build node (`.now_ms`, `.active[]`, `.done[]`, each job
+   with `.id`, `.started_ms`, `.ended_ms`, `.repo`, `.argv`). Without it, `all` refuses to start:
+   a run whose rows cannot say whether they were measured alone is not started.
+   `BENCH_ALLOW_UNWATCHED=1` runs it anyway, and then every row is `loaded: true` with
+   `loaded_reason` `unwatched`.
+
+   Before each job, `all` reads the node's job list every 10 s until the node runs no pool job
+   of any repository, at most 600 s (`BENCH_IDLE_POLL_S`, `BENCH_IDLE_WAIT_S`); then it starts
+   the job either way, after "the node is not idle after 600 s; starting job <config> <suite>
+   beside it". After each job, it reads the list again and writes
+   `logs/<config>.<suite>.neighbours.json` beside the job's log: the node's record of the job
+   (id, start, end) and every other pool job whose time overlaps it (id, repository, start,
+   end, the first 80 characters of its command with `/home/<name>/` cut to `~/`).
+
    It writes `bench/results/<date>-<commit>.json` and stops at the first job the pool refuses.
+
+   Every row says whether it was measured alone. `loaded: true` means one of these held for its
+   job, and `loaded_reason` names which (a list when more than one holds):
+
+   - `neighbour`: another pool job ran on the node during the job;
+   - `load`: the node's 1-minute load per CPU at the job's start or end was over
+     `limits.loaded_bound_per_cpu`;
+   - `unwatched`: the run had no record of the node for the job (no `BENCH_NODE_STATE`, or the
+     node's list had no record of it).
+
+   `loaded: false` means none held, and the row has no `loaded_reason`. The result's `loaded`
+   names this rule in one line and counts the jobs, the jobs with a neighbour and the rows
+   loaded. `task bench-schema-check` refuses a row with `loaded: false` and a `loaded_reason`,
+   and a row with `loaded: true` without one. The selftests `tests/gate/bench-all-*.sh` hold the
+   wait, the refusal and the marks.
 
 4. The gate, then the site data:
 

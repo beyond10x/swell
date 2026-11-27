@@ -6,7 +6,10 @@
 # Run from the repository root:
 #   sh bench/run.sh all [WORKERS]           on the workstation: one pool job per (config, suite),
 #                                           WORKERS (default 1) at a time, then assemble; stops
-#                                           at the first job the pool refuses
+#                                           at the first job the pool refuses. Needs
+#                                           BENCH_NODE_STATE, a shell command that prints the
+#                                           JSON of `slot state` of the build node; refuses to
+#                                           start without it unless BENCH_ALLOW_UNWATCHED=1
 #   sh bench/run.sh prepare                 in a pool job: the image and the tool
 #   sh bench/run.sh job CONFIG SUITE WORKER ORIGIN [RUNS] [ITERATIONS_FILE]
 #                                           in a pool job: SUITE is bench-v8, are-we-fast-yet or
@@ -21,6 +24,13 @@
 # cpuset) and `prlimit --data` (the memory limit). The node's 1-minute load average is read at
 # the start and the end of each job. A job prints its rows between "== rows begin" and
 # "== rows end", so that the rows reach the workstation in the job's output.
+#
+# Before each job, `all` waits until the node runs no pool job (it reads the node's job list
+# with BENCH_NODE_STATE every IDLE_POLL_S seconds), at most IDLE_WAIT_S seconds, and then starts
+# the job either way. After each job it reads the list again and writes every other pool job
+# whose time overlaps the job's own record to logs/<config>.<suite>.neighbours.json. `assemble`
+# marks every row of a job loaded: true, with loaded_reason, when the job had a neighbour, a
+# load per CPU over LOADED_PER_CPU at its start or end, or no record of the node (unwatched).
 set -eu
 
 RUNS_K2=5
@@ -28,6 +38,8 @@ RUNS_START=10
 PROCESS_TIMEOUT_S=600
 MEMORY_LIMIT_BYTES=4294967296
 LOADED_PER_CPU=1.0
+IDLE_WAIT_S=${BENCH_IDLE_WAIT_S:-600}
+IDLE_POLL_S=${BENCH_IDLE_POLL_S:-10}
 
 die() {
   echo "bench: $*" >&2
@@ -486,10 +498,80 @@ job() {
   echo "== rows end"
 }
 
+# node_state: the node's job list, as BENCH_NODE_STATE prints it (the JSON of `slot state`:
+# .now_ms, .active[], .done[]); fails when the command prints no object with a .now_ms. Its
+# stdin is /dev/null: `all` reads its job list on stdin, and a command such as ssh reads stdin.
+node_state() {
+  sh -c "$BENCH_NODE_STATE" < /dev/null 2> /dev/null \
+    | jq -c 'select(type == "object" and (.now_ms | type) == "number")' 2> /dev/null | grep .
+}
+
+# wait_idle CONFIG SUITE: wait until the node runs no pool job, reading its job list every
+# IDLE_POLL_S seconds, at most IDLE_WAIT_S seconds; then return either way. Sets since, the
+# node's clock (ms) at the last read, 0 when no read succeeded.
+wait_idle() {
+  since=0
+  t0=$(date +%s)
+  while :; do
+    busy=unknown
+    if state=$(node_state); then
+      since=$(printf '%s\n' "$state" | jq '.now_ms')
+      busy=$(printf '%s\n' "$state" | jq '[(.active // [])[] | select(.started_ms > 0)] | length')
+    fi
+    [ "$busy" != 0 ] || return 0
+    waited=$(($(date +%s) - t0))
+    if [ "$waited" -ge "$IDLE_WAIT_S" ]; then
+      if [ "$busy" = unknown ]; then
+        echo "bench: cannot read the node's job list after $IDLE_WAIT_S s; starting job $1 $2" >&2
+      else
+        echo "bench: the node is not idle after $IDLE_WAIT_S s; starting job $1 $2 beside it" >&2
+      fi
+      return 0
+    fi
+    nap=$((IDLE_WAIT_S - waited))
+    [ "$nap" -le "$IDLE_POLL_S" ] || nap=$IDLE_POLL_S
+    sleep "$nap"
+  done
+}
+
+# neighbours CONFIG SUITE WORKER ORIGIN SINCE FILE: the node's record of the job (the newest
+# job of `bench/run.sh job CONFIG SUITE WORKER ORIGIN` that started at or after SINCE) and every
+# other pool job whose time overlaps it, into FILE: {job: {id, started_ms, ended_ms},
+# neighbours: [{id, repo, started_ms, ended_ms, command}]}, the command its first 80
+# characters with each /home/<name>/ cut to ~/, an ended_ms of 0 a job that still runs. Without
+# a record of the job, {job: null, neighbours: [], unwatched: <why>}.
+neighbours() {
+  if ! state=$(node_state); then
+    jq -n -c '{job: null, neighbours: [], unwatched: "cannot read the node'"'"'s job list after the job"}' > "$6"
+    return 0
+  fi
+  printf '%s\n' "$state" | jq -c --arg job "bench/run.sh job $1 $2 $3 $4" --argjson since "$5" '
+    .now_ms as $now
+    | def ends: if .ended_ms > 0 then .ended_ms else $now end;
+    [(.done // [])[], (.active // [])[]] as $jobs
+    | ([$jobs[] | select(((.argv // []) | join(" ") | contains($job)) and .started_ms >= $since)]
+       | max_by(.started_ms)) as $j
+    | if $j == null then
+        {job: null, neighbours: [], unwatched: "no record of the job in the node'"'"'s job list"}
+      else
+        {job: {id: $j.id, started_ms: $j.started_ms, ended_ms: $j.ended_ms},
+         neighbours: [$jobs[] | select(.id != $j.id and .started_ms > 0
+             and .started_ms < ($j | ends) and ends > $j.started_ms)
+           | {id, repo, started_ms, ended_ms,
+              command: ((.argv // []) | join(" ") | gsub("/home/[^/]+/"; "~/") | .[0:80])}]}
+      end' > "$6"
+}
+
 # all [WORKERS]: one pool job per (config, suite). A job whose log has no rows is run once more
 # by a later `all` with the same date (jobs with rows are kept); the first job the pool refuses
-# ("did not run") stops every worker, and nothing is assembled.
+# ("did not run") stops every worker, and nothing is assembled. Without BENCH_NODE_STATE it
+# refuses to start; with BENCH_ALLOW_UNWATCHED=1 it runs without watching the node, and every
+# row is loaded: true with loaded_reason unwatched.
 all() {
+  if [ -z "${BENCH_NODE_STATE:-}" ]; then
+    [ "${BENCH_ALLOW_UNWATCHED:-}" = 1 ] || die "BENCH_NODE_STATE is not set, a command that prints the JSON of \`slot state\` of the build node: without it no row can say whether it was measured alone, so the run is not started (BENCH_ALLOW_UNWATCHED=1 runs it anyway, every row loaded: true, loaded_reason unwatched)"
+    echo "bench: BENCH_ALLOW_UNWATCHED=1: the node is not watched; every row is loaded: true, loaded_reason unwatched" >&2
+  fi
   workers=${1:-1}
   stamp=$(date -u +%Y-%m-%d)
   out=.out/bench/run-$stamp
@@ -507,7 +589,10 @@ all() {
       while read -r config suite; do
         log=$out/logs/$config.$suite.log
         if [ $((k % workers)) -eq "$w" ] && [ ! -f "$out/stop" ] && ! grep -q '^== rows end$' "$log" 2>/dev/null; then
-          if ! slot --timeout 30m --tokens 2 sh bench/run.sh job "$config" "$suite" "$w" "$here" > "$log" 2>&1; then
+          rm -f "$out/logs/$config.$suite.neighbours.json"
+          since=0
+          [ -z "${BENCH_NODE_STATE:-}" ] || wait_idle "$config" "$suite"
+          if ! slot --timeout 30m --tokens 2 sh bench/run.sh job "$config" "$suite" "$w" "$here" < /dev/null > "$log" 2>&1; then
             if grep -q '^slot: .*did not run' "$log"; then
               grep 'slot:' "$log" | tail -n 3 > "$out/stop"
               echo "bench: the pool refused job $config $suite; stopping: $(cat "$out/stop")" >&2
@@ -515,6 +600,8 @@ all() {
               echo "bench: job $config $suite failed; see $log" >&2
             fi
           fi
+          [ -z "${BENCH_NODE_STATE:-}" ] ||
+            neighbours "$config" "$suite" "$w" "$here" "$since" "$out/logs/$config.$suite.neighbours.json"
         fi
         k=$((k + 1))
       done < "$out/jobs.list"
@@ -526,12 +613,18 @@ all() {
   assemble "$out" "bench/results/$stamp-$(git rev-parse --short HEAD).json"
 }
 
+# assemble DIR RESULT: the rows of each DIR/logs/<config>.<suite>.log into RESULT. Every row of
+# a job is loaded: true, with loaded_reason, when its job had a neighbour (its
+# <config>.<suite>.neighbours.json lists one), a load over the bound (the job's own loaded),
+# or no record of the node (no neighbours file, or one without the job: unwatched); else
+# loaded: false without loaded_reason.
 assemble() {
   [ $# -eq 2 ] || die "assemble DIR RESULT"
   dir=$1
   result=$2
   : > "$dir/rows.jsonl"
   : > "$dir/hosts.jsonl"
+  : > "$dir/jobs.jsonl"
   missing=
   for log in "$dir"/logs/*.log; do
     case $log in */prepare.log) continue ;; esac
@@ -539,7 +632,24 @@ assemble() {
       missing="$missing ${log##*/}"
       continue
     fi
-    sed -n '/^== rows begin$/,/^== rows end$/p' "$log" | sed '1d;$d' >> "$dir/rows.jsonl"
+    nb=${log%.log}.neighbours.json
+    watched=false
+    neighbour_count=0
+    if [ -f "$nb" ] && jq -e '.job != null' "$nb" > /dev/null 2>&1; then
+      watched=true
+      neighbour_count=$(jq '.neighbours | length' "$nb")
+    fi
+    jq -n -c --arg log "${log##*/}" --argjson watched "$watched" --argjson n "$neighbour_count" \
+      '{log: $log, watched: $watched, neighbours: $n}' >> "$dir/jobs.jsonl"
+    sed -n '/^== rows begin$/,/^== rows end$/p' "$log" | sed '1d;$d' \
+      | jq -c --argjson watched "$watched" --argjson n "$neighbour_count" '
+        [(if $n > 0 then "neighbour" else empty end),
+         (if .loaded == true then "load" else empty end),
+         (if $watched then empty else "unwatched" end)] as $why
+        | del(.loaded_reason)
+        | if ($why | length) == 0 then . + {loaded: false}
+          else . + {loaded: true, loaded_reason: (if ($why | length) == 1 then $why[0] else $why end)} end' \
+      >> "$dir/rows.jsonl"
     sed -n "s/^== host //p" "$log" >> "$dir/hosts.jsonl"
   done
   [ -z "$missing" ] || die "job(s) without rows:$missing"
@@ -561,7 +671,7 @@ assemble() {
     --argjson timeout "$PROCESS_TIMEOUT_S" --argjson memory "$MEMORY_LIMIT_BYTES" \
     --argjson bound "$LOADED_PER_CPU" \
     --slurpfile rows "$dir/rows.jsonl" --slurpfile engines "$dir/engines.jsonl" \
-    --slurpfile suites "$dir/suites.jsonl" '
+    --slurpfile suites "$dir/suites.jsonl" --slurpfile jobs "$dir/jobs.jsonl" '
     def swell($kpi; $measurement; $unit):
       {engine: "swell", config: "swell", version: "none", mode: "interpreter", flags: [],
        kpi: $kpi, measurement: $measurement, unit: $unit, runs: 0, values: [], median: null,
@@ -577,6 +687,10 @@ assemble() {
      limits: {process_timeout_s: $timeout, memory_rlimit_data_bytes: $memory,
               network: "none (a network namespace with only a down loopback)",
               cpuset: "two CPUs per job, named in each row", loaded_bound_per_cpu: $bound},
+     loaded: {rule: "a row is loaded: true when another pool job ran on the build node during its job (neighbour), the node'"'"'s 1-minute load per CPU at its job'"'"'s start or end was over limits.loaded_bound_per_cpu (load), or its job had no record of the node (unwatched); loaded_reason names which",
+              jobs: ($jobs | length),
+              jobs_with_neighbour: ([$jobs[] | select(.neighbours > 0)] | length),
+              rows_loaded: ([$rows[] | select(.loaded == true)] | length)},
      engines: $engines, suites: $suites,
      rows: ($rows + [
        swell("K2"; "bench-v8/geomean"; "ms"),

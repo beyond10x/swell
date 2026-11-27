@@ -24,6 +24,17 @@
     "image_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "harness_digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "limits": { "type": "object" },
+    "loaded": {
+      "type": "object",
+      "description": "The rule that marks a row loaded, in one line, and the counts of the run.",
+      "required": ["rule", "jobs", "jobs_with_neighbour", "rows_loaded"],
+      "properties": {
+        "rule": { "type": "string", "minLength": 1 },
+        "jobs": { "type": "integer", "minimum": 0 },
+        "jobs_with_neighbour": { "type": "integer", "minimum": 0 },
+        "rows_loaded": { "type": "integer", "minimum": 0 }
+      }
+    },
     "engines": {
       "type": "array",
       "items": {
@@ -101,9 +112,24 @@
             "cpus": { "type": "integer", "minimum": 1 }
           }
         },
-        "loaded": { "type": "boolean" }
+        "loaded": { "type": "boolean", "description": "True when the row was measured beside another pool job, under a load per CPU over the bound, or without a record of the node; loaded_reason says which." },
+        "loaded_reason": {
+          "description": "Why the row is loaded: neighbour (another pool job ran on the node during its job), load (the node's 1-minute load per CPU at the job's start or end was over limits.loaded_bound_per_cpu), unwatched (no record of the node for its job); a list when more than one holds. Present exactly when loaded is true.",
+          "type": ["string", "array"],
+          "if": { "type": "string" },
+          "then": { "enum": ["neighbour", "load", "unwatched"] },
+          "else": { "minItems": 2, "items": { "enum": ["neighbour", "load", "unwatched"] } }
+        }
       },
       "allOf": [
+        {
+          "if": { "required": ["loaded"], "properties": { "loaded": { "const": true } } },
+          "then": { "required": ["loaded_reason"] }
+        },
+        {
+          "if": { "required": ["loaded_reason"] },
+          "then": { "required": ["loaded"], "properties": { "loaded": { "const": true } } }
+        },
         {
           "if": { "properties": { "status": { "const": "measured" } } },
           "then": { "properties": { "runs": { "minimum": 1 }, "values": { "minItems": 1 }, "median": { "type": "number" } } },

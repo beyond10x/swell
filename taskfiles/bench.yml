@@ -61,6 +61,9 @@ tasks:
       built; every measurement runs without a network. Each job refuses to measure on the
       machine that started it, so a benchmark never runs beside the pool's build node. Run it
       from the workstation, not inside a pool job; logs go to .out/bench/run-<date>/logs/.
+      It needs BENCH_NODE_STATE in the environment, a command that prints the JSON of slot
+      state on the build node: before each job it waits for the node to run no pool job, and
+      after it marks the rows of a job measured beside another loaded: true (bench/RUNBOOK.md).
     dir: '{{.TASKFILE_DIR}}/..'
     vars:
       BENCH_WORKERS: '{{.BENCH_WORKERS | default "1"}}'
