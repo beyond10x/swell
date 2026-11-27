@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:03Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit 1c8d802, an ancestor of that head",
+    "reference": "the lane slow on the forge, run 45963552396 on wave/big-2 at b9adbe35 (https://github.com/beyond10x/swell/actions/runs/45963552396): slow-time lane 882.6 of 900, longest part slow-test262 504.8 of 600"
+  }
+}

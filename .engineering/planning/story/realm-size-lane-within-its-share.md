@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:realm-size-lane-within-its-share
 kind: story
-status: active
+status: implemented
 title: The lane slow ends within 15 minutes on the forge and each of its parts within 10
 summary: 'task slow took 22 min 35 s on pull request 19; two profile builds are 433 s of it and test-realm-sizes 524 s. Bound: 900 s for the lane, 600 s per part.'
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T20:04:08Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T20:04:08Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:03Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":10,"verification":5}}, executor: "agent:coordinator"}
 ---
 A defect of the lane `slow`, not a feature. Ordered ahead of the next feature units of wave
 big-2 on the operator's order of 2026-11-26; no feature unit of the wave merges before it.

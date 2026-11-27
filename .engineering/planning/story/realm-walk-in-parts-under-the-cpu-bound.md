@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:realm-walk-in-parts-under-the-cpu-bound
 kind: story
-status: active
+status: implemented
 title: The walk over every function of the realm runs in parts, each under its CPU bound, and a test holds that the parts cover the list
 summary: The walk reads the places of the realm's functions from a committed file that one test in the default mode holds equal to the walk at every gate run; it runs in 2 to 8 parts, a place in the part its text hashes to, each part resolving and checking only its own places; a cover test holds the file's form, the partition and the rows of expected, and a row whose answer depends on earlier calls carries the condition its clause tests.
 relations:
@@ -18,10 +18,11 @@ scope:
   path: crates/swell/tests/support/host.rs
 - confidence: cited
   path: taskfiles/realm-places.yml
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 3}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:03Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 Waits for: nothing recorded; `story:map-upsert-and-group-by` waits for this story. Base: the wave
 tip the brief names, `B` below; the figures of this revision were read on `158888d`, the tip of
