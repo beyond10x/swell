@@ -92,9 +92,84 @@ tool_field() {
   echo "$1" | tr ' ' '\n' | sed -n "s/^$2=//p"
 }
 
+# message FILE [SKIP]: the first line of FILE that is not empty, not a stack line and, with
+# SKIP, not one of the harness's own lines; leading blanks dropped, cut to 200 characters. A
+# stack line is "at f (file:1:2)" (V8, QuickJS, Hermes) or "f@file:1:2" (SpiderMonkey,
+# JavaScriptCore).
+message() {
+  awk -v skip="${2:-}" '
+    { line = $0; sub(/^[[:space:]]+/, "", line) }
+    line == "" { next }
+    line ~ /^at / { next }
+    line ~ /^[^:@]*@.*:[0-9]+(:[0-9]+)?$/ { next }
+    skip != "" && line ~ /^(iteration|clock|done) / { next }
+    { print substr(line, 1, 200); exit }' "$1"
+}
+
+# failure_reason PREFIX EXIT SIGNAL TIMED_OUT: the engine's own message, from PREFIX.err, else
+# from PREFIX.out (an engine that reports its error on stdout).
 failure_reason() {
-  last=$( { cat "$1.err"; cat "$1.out"; } | awk 'NF' | tail -n 1 | cut -c1-200)
-  echo "failed: exit $2, signal $3, timed out $4: ${last:-no output}"
+  msg=$(message "$1.err")
+  [ -n "$msg" ] || msg=$(message "$1.out" harness)
+  echo "failed: exit $2, signal $3, timed out $4: ${msg:-no output}"
+}
+
+# verified_counts MODULE_FILE: the inner counts the are-we-fast-yet benchmark's own
+# verifyResult knows, one per line, or "any" when its verifyResult checks each call whatever
+# the count (verifyResult(result)) or the benchmark checks itself (DeltaBlue). A module whose
+# verifyResult takes the count (verifyResult(result, n)) lists them as "if (n === N)"; one
+# that says "No verification result" and lists no count in that form prints nothing.
+verified_counts() {
+  awk '
+    /^[[:space:]]*verifyResult\([^)]*\)[[:space:]]*\{/ {
+      params = $0
+      sub(/^[[:space:]]*verifyResult\(/, "", params)
+      sub(/\).*/, "", params)
+      n = split(params, p, /[[:space:]]*,[[:space:]]*/)
+      if (n >= 2) { inside = 1; counted = 1; arg = p[2] }
+      next
+    }
+    inside && /^  }/ { inside = 0 }
+    inside {
+      if (match($0, "if \\(" arg " === [0-9]+\\)")) {
+        count = substr($0, RSTART, RLENGTH)
+        sub(/.*=== /, "", count)
+        sub(/\)$/, "", count)
+        print count
+      }
+    }
+    /No verification result/ { unverified = 1 }
+    END { if (!counted && !unverified) print "any" }' "$1"
+}
+
+# check_counts IMAGE ITERATIONS_FILE: fail, naming each, when a benchmark of are-we-fast-yet in
+# ITERATIONS_FILE has an inner count its own verifyResult does not know (the suite then fails
+# it with "No verification result for N found"), or an iteration count that is not a positive
+# whole number. Runs before anything is built or measured.
+check_counts() {
+  bad=$(awk 'NR > 1 && $1 == "are-we-fast-yet" { print $2, $3, $4, $5 }' "$2" | while read -r name module iterations inner; do
+    case $iterations in
+      ''|0*|*[!0-9]*) echo "  are-we-fast-yet $name: iteration count '$iterations' is not a positive whole number" ;;
+    esac
+    case $inner in
+      ''|0*|*[!0-9]*)
+        echo "  are-we-fast-yet $name: inner count '$inner' is not a positive whole number"
+        continue ;;
+    esac
+    file=$1/suites/are-we-fast-yet/$module.js
+    if [ ! -f "$file" ]; then
+      echo "  are-we-fast-yet $name: no suite file $module.js in the image"
+      continue
+    fi
+    counts=$(verified_counts "$file" | tr '\n' ' ' | sed 's/ $//')
+    case " $counts " in
+      " any "|*" $inner "*) ;;
+      "  ") echo "  are-we-fast-yet $name: inner count $inner; cannot read the counts $module.js verifies" ;;
+      *) echo "  are-we-fast-yet $name: inner count $inner is not one the suite verifies ($module.js verifies $counts)" ;;
+    esac
+  done)
+  [ -z "$bad" ] || die "$2 holds counts the suite does not verify; nothing measured:
+$bad"
 }
 
 # row KPI MEASUREMENT UNIT STATUS REASON VALUES [EXTRA_JSON]
@@ -327,6 +402,7 @@ start() {
 
 prepare() {
   image=$(image_build .out/bench/prepare-image.log) || exit 1
+  check_counts "$image" bench/suites/iterations.tsv
   cat .out/bench/prepare-image.log
   echo "image $image"
   echo "image_digest sha256:$(sha256sum "$image/manifest.tsv" | cut -d' ' -f1)"
@@ -382,6 +458,7 @@ job() {
 
   image=$(image_build "$work/image.log") || exit 1
   image_digest=sha256:$(sha256sum "$image/manifest.tsv" | cut -d' ' -f1)
+  check_counts "$image" "$iterations_file"
   tool=$(build_tool 2> "$work/tool.log") || die "no swell-bench-exec; see $work/tool.log: $(tail -n 1 "$work/tool.log")"
   [ -x "$tool" ] || die "no swell-bench-exec; see $work/tool.log"
   bin=$image/engines/$engine/$binary
