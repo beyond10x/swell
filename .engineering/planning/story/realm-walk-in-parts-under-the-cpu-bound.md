@@ -7,7 +7,18 @@ title: The walk over every function of the realm runs in parts, each under its C
 summary: The walk reads the places of the realm's functions from a committed file that one test in the default mode holds equal to the walk at every gate run; it runs in 2 to 8 parts by the index of a place, each resolving only its own places; a cover test holds the partition and the rows of expected, and a row whose answer depends on earlier calls carries the condition its clause tests.
 relations:
 - decomposes: epic:slice-04-numbers-and-dates
-revision: 5
+scope:
+- confidence: cited
+  path: Taskfile.yml
+- confidence: cited
+  path: crates/swell/tests/builtins_symbol_values.rs
+- confidence: cited
+  path: crates/swell/tests/fixtures/realm_places.txt
+- confidence: cited
+  path: crates/swell/tests/support/host.rs
+- confidence: cited
+  path: taskfiles/realm-places.yml
+revision: 6
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 3}
