@@ -457,6 +457,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   default mode). The workflow `slow` starts on a change of `taskfiles/gate-time.yml`,
   `taskfiles/realm-room-tests.awk` and `.config/nextest.toml` too
   (`story:realm-size-lane-within-its-share`).
+- The lane `slow` prints the machine it runs on, `slow-runner: <n> cores, <cpu>, <memory>,
+  sh is <sh>`, right after its clock starts, so that two runs on the same code can be read
+  against their machines. The forge ran the lane on one code in 882.6 s and in 1,142.0 s.
 - The lane `slow` builds the stack tests' binary with their modules only:
   `build-stack-profiles` passes `--cfg test_modules` and the modules of `STACK_MODULE_LIST`
   (`taskfiles/stack-profiles.yml`) to the test target of `swell` through `cargo rustc`, so
@@ -610,6 +613,12 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Fixed
 
+- The lane's background build of the profile collect ends with the lane on the forge too:
+  the kills of its process group had two dashes after the signal, which the forge's `sh`
+  (dash) refuses, so `slow-collect-stop` and the build's watcher ended nothing there, and
+  the forge's `task check` went red on the planted script that holds it. A new static check
+  of the gate, `kill-check`, refuses that form in `Taskfile.yml`, `taskfiles/`, `tests/gate/`
+  and `.github/workflows/`.
 - `JSON.parse` frees the room of its stack of open values when the parse ends, before the
   reviver is called; before, that room stayed allocated, uncharged, while the reviver ran
   (found by the review of `story:buffer-growth-outside-the-charged-list-is-listed`).

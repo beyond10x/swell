@@ -430,6 +430,22 @@ that is pushed.
   again. The draft `story:class-elements-scale-test-reads-no-wall-time` holds it.
 - The subject line of the commit `b9adbe35` has 75 columns, over the 72 this repository's
   commits keep. It was pushed before it was seen, and a pushed commit is not rewritten.
+- The forge's `task check` on the pull request's head `d16fe575` went red after three green
+  runs of the same gate on the build node: `gate-selftest: 103 passed, 1 failed`, the planted
+  script `slow-collect-builds-beside-the-lane-and-ends-with-it` ("task slow ended without
+  slow-collect-stop ending the build"). The forge's `sh` is dash and the build node's is
+  bash. The lane's 17 kills of a process group had two dashes after the signal, which dash's
+  `kill` reads as a process number, so on the forge `slow-collect-stop` and the build's
+  watcher ended nothing. The unit `lanefix` wrote the kills in the form both shells read and
+  added the static check `kill-check` with its planted script, so the local gate refuses
+  that form (`gate-selftest: 105 passed`; merged at `175c17f` on 2026-11-27, 10:14 CET;
+  `review-result:lanefix-coordinator-read`). No dash is installed where the unit ran: the
+  forge's run of the corrected head is the check.
+- The forge's run of the lane `slow` on `d16fe575` read `slow-time lane 1142.0 of 900,
+  longest part slow-test262 634.0 of 600`, on code that read 882.6 s one run before (the two
+  heads differ in no file of code): single tests ran 1.4 to 1.56 times slower, builds 1.11
+  to 1.14 times, on the same runner image. The forge's log does not name the runner's CPU;
+  from `lanefix` on the lane prints it (`slow-runner`).
 
 ### Where each finding went
 

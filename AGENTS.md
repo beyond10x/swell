@@ -520,22 +520,34 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   - A command script stops at the first failing command, and a `grep` that matches nothing
     fails: write `|| true` where no match is a valid answer.
   - A check that finds nothing to read fails. A check that passes on an empty input is a bug.
+  - The forge's `sh` is dash; here and on the build node it is bash. A `sh -c` text of a
+    task and a planted script run under both. dash's builtin `kill` takes the word after a
+    signal operand as the first process, so `kill -TERM`, then two dashes, then the group
+    fails there with "Illegal number" and signals nothing. Write `kill -TERM "-$pid"` (the
+    group right after the signal) or give the signal by `-s`. `kill-check`
+    (`taskfiles/shell.yml`, variable `GATE_ROOT`) refuses the other form in `Taskfile.yml`,
+    `taskfiles/`, `tests/gate/` and `.github/workflows/`
+    (`tests/gate/kill-check-refuses-two-dashes-after-the-signal.sh`). A test that waits for
+    a process group to be gone tells "No such process" from any other failure of `kill`
+    (`group_alive` in the two slow-collect scripts). On 2026-11-27 the forge's `task check`
+    went red on this after green runs on the build node.
 - A bare `task` or `cargo` in an agent shell is refused or queued by the build pool's hook;
   inside a pool job (`slot task check`) the scripts call them directly.
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-27, on `wave/big-2` at `b9adbe35`, the head
-of the second part of wave big-2 before the coordinator's files of its close
-(`docs/plan/wave-big-2.md`), on the pool's build node, load 14 on 32 cores. Every check
-passed and the run exited 0: the test steps took 65.5 s of their 120 (315.0 CPU seconds, of
-them `test` 200.9 and `test-collect` 61.1; 32 cores have no entry in the table of CPU
-seconds, so the `gate-cpu` line prints no bound). On `wave/big-2` at `8ab9456a`, the first
-part of that wave, the node took 56.4 s at load 26 (431.5 CPU seconds). On `wave/big-1` at
-`a4c1b2e7`, the close of slice 4, the node took 89.7 s at load 46 (304.4 CPU seconds). On
-`5ee604a`, the release commit of `0.9.0`, the node took 24.9 s at load 36 on 64 cores (166.7
-CPU seconds). On the code of release `0.8.0` with the gate change of
-`story:gate-test-steps-fit-four-cores` (`756b8be`) the same node took 34.3 s at load 67
+`slot --timeout 30m task check-runner` on 2026-11-27, on `impl/lanefix` at `e3c97c4`, the
+head of the unit that `wave/big-2` merged at `175c17f` (the two trees differ only in the
+planning store), on the pool's build node, load 12 on 32 cores. Every check passed and the
+run exited 0: the test steps took 35.3 s of their 120 (429.5 CPU seconds, of them `test`
+272.0 and `test-collect` 106.9; 32 cores have no entry in the table of CPU seconds, so the
+`gate-cpu` line prints no bound). On `wave/big-2` at `b9adbe35`, the head of the second part
+of wave big-2, the node took 65.5 s at load 14 (315.0 CPU seconds). On `wave/big-2` at
+`8ab9456a`, the first part of that wave, the node took 56.4 s at load 26 (431.5 CPU
+seconds). On `wave/big-1` at `a4c1b2e7`, the close of slice 4, the node took 89.7 s at load
+46 (304.4 CPU seconds). On `5ee604a`, the release commit of `0.9.0`, the node took 24.9 s at
+load 36 on 64 cores (166.7 CPU seconds). On the code of release `0.8.0` with the gate change
+of `story:gate-test-steps-fit-four-cores` (`756b8be`) the same node took 34.3 s at load 67
 (201.5 CPU seconds); before that change, on the code of `0.8.0`, a 16-core machine took
 94.3 s at load 34 (312.1 CPU seconds) and the forge's runner of 4 cores 127.9 s (448.5 CPU
 seconds). The planted scripts' single `ok` lines, the ten slowest tests of each step and the
@@ -544,16 +556,17 @@ line). The fault step's line counts the 1,693 tests its filter leaves out as ign
 
 ```
 runner-env-check: check-runner sets CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0: CI and GITHUB_ACTIONS as the runner sets them, and the 2 variable(s) .github/workflows/check.yml sets for task check
-python-check: no Python file among 2895 file(s)
+python-check: no Python file among 2917 file(s)
+kill-check: no kill with two dashes after its signal operand in 141 file(s)
 forbid-unsafe-check: 10 crate root(s), each with #![forbid(unsafe_code)]
 libm-check: no forbidden call under 228 file(s)
-nostd-build: Finished `dev` profile [unoptimized] target(s) in 7.59s
+nostd-build: Finished `dev` profile [unoptimized] target(s) in 0.03s
 nostd-build: 6 libraries for x86_64-unknown-none: swell swell_compiler swell_num swell_regexp swell_syntax swell_unicode
 nostd-symbols: 6 libraries, 57 object(s), 10248 undefined symbol(s): 10106 Rust's own, 55 memory functions, 87 compiler runtime routines; none from a C library or the system
 Cargo.lock: 9 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 6 workflow file(s), none names a compiler; .github/workflows/check.yml installs the 2 component(s) and 1 target(s) rust-toolchain.toml names
 release-targets-check: 7 target(s) in .github/workflows/release-build.yml, the release's targets; musl and Windows built with +crt-static and their linking checked; docs/releasing.md and website/docs/embedding.md name each archive and no other, and docs/releasing.md counts 7 archives and 8 assets
-nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 21 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
+nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 22 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 math-data-check: 3 file(s)
@@ -569,24 +582,24 @@ site-data-check: website/data/engines.json equals its regeneration from bench/en
 test-main: 9 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
 test-binaries-check: 19 test executables, 9 integration-test binaries in 9 packages, none with a .debug_ section
 build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
-build-collect: Finished `collect` profile [optimized] target(s) in 4m 03s
+build-collect: Finished `collect` profile [optimized] target(s) in 0.00s
 build-collect: 2 test executables in target/collect/deps, none with a .debug_ section
-build-faults: Finished `test` profile [unoptimized] target(s) in 22.97s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 8.29s
+build-faults: Finished `test` profile [unoptimized] target(s) in 0.00s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 0.04s
 build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.04s
 build-test262-runner: Finished `release` profile [optimized] target(s) in 0.00s
 19 test binaries: 2445 passed, 0 failed, 1 ignored
-gate-time test 34.5
+gate-time test 10.9
 test-doc: 8 test suites: 19 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 19 passed, 0 failed, 0 ignored
 gate-time test-doc 4.2
 test-collect: 2 test binaries: 1944 passed, 0 failed, 1 ignored
-gate-time test-collect 10.3
+gate-time test-collect 4.2
 test-faults: 1 test binaries: 1 passed, 0 failed, 1693 ignored
 gate-time test-faults 0.2
 conform-engine: 3 test binaries: 16 passed, 0 failed, 0 ignored
   60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported
-gate-time conform-engine 1.5
+gate-time conform-engine 1.6
 test262-refused 5369
 test262 total 53801 8982 7 44812 36027 8783 2
 test262: 221 directory lines sum to the total
@@ -597,21 +610,21 @@ test262-slice 04 1681 3320 0 0 1681 1681 0 0
 test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1472 2801 0 0 1472 1472 0 0
-test262-slice 08 9302 18455 0 0 9302 8242 1060 0
-test262-slice 09 1787 3545 0 0 1787 1765 22 0
+test262-slice 08 9339 18529 0 0 9339 8279 1060 0
+test262-slice 09 1858 3678 0 0 1858 1858 0 0
 test262-slice 10 3759 7258 0 0 3759 3759 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 287 lines of conformance/test262/expected.txt; sources digest bb23016e7f8e877916644dfd0c343278bb8275178ec048aed63aa2e78fd364c1 equals conformance/test262/expected.digest
+test262: 287 lines of conformance/test262/expected.txt; sources digest 6c2d41c27635226bceca91f133544a9fdc65eb62658fac2ce65567cf161e904c equals conformance/test262/expected.digest
 gate-time test262-check 0.1
-test262-moves: 1964 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:341 9:30 10:83 11:4 12:42 13:17; slices 1 to 19: 44931 85794
+test262-moves: 2022 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:378 9:29 10:83 11:4 12:64 13:17; slices 1 to 19: 44931 85794
 gate-time test262-moves-check 1.5
-gate-selftest: 104 passed, 0 failed
-gate-time gate-selftest 13.2
-gate-time test-steps 65.5 of 120, cpu 315.0, load 14.17 on 32 cores
-gate-time yardstick 3.0 s: conform-engine 1.5 and test262-moves-check 1.5
-gate-cpu test-steps 315.0, no bound for 32 cores: test 200.9, test-doc 4.8, test-collect 61.1, test-faults 0.1, conform-engine 2.4, test262-check 0.1, test262-moves-check 1.4, gate-selftest 44.3
-gate-time: no file of 400 under target/*/deps changed while the test steps ran
+gate-selftest: 105 passed, 0 failed
+gate-time gate-selftest 12.6
+gate-time test-steps 35.3 of 120, cpu 429.5, load 11.55 on 32 cores
+gate-time yardstick 3.1 s: conform-engine 1.6 and test262-moves-check 1.5
+gate-cpu test-steps 429.5, no bound for 32 cores: test 272.0, test-doc 4.9, test-collect 106.9, test-faults 0.1, conform-engine 2.4, test262-check 0.1, test262-moves-check 1.5, gate-selftest 41.6
+gate-time: no file of 336 under target/*/deps changed while the test steps ran
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -866,7 +879,14 @@ session coordinates; this section is its procedure, taken from how surf is run
   reads the lane's clock as well (`.out/gate-time/start`, which `gate-time-start` writes as
   the first step of `task slow`) and fails the lane when the clock is over 900 s, naming the
   clock's seconds and the sum of the timed parts, so a step without its own `slow-time` line
-  is bounded too. It runs only as the last step of `task slow`, in the same task process:
+  is bounded too. Right after `gate-time-start` the lane prints the machine it runs on,
+  `slow-runner: <n> cores, <model name>, <MemTotal> kB, sh is <sh>` (task `slow-runner`;
+  "cpu not read" when `/proc/cpuinfo` is missing or has no model name; it never fails the
+  lane), so that two runs on the same code can be read against their machines: the forge ran
+  the lane on one code in 882.6 s and 1,142.0 s, single tests 1.4 to 1.56 times slower in
+  the second run, builds 1.11 to 1.14 times. On the build node it prints `slow-runner: 32
+  cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash`.
+  `slow-time-sum` runs only as the last step of `task slow`, in the same task process:
   called on its own it refuses the clock an earlier run left (the PID in
   `.out/gate-time/cpu`), and a part run as its own pool job (`slot task slow-test262`, ...)
   has no lane sum; the lane's sum on this host comes from one `slot --timeout 30m task slow`
