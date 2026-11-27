@@ -757,11 +757,11 @@ fn answers_once(source: &str, expected: &str) {
 /// live iterators of every kind, one replaced and abandoned at random; `next` of one; and a
 /// `forEach` whose callback mutates both). Every answer is compared with the model: the
 /// order, the canonical key (`+0`), the value, `done` for ever, `size` and `delete`'s answer.
-#[test]
-fn random_operations_match_the_model_list_of_the_clauses() {
-    let ops = if collect_mode() { 12 } else { 2_000 };
+/// The script runs `ops` operations from `seed` and answers `mismatches <n>[ first: <what>],
+/// specials <r>`: `r` of the eight special keys were set at least once.
+fn random_operations(seed: u64, ops: u32) -> Outcome {
     let source = r#"
-var OPS = __OPS__, K = 40, seed = 20261126, i;
+var OPS = __OPS__, K = 40, seed = __SEED__, i, reached = 0, hit = [];
 function rnd(n) { seed = (seed * 48271) % 2147483647; return seed % n; }
 var syms = [], objs = [];
 for (i = 0; i < K; i++) { syms.push(Symbol("y" + i)); objs.push({ n: i }); }
@@ -794,7 +794,7 @@ function mset(id, v) { if (at[id] >= 0) list[at[id]].v = v; else { at[id] = list
 function mdel(id) { if (at[id] < 0) return false; list[at[id]].live = false; at[id] = -1; size--; return true; }
 function mclear() { var j; for (j = 0; j < list.length; j++) list[j].live = false; for (j = 0; j < K; j++) at[j] = -1; size = 0; }
 function mnext(c) { if (c.done) return null; while (c.idx < list.length) { var e = list[c.idx++]; if (e.live) return e; } c.done = true; return null; }
-function doSet(turn) { var id = rnd(K); m.set(keyOf(id), turn); s.add(keyOf(id)); mset(id, turn); }
+function doSet(turn) { var id = rnd(K); m.set(keyOf(id), turn); s.add(keyOf(id)); mset(id, turn); if (id % 5 === 4 && !hit[id]) { hit[id] = true; reached++; } }
 function doDelete(turn) {
   var id = rnd(K), a = m.delete(keyOf(id)), b = s.delete(keyOf(id)), e = mdel(id);
   check(a === e && b === e, "delete " + canon(id) + " at " + turn + ": " + a + b + e);
@@ -845,10 +845,43 @@ var all = []; m.forEach(function (v, k) { all.push(shown(k) + "=" + v); });
 var want = []; for (i = 0; i < list.length; i++) if (list[i].live) want.push(canon(list[i].id) + "=" + list[i].v);
 check(all.join() === want.join(), "final order " + all.join() + " want " + want.join());
 check([...s].map(shown).join() === [...m.keys()].map(shown).join(), "the Set's order differs from the Map's");
-"mismatches " + bad + (bad > 0 ? " first: " + first : "") + (compares >= OPS ? "" : " compares " + compares);
+"mismatches " + bad + (bad > 0 ? " first: " + first : "") + (compares >= OPS ? "" : " compares " + compares) + ", specials " + reached;
 "#
-    .replace("__OPS__", &ops.to_string());
-    answers_once(&source, "mismatches 0");
+    .replace("__OPS__", &ops.to_string())
+    .replace("__SEED__", &seed.to_string());
+    support::script::run(unbounded_steps(), &source)
+}
+
+/// The operations of each test of [`random_operations`] and the special keys it sets: 1,000
+/// and all eight in the default mode; 6 in the collect mode, which reach none (as the 12 of one
+/// test did before). One test of 2,000 operations took 2.1 s alone in the default build, and
+/// one of 12 took 2.15 s in the lane's collect build (test profile, opt-level 0), of which the
+/// script's setup with no operation took 0.88 s and each operation about 0.1 s (2026-11-27), so
+/// the story's 2,000 are two tests over two seeds.
+fn random_operations_count() -> (u32, u32) {
+    if collect_mode() { (6, 0) } else { (1_000, 8) }
+}
+
+/// [`random_operations`] from the seed 20261126, the story's seed: the first half of its 2,000
+/// operations ([`random_operations_count`]).
+#[test]
+fn random_operations_match_the_model_list_of_the_clauses() {
+    let (ops, specials) = random_operations_count();
+    assert_eq!(
+        random_operations(20_261_126, ops),
+        Outcome::Normal(format!("\"mismatches 0, specials {specials}\""))
+    );
+}
+
+/// [`random_operations`] from a second seed, 20261127, in place of the second half of the
+/// story's 2,000 operations ([`random_operations_count`]).
+#[test]
+fn random_operations_from_a_second_seed_match_the_model_list_of_the_clauses() {
+    let (ops, specials) = random_operations_count();
+    assert_eq!(
+        random_operations(20_261_127, ops),
+        Outcome::Normal(format!("\"mismatches 0, specials {specials}\""))
+    );
 }
 
 /// `story:map-and-set` and `story:keyed-entry-table`: a compaction in the middle of a
