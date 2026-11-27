@@ -6,9 +6,18 @@ test/staging/set-methods/set-intersect-other-is-set-like.js	19	dir test/staging/
 test/staging/set-methods/set-intersection-other-is-map.js	19	dir test/staging/set-methods/ 9	threw ReferenceError: Set is not defined	Set
 test/staging/set-methods/set-intersection-other-is-set.js	19	dir test/staging/set-methods/ 9	threw ReferenceError: Set is not defined	Set
 test/staging/sm/Array/concat-proxy.js	19	dir test/staging/sm/Array/concat-proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/Array/concat-spreadable-basic.js	19	dir test/staging/sm/Array/concat-spreadable-basic.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Array/for_of_2.js	19	dir test/staging/sm/Array/for_of_2.js 9	threw ReferenceError: Set is not defined	Set
 test/staging/sm/Array/for_of_3.js	19	dir test/staging/sm/Array/for_of_3.js 9	threw ReferenceError: Set is not defined	Set
 test/staging/sm/Array/for_of_4.js	19	dir test/staging/sm/Array/for_of_4.js 9	threw ReferenceError: Set is not defined	Set
+test/staging/sm/Array/from_basics.js	19	dir test/staging/sm/Array/from_basics.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Array/from_constructor.js	19	dir test/staging/sm/Array/from_constructor.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Array/from_iterable.js	19	dir test/staging/sm/Array/from_iterable.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Array/from_mapping.js	19	dir test/staging/sm/Array/from_mapping.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Array/from_proxy.js	19	dir test/staging/sm/Array/from_proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/Array/from_string.js	19	dir test/staging/sm/Array/from_string.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Array/group-propertkey-is-length.js	19	dir test/staging/sm/Array/group-propertkey-is-length.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Array/group.js	19	dir test/staging/sm/Array/group.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Array/includes.js	19	dir test/staging/sm/Array/includes.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Array/indexOf-packed-array.js	19	dir test/staging/sm/Array/indexOf-packed-array.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Array/isArray.js	19	dir test/staging/sm/Array/isArray.js 9	threw TypeError: the value is not a constructor	Proxy
@@ -16,12 +25,14 @@ test/staging/sm/Array/join-no-has-trap.js	19	dir test/staging/sm/Array/join-no-h
 test/staging/sm/Array/pop-no-has-trap.js	19	dir test/staging/sm/Array/pop-no-has-trap.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Array/shift-no-has-trap.js	19	dir test/staging/sm/Array/shift-no-has-trap.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Array/sort-delete-ascending-order.js	19	dir test/staging/sm/Array/sort-delete-ascending-order.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/Array/sort_holes.js	19	dir test/staging/sm/Array/sort_holes.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Array/sort_proxy.js	19	dir test/staging/sm/Array/sort_proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Array/to-length.js	19	dir test/staging/sm/Array/to-length.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Array/unshift-with-enumeration.js	19	dir test/staging/sm/Array/unshift-with-enumeration.js 9	threw ReferenceError: Reflect is not defined	Reflect
 test/staging/sm/AsyncGenerators/create-function-parse-before-getprototype.js	19	dir test/staging/sm/AsyncGenerators/create-function-parse-before-getprototype.js 9	threw Test262Error: Expected a SyntaxError but got a ReferenceError	Reflect
 test/staging/sm/Date/toString-generic.js	19	dir test/staging/sm/Date/toString-generic.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Error/constructor-ordering.js	19	dir test/staging/sm/Error/constructor-ordering.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/Function/arguments-iterator.js	19	dir test/staging/sm/Function/arguments-iterator.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Function/bound-length-and-name.js	19	dir test/staging/sm/Function/bound-length-and-name.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Function/bound-non-constructable.js	19	dir test/staging/sm/Function/bound-non-constructable.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Function/builtin-no-construct.js	19	dir test/staging/sm/Function/builtin-no-construct.js 9	threw ReferenceError: Proxy is not defined	Proxy
@@ -33,6 +44,7 @@ test/staging/sm/Map/forEach-selfhosted-behavior.js	19	dir test/staging/sm/Map/fo
 test/staging/sm/Map/getter-name.js	19	dir test/staging/sm/Map/getter-name.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Map/iterable.js	19	dir test/staging/sm/Map/iterable.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Map/iterator-thisv-error.js	19	dir test/staging/sm/Map/iterator-thisv-error.js 9	threw Test262Error: Expected a TypeError but got a ReferenceError	Map
+test/staging/sm/Map/symbols.js	19	dir test/staging/sm/Map/symbols.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Proxy/define-writable-as-non-writable.js	19	dir test/staging/sm/Proxy/define-writable-as-non-writable.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/delete-non-extensible.js	19	dir test/staging/sm/Proxy/delete-non-extensible.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/getPrototypeOf.js	19	dir test/staging/sm/Proxy/getPrototypeOf.js 9	threw ReferenceError: Proxy is not defined	Proxy
@@ -45,13 +57,18 @@ test/staging/sm/Proxy/proxy-constructNonObject.js	19	dir test/staging/sm/Proxy/p
 test/staging/sm/Proxy/proxy-no-receiver-overwrite.js	19	dir test/staging/sm/Proxy/proxy-no-receiver-overwrite.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/proxy-proto-lazy-props.js	19	dir test/staging/sm/Proxy/proxy-proto-lazy-props.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/proxy-with-revoked-arguments.js	19	dir test/staging/sm/Proxy/proxy-with-revoked-arguments.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/Proxy/regress-bug1062349.js	19	dir test/staging/sm/Proxy/regress-bug1062349.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/report-writable-as-non-writable.js	19	dir test/staging/sm/Proxy/report-writable-as-non-writable.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/revocable-proxy-prototype.js	19	dir test/staging/sm/Proxy/revocable-proxy-prototype.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/revoke-as-side-effect.js	19	dir test/staging/sm/Proxy/revoke-as-side-effect.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Proxy/revoke-no-name.js	19	dir test/staging/sm/Proxy/revoke-no-name.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Reflect/argumentsList.js	19	dir test/staging/sm/Reflect/argumentsList.js 9	threw Test262Error: Expected a TypeError but got a ReferenceError	Reflect
+test/staging/sm/Reflect/deleteProperty.js	19	dir test/staging/sm/Reflect/deleteProperty.js 9	threw ReferenceError: Reflect is not defined	Reflect
+test/staging/sm/Reflect/getOwnPropertyDescriptor.js	19	dir test/staging/sm/Reflect/getOwnPropertyDescriptor.js 9	threw ReferenceError: Reflect is not defined	Reflect
 test/staging/sm/Reflect/getPrototypeOf.js	19	dir test/staging/sm/Reflect/getPrototypeOf.js 9	threw ReferenceError: Reflect is not defined	Reflect
 test/staging/sm/Reflect/has.js	19	dir test/staging/sm/Reflect/has.js 9	threw ReferenceError: Reflect is not defined	Reflect
+test/staging/sm/Reflect/propertyKeys.js	19	dir test/staging/sm/Reflect/propertyKeys.js 9	threw ReferenceError: Reflect is not defined	Reflect
+test/staging/sm/Reflect/set.js	19	dir test/staging/sm/Reflect/set.js 9	threw ReferenceError: Reflect is not defined	Reflect
 test/staging/sm/Reflect/setPrototypeOf.js	19	dir test/staging/sm/Reflect/setPrototypeOf.js 9	threw ReferenceError: Reflect is not defined	Reflect
 test/staging/sm/Reflect/surfaces.js	19	dir test/staging/sm/Reflect/surfaces.js 9	threw Test262Error: Expected SameValue(«"undefined"», «"object"») to be true	Reflect
 test/staging/sm/Reflect/target.js	19	dir test/staging/sm/Reflect/target.js 9	threw ReferenceError: Reflect is not defined	Reflect
@@ -65,9 +82,13 @@ test/staging/sm/RegExp/search-trace.js	19	dir test/staging/sm/RegExp/search-trac
 test/staging/sm/RegExp/source.js	19	dir test/staging/sm/RegExp/source.js 9	threw Test262Error: Expected a TypeError but got a ReferenceError	Proxy
 test/staging/sm/RegExp/split-trace.js	19	dir test/staging/sm/RegExp/split-trace.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/RegExp/toString.js	19	dir test/staging/sm/RegExp/toString.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/String/iterator_edge_cases.js	19	dir test/staging/sm/String/iterator_edge_cases.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/String/match-GetMethod.js	19	dir test/staging/sm/String/match-GetMethod.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/String/string-pad-start-end.js	19	dir test/staging/sm/String/string-pad-start-end.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Symbol/enumeration-order.js	19	dir test/staging/sm/Symbol/enumeration-order.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/Symbol/enumeration.js	19	dir test/staging/sm/Symbol/enumeration.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/Symbol/property-basics.js	19	dir test/staging/sm/Symbol/property-basics.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/Symbol/property-reflection.js	19	dir test/staging/sm/Symbol/property-reflection.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/Symbol/toPrimitive.js	19	dir test/staging/sm/Symbol/toPrimitive.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/WeakMap/symbols.js	19	dir test/staging/sm/WeakMap/ 9	threw ReferenceError: WeakMap is not defined	WeakMap
 test/staging/sm/async-functions/create-function-parse-before-getprototype.js	19	dir test/staging/sm/async-functions/create-function-parse-before-getprototype.js 9	threw Test262Error: Expected a SyntaxError but got a ReferenceError	Reflect
@@ -81,11 +102,21 @@ test/staging/sm/extensions/proxy-strict.js	19	dir test/staging/sm/extensions/pro
 test/staging/sm/extensions/reviver-mutates-holder-array.js	19	dir test/staging/sm/extensions/reviver-mutates-holder-array.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/extensions/reviver-mutates-holder-object.js	19	dir test/staging/sm/extensions/reviver-mutates-holder-object.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/generators/create-function-parse-before-getprototype.js	19	dir test/staging/sm/generators/create-function-parse-before-getprototype.js 9	threw Test262Error: Expected a SyntaxError but got a ReferenceError	Reflect
+test/staging/sm/generators/delegating-yield-1.js	19	dir test/staging/sm/generators/delegating-yield-1.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/generators/delegating-yield-11.js	19	dir test/staging/sm/generators/delegating-yield-11.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/generators/delegating-yield-5.js	19	dir test/staging/sm/generators/delegating-yield-5.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/generators/delegating-yield-6.js	19	dir test/staging/sm/generators/delegating-yield-6.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/generators/delegating-yield-7.js	19	dir test/staging/sm/generators/delegating-yield-7.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/generators/delegating-yield-8.js	19	dir test/staging/sm/generators/delegating-yield-8.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/generators/delegating-yield-9.js	19	dir test/staging/sm/generators/delegating-yield-9.js 9	threw ReferenceError: Map is not defined	Map
+test/staging/sm/lexical-environment/unscopables-proxy.js	19	dir test/staging/sm/lexical-environment/unscopables-proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/misc/new-with-non-constructor.js	19	dir test/staging/sm/misc/new-with-non-constructor.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/object/bug-1206700.js	19	dir test/staging/sm/object/bug-1206700.js 9	threw ReferenceError: Reflect is not defined	Reflect
 test/staging/sm/object/defineProperties-order.js	19	dir test/staging/sm/object/defineProperties-order.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/object/defineProperty-proxy.js	19	dir test/staging/sm/object/defineProperty-proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/object/entries.js	19	dir test/staging/sm/object/entries.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/object/freeze-proxy.js	19	dir test/staging/sm/object/freeze-proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
+test/staging/sm/object/getOwnPropertyDescriptor.js	19	dir test/staging/sm/object/getOwnPropertyDescriptor.js 9	threw ReferenceError: Map is not defined	Map
 test/staging/sm/object/getOwnPropertySymbols-proxy.js	19	dir test/staging/sm/object/getOwnPropertySymbols-proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/object/getOwnPropertySymbols.js	19	dir test/staging/sm/object/getOwnPropertySymbols.js 9	threw ReferenceError: Proxy is not defined	Proxy
 test/staging/sm/object/preventExtensions-proxy.js	19	dir test/staging/sm/object/preventExtensions-proxy.js 9	threw ReferenceError: Proxy is not defined	Proxy
