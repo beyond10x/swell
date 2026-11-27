@@ -38,7 +38,7 @@ session's scratch directory. The stage is kept current by the coordinator.
 | words | marks | none | `impl/marks`, cut at `2359923`: a comment of `crates/swell/src/interp/class.rs` and a summary line of `taskfiles/gate-time.yml` named a decision by a number of the coordinating session; both state the rule in words now (`176998f`, two files, four lines, no line of code); the coordinator read the diff; no adversary pass and no record in the store, since the unit has no story; merged at `758ad53` on 2026-11-27, 02:31 CET |
 | 4 | upsert | `story:map-upsert-and-group-by` | `impl/upsert`, cut at `d90c333` after the merge of the unit `realmwalk`, on whose story it depends; dispatched on 2026-11-27; green at `5458d2e` (11 tests; the part of 202 cases: 202 passed, 165 on the base); pass 1 of the adversary dispatched; pass 1 was green on the code (`review-result:adversary-upsert-pass-1`: two warnings and five notes, each a gap in the tests or texts; two planted defects passed all 11 tests), correction 1 at `5233731` (four tests more, two of them red with a defect planted, and a bound on the bytes per grouped element in the memory test; 15 tests); read by the coordinator (`review-result:upsert-correction-1-coordinator-read`); merged at `6e03591` on 2026-11-27, 08:21 CET |
 | 4 | overrides | `story:host-object-overrides` | `impl/overrides`, cut at `6f21df6d`, with the base run of `6f21df6d` (`test262 total 53801 8982 7 44812 33457 11353 2`); dispatched on 2026-11-27, 04:06 CET; the story has no test262 case; the design line HOST-222 is merged (`f3d194e2`); it is merged into `wave/big-2` when it is closed; green at `3d29fd7`; pass 1 of the adversary was red (`review-result:adversary-overrides-pass-1`: a descriptor held across an `is_extensible` override was freed by a collection, the walks of HasProperty, Get and Set held their key and value across an override), correction 1 at `046bfb6`; pass 2 was red (`review-result:adversary-overrides-pass-2`: four invariants broken where the object's record answers for an override the table leaves out, and the question whether a `has_property` false is a fact), correction 2 at `f28eb7c`, `4dccde9` and `2a91ce5` (the record's answer goes through the override's checks; a `has_property` false records nothing and faults only for a non-configurable property; the stack lists name the module); read by the coordinator (`review-result:overrides-correction-2-coordinator-read`); `swell::main` 1657 passed and 1630 with collect-every-safe-point on the unit's head; merged at `0680551` on 2026-11-27, 07:16 CET |
-| 5 | close9 | `story:slice-09-conformance-close` | `impl/close9`, cut at `bc45e92` (every other story of slice 9 merged), with the start run of `cf7f253` and the base run of `bc45e92` (`test262-slice 09 1787 3545 0 0 1787 1765 22 0`); dispatched on 2026-11-27; green at `66fe379` (`test262-slice 09 1864 3694 0 0 1864 1864 0 0`: 22 cases moved to slice 12, 99 taken in from slice 19); adversary pass 1 red on 32 more cases the rule takes in (`review-result:adversary-close9-pass-1`); correction 1 runs |
+| 5 | close9 | `story:slice-09-conformance-close` | `impl/close9`, cut at `bc45e92` (every other story of slice 9 merged), with the start run of `cf7f253` and the base run of `bc45e92` (`test262-slice 09 1787 3545 0 0 1787 1765 22 0`); dispatched on 2026-11-27; green at `66fe379` (`test262-slice 09 1864 3694 0 0 1864 1864 0 0`: 22 cases moved to slice 12, 99 taken in from slice 19); adversary pass 1 red on 32 more cases the rule takes in (`review-result:adversary-close9-pass-1`); correction 1 at `37aaed6` (31 of the 32 come in, 130 in all; one stays in slice 19); correction 2 at `6cc4ca7` moves the 37 cases that need slice 8 there, as the plan of slice 8 counts them (`test262-slice 09 1858 3678 0 0 1858 1858 0 0`); read by the coordinator in place of a second pass (`review-result:close9-correction-2-coordinator-read`); merged at `65b424e` on 2026-11-27, 09:45 CET |
 
 ## The stories of slice 8
 
@@ -473,3 +473,26 @@ Slice 8 and slice 9 are not delivered: `conformance/slices-delivered.txt` is unc
 on this branch: `story:private-fields-and-private-in`, `story:private-names-in-eval-code`,
 `story:host-ensure-can-add-private-element`, `story:slice-09-conformance-close`,
 `story:slice-08-conformance-close` and the fifth unit of the lane.
+
+## The close of slice 9
+
+`story:slice-09-conformance-close`, the unit `close9`, on `wave/big-2` after the merge of the
+unit `upsert` (`bc45e92`) and, after its correction 1, of `lanefour` (`b9adbe35`). The full run
+of its head (`task test262-expected`, exit 0) prints:
+
+```
+test262 total 53801 8982 7 44812 36027 8783 2
+test262-slice 08 9339 18529 0 0 9339 8279 1060 0
+test262-slice 09 1858 3678 0 0 1858 1858 0 0
+test262-slice 12 381 760 0 0 381 39 342 0
+test262-slice 19 1233 2299 0 0 1233 736 495 2
+```
+
+Every case of slice 9 passes in every run. 59 cases that need a later slice move by lines of
+the block and of `conformance/test262/moves.tsv`: the 37 that need `class` or `new.target`
+to slice 8, which takes them as `docs/plan/slice-08/incoming.tsv` plans, and the 22 that need
+a BigInt literal to slice 12. 130 cases of `test/staging/` come in from slice 19
+(`docs/plan/slice-09/close-into-09.tsv`). The run changes no outcome against the run of
+`bc45e92`. With `9` delivered, `host-requirements-check` exits 0 (`pending by slice: 8:1 11:32
+12:3 13:2 14:6 16:5 18:1`). The paragraph "Slice 9's cases that need a later slice" of section
+12 of `docs/design/engine.md` gives the reasons.

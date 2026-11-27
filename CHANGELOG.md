@@ -54,6 +54,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
+- The close of slice 9, `collections-proxy-reflect` (`story:slice-09-conformance-close`):
+  every case of the slice passes in every run, `test262-slice 09 1858 3678 0 0 1858 1858 0 0`.
+  59 cases that need a later slice move with evidence in `conformance/test262/moves.tsv`:
+  37 to slice 8, each refused at the start of the slice on `class` (36: subclasses and
+  set-like classes of the seven set methods of `Set/prototype/`) or `new.target` (1,
+  `optional-chaining/new-target-optional-call`), and 22 to slice 12 on a BigInt literal
+  (`1n` 15, `0n` 7: `Map/prototype/getOrInsertComputed/this-not-object-throw` and the
+  `called-with-object`, `require-internal-slot` and `size-is-a-number` cases of the set
+  methods). 130 cases of `test/staging/` that failed at the start of the slice on `Proxy`,
+  `Reflect`, `Map`, `Set` or `WeakMap` and pass now come into slice 9 from slice 19 by lines
+  of the block (`docs/plan/slice-09/close-into-09.tsv`). Each was read case by case against
+  the full run at the start commit of the slice; 31 of them name later slices only in the
+  `typeof` guards of `harness/deepEqual.js`. The table of section 12 moves by them: slice 8
+  9,339 cases and 18,529 runs, slice 9 1,858 and 3,678, slice 12 381 and 760, slice 19 1,233
+  and 2,299; the sums do not move.
 - `Reflect`, the first story of the ninth slice (`#sec-reflect-object`): the global `Reflect`,
   an ordinary object of `%Object.prototype%` with its 13 functions in the order of their
   clauses (`apply`, `construct`, `defineProperty`, `deleteProperty`, `get`,
