@@ -12,7 +12,8 @@
 //! function (`object/async_builtin.rs`, `story:array-from-async`).
 //!
 //! Every kind but the Array, String, arguments and Proxy exotic objects uses the ordinary internal
-//! methods (`object/ordinary.rs`); host objects too, until the overrides of slice 9. [[Call]] and
+//! methods (`object/ordinary.rs`); a host object runs the overrides its table gives and the
+//! ordinary methods it does not (`object/host_overrides.rs`). [[Call]] and
 //! [[Construct]] have an arm for each function kind, the bound function and ECMAScript function
 //! arms calling into files their own stories fill.
 //!
@@ -46,6 +47,7 @@ pub(crate) mod class_constructor;
 pub(crate) mod collection;
 pub(crate) mod ecmascript_function;
 pub(crate) mod generator;
+pub(crate) mod host_overrides;
 pub(crate) mod invariants;
 pub(crate) mod keyed_entries;
 pub(crate) mod ordinary;
@@ -433,6 +435,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn get_prototype_of(&mut self, object: ObjectRef) -> Completion<Option<ObjectRef>> {
         match self.kind_of(object)? {
             KindTag::Proxy => self.proxy_get_prototype_of(object),
+            KindTag::Host => self.host_get_prototype_of(object),
             _ => self.ordinary_get_prototype_of(object),
         }
     }
@@ -451,6 +454,7 @@ impl<H: Host> Agent<H> {
                 Ok(self.get_prototype_of(object)? == prototype)
             }
             KindTag::Proxy => self.proxy_set_prototype_of(object, prototype),
+            KindTag::Host => self.host_set_prototype_of(object, prototype),
             _ => self.ordinary_set_prototype_of(object, prototype),
         }
     }
@@ -459,6 +463,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn is_extensible(&mut self, object: ObjectRef) -> Completion<bool> {
         match self.kind_of(object)? {
             KindTag::Proxy => self.proxy_is_extensible(object),
+            KindTag::Host => self.host_is_extensible(object),
             _ => self.ordinary_is_extensible(object),
         }
     }
@@ -467,6 +472,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn prevent_extensions(&mut self, object: ObjectRef) -> Completion<bool> {
         match self.kind_of(object)? {
             KindTag::Proxy => self.proxy_prevent_extensions(object),
+            KindTag::Host => self.host_prevent_extensions(object),
             _ => self.ordinary_prevent_extensions(object),
         }
     }
@@ -484,6 +490,7 @@ impl<H: Host> Agent<H> {
             KindTag::String => self.string_get_own_property_method(object, key),
             KindTag::Arguments => self.arguments_get_own_property(object, key),
             KindTag::Proxy => self.proxy_get_own_property(object, key),
+            KindTag::Host => self.host_get_own_property(object, key),
             _ => self.ordinary_get_own_property(object, key),
         }
     }
@@ -501,6 +508,7 @@ impl<H: Host> Agent<H> {
             KindTag::String => self.string_define_own_property(object, key, descriptor),
             KindTag::Arguments => self.arguments_define_own_property(object, key, descriptor),
             KindTag::Proxy => self.proxy_define_own_property(object, key, descriptor),
+            KindTag::Host => self.host_define_own_property(object, key, descriptor),
             _ => self.ordinary_define_own_property(object, key, descriptor),
         }
     }
@@ -509,6 +517,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn has_property(&mut self, object: ObjectRef, key: Key) -> Completion<bool> {
         match self.kind_of(object)? {
             KindTag::Proxy => self.proxy_has_property(object, key),
+            KindTag::Host => self.host_has_property(object, key),
             _ => self.ordinary_has_property(object, key),
         }
     }
@@ -523,6 +532,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         match self.kind_of(object)? {
             KindTag::Proxy => self.proxy_get(object, key, receiver),
+            KindTag::Host => self.host_get(object, key, receiver),
             _ => self.ordinary_get(object, key, receiver),
         }
     }
@@ -538,6 +548,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<bool> {
         match self.kind_of(object)? {
             KindTag::Proxy => self.proxy_set(object, key, value, receiver),
+            KindTag::Host => self.host_set(object, key, value, receiver),
             _ => self.ordinary_set(object, key, value, receiver),
         }
     }
@@ -549,6 +560,7 @@ impl<H: Host> Agent<H> {
             KindTag::Arguments => self.arguments_delete(object, key),
             KindTag::Array => self.array_delete(object, key),
             KindTag::Proxy => self.proxy_delete(object, key),
+            KindTag::Host => self.host_delete(object, key),
             _ => self.ordinary_delete(object, key),
         }
     }
@@ -562,6 +574,7 @@ impl<H: Host> Agent<H> {
             KindTag::String => self.string_own_property_keys(object),
             KindTag::Array => self.array_own_property_keys(object),
             KindTag::Proxy => self.proxy_own_property_keys(object),
+            KindTag::Host => self.host_own_property_keys(object),
             _ => self.ordinary_own_property_keys(object),
         }
     }

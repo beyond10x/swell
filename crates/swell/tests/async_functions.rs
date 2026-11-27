@@ -436,6 +436,7 @@ fn the_consumer_shape_runs_to_its_end() {
                     brand: Brand(1),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

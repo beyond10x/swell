@@ -416,6 +416,7 @@ macro_rules! scoped_answers {
                 brand: Brand(3),
                 data: Some(Box::new(Nothing)),
                 error_kind: None,
+                overrides: None,
             })),
         ));
         $out.push((
@@ -425,6 +426,7 @@ macro_rules! scoped_answers {
                 brand: Brand(3),
                 data: Some(Box::new(Nothing)),
                 error_kind: None,
+                overrides: None,
             })),
         ));
         $out.push(("brand", shape($cx.brand(bad.object))));
@@ -607,6 +609,7 @@ fn misuse_changes_nothing(
                     brand: Brand(1),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()?;
             Ok(GlobalObjects { global, this: None })
@@ -706,6 +709,7 @@ fn host_30_a_realm_create_realm_did_not_make_is_stale() {
                     brand: Brand(1),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 }));
                 [parsed, function, error, object]
             })
@@ -1112,6 +1116,7 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
                     brand: Brand(3),
                     data: Some(Box::new(Nothing)),
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();
@@ -1196,6 +1201,7 @@ fn host_129_collect_runs_no_code_and_calls_no_hook() {
                     brand: Brand(4),
                     data: Some(Box::new(Traced(data))),
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();
@@ -1327,6 +1333,7 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
                                         brand: Brand(1),
                                         data: None,
                                         error_kind: None,
+                                        overrides: None,
                                     })),
                                 ),
                             ];
@@ -1371,6 +1378,7 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
                         brand: Brand(2),
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()?;
                 match case {

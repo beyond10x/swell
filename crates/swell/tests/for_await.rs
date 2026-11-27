@@ -223,6 +223,7 @@ fn host_next(cx: &mut Cx<'_, TestHost>, _call: HostCall<'_>) -> Completion<Value
             brand: swell::Brand(3),
             data: None,
             error_kind: None,
+            overrides: None,
         })
         .unwrap()?;
     if first {
@@ -293,6 +294,7 @@ fn host_203_a_host_reads_symbol_async_iterator_and_a_host_object_is_async_iterab
                 brand: swell::Brand(2),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })
@@ -338,6 +340,7 @@ fn host_203_a_host_reads_symbol_async_iterator_and_a_host_object_is_async_iterab
                     brand: swell::Brand(1),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

@@ -16,6 +16,7 @@
 //! answers that parent's own method, with the same receiver, as the clauses' "Return ?
 //! parent.[[Get]](P, Receiver)" order.
 
+use super::host_overrides::Walk;
 use super::property::{Descriptor, Key, Property, Slot};
 use super::{KeyList, ObjectKind};
 use crate::heap::collect::Mark;
@@ -321,9 +322,14 @@ impl<H: Host> Agent<H> {
     }
 
     /// Whether a walk of the chain hands over to `parent`'s own [[HasProperty]], [[Get]] or
-    /// [[Set]] instead of going on: a Proxy.
-    fn walk_hands_over_to(&mut self, parent: ObjectRef) -> Completion<bool> {
-        Ok(self.kind_of(parent)? == super::KindTag::Proxy)
+    /// [[Set]] instead of going on: a Proxy, and a host object whose override table has the
+    /// override of the method `walk` makes (`object/host_overrides.rs`).
+    fn walk_hands_over_to(&mut self, parent: ObjectRef, walk: Walk) -> Completion<bool> {
+        match self.kind_of(parent)? {
+            super::KindTag::Proxy => Ok(true),
+            super::KindTag::Host => self.host_overrides_walk(parent, walk),
+            _ => Ok(false),
+        }
     }
 
     /// OrdinaryHasProperty (`#sec-ordinaryhasproperty`), as a loop over the chain.
@@ -341,7 +347,7 @@ impl<H: Host> Agent<H> {
                 Some(parent) => {
                     self.charge_steps(1)?;
                     // 4.a. Return ? parent.[[HasProperty]](P).
-                    if self.walk_hands_over_to(parent)? {
+                    if self.walk_hands_over_to(parent, Walk::Has)? {
                         return self.has_property(parent, key);
                     }
                     o = parent;
@@ -365,7 +371,7 @@ impl<H: Host> Agent<H> {
                     Some(parent) => {
                         self.charge_steps(1)?;
                         // 2.c. Return ? parent.[[Get]](P, Receiver).
-                        if self.walk_hands_over_to(parent)? {
+                        if self.walk_hands_over_to(parent, Walk::Get)? {
                             return self.internal_get(parent, key, receiver);
                         }
                         o = parent;
@@ -411,7 +417,7 @@ impl<H: Host> Agent<H> {
                         self.charge_steps(1)?;
                         // OrdinarySetWithOwnDescriptor, 1.c. Return ? parent.[[Set]](P, V,
                         // Receiver).
-                        if self.walk_hands_over_to(parent)? {
+                        if self.walk_hands_over_to(parent, Walk::Set)? {
                             return self.internal_set(parent, key, value, receiver);
                         }
                         o = parent;
