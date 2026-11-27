@@ -1029,7 +1029,8 @@ r.join(" | ");"#,
         ]
         .concat(),
         "clear clear/0:wc; constructor Map/0:wc; delete delete/1:wc; entries entries/0:wc; forEach forEach/1:wc; \
-         get get/1:wc; has has/1:wc; keys keys/0:wc; set set/2:wc; size get get size/0 set none:c; values values/0:wc; \
+         get get/1:wc; getOrInsert getOrInsert/2:wc; getOrInsertComputed getOrInsertComputed/2:wc; \
+         has has/1:wc; keys keys/0:wc; set set/2:wc; size get get size/0 set none:c; values values/0:wc; \
          Symbol(Symbol.iterator) entries/0:wc; Symbol(Symbol.toStringTag) Map:c | \
          add add/1:wc; clear clear/0:wc; constructor Set/0:wc; delete delete/1:wc; difference difference/1:wc; \
          entries entries/0:wc; forEach forEach/1:wc; has has/1:wc; intersection intersection/1:wc; \
