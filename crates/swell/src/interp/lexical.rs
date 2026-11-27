@@ -18,7 +18,7 @@ use crate::env::{EnvironmentRecord, NameTable, RecordNames, SlotNames};
 use crate::host::Host;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
-use crate::interp::frame::SlotValue;
+use crate::interp::frame::{Entry, SlotValue};
 use crate::object::property::Key;
 use alloc::string::String;
 
@@ -155,27 +155,46 @@ impl<H: Host> Agent<H> {
     /// `GetLocalChecked { slot, name }`.
     #[inline(never)]
     pub(crate) fn get_local_checked(&mut self, slot: u32, name: u32) -> Completion<()> {
-        match self.local_state(slot)? {
-            SlotValue::Value(value) => self.push_value(value),
-            SlotValue::Uninitialized => {
+        let position = usize::try_from(slot).unwrap_or(usize::MAX);
+        let state = self
+            .interp
+            .frames
+            .last()
+            .and_then(|frame| frame.locals.get(position).copied());
+        match state {
+            Some(SlotValue::Value(value)) => self.push_operand(value),
+            Some(SlotValue::Uninitialized) => {
                 let text = self.lexical_text(name);
                 Err(self.not_initialized(&text))
             }
-            SlotValue::PrivateName(_) => Err(self.fault()),
+            Some(SlotValue::PrivateName(_)) | None => Err(self.fault()),
         }
     }
 
-    /// `SetLocalChecked { slot, name }`.
+    /// `SetLocalChecked { slot, name }`: the value on top and the slot read in one borrow of
+    /// the frame, the value stored there while the slot is initialized.
     #[inline(never)]
     pub(crate) fn set_local_checked(&mut self, slot: u32, name: u32) -> Completion<()> {
-        let value = self.peek_value(0)?;
-        match self.local_state(slot)? {
-            SlotValue::Value(_) => self.store_local(slot, SlotValue::Value(value)),
-            SlotValue::Uninitialized => {
+        let position = usize::try_from(slot).unwrap_or(usize::MAX);
+        let state = self.interp.frames.last_mut().and_then(|frame| {
+            let Some(Entry::Value(value)) = frame.stack.last() else {
+                return None;
+            };
+            let value = *value;
+            let binding = frame.locals.get_mut(position)?;
+            let state = *binding;
+            if let SlotValue::Value(_) = state {
+                *binding = SlotValue::Value(value);
+            }
+            Some(state)
+        });
+        match state {
+            Some(SlotValue::Value(_)) => Ok(()),
+            Some(SlotValue::Uninitialized) => {
                 let text = self.lexical_text(name);
                 Err(self.not_initialized(&text))
             }
-            SlotValue::PrivateName(_) => Err(self.fault()),
+            Some(SlotValue::PrivateName(_)) | None => Err(self.fault()),
         }
     }
 

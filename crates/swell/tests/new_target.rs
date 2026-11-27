@@ -188,7 +188,7 @@ fn generators_and_async_functions_see_undefined() {
     );
 }
 
-/// PerformEval, step 6 (`#sec-performeval`): a direct eval in a function admits `new.target`
+/// PerformEval, step 11 (`#sec-performeval`): a direct eval in a function admits `new.target`
 /// (inFunction), and the eval code sees the function's NewTarget.
 #[test]
 fn direct_eval_in_a_function_sees_new_target() {
@@ -199,7 +199,7 @@ fn direct_eval_in_a_function_sees_new_target() {
     );
 }
 
-/// PerformEval, step 6, and decision 3, item 5: eval code's frame has the caller's function
+/// PerformEval, step 11, and decision 3, item 5: eval code's frame has the caller's function
 /// and NewTarget, so a direct eval inside eval code inside a constructed function sees that
 /// function.
 #[test]
@@ -210,7 +210,7 @@ fn nested_direct_eval_sees_the_new_target_of_its_function() {
     );
 }
 
-/// PerformEval, step 6.a (GetThisEnvironment): a direct eval in an arrow in a function reads
+/// PerformEval, step 11.a (GetThisEnvironment): a direct eval in an arrow in a function reads
 /// the function's environment, so `new.target` is admitted and is the function's.
 #[test]
 fn eval_in_an_arrow_in_a_function_sees_new_target() {
@@ -221,7 +221,7 @@ fn eval_in_an_arrow_in_a_function_sees_new_target() {
     );
 }
 
-/// `#sec-scripts-static-semantics-early-errors` with PerformEval, step 6: `new.target` in eval
+/// `#sec-scripts-static-semantics-early-errors` with PerformEval, step 12.e: `new.target` in eval
 /// code is a SyntaxError where inFunction is false: a direct eval at the top of a script, an
 /// indirect eval in a function, and a direct eval in an arrow at the top of a script; the same
 /// text in a direct eval in a function is admitted, so the errors are the rule's.
@@ -530,7 +530,7 @@ fn new_target_has_its_value_in_every_way_a_function_runs() {
     ]);
 }
 
-/// PerformEval, step 6, in every context of eval: `eval?.()`, `eval` run by `map` and
+/// PerformEval, steps 11 and 12.e, in every context of eval: `eval?.()`, `eval` run by `map` and
 /// `eval.call` are indirect and refuse `new.target`; a direct eval in a generator, a method or an
 /// accessor sees `undefined`; nested and arrow-made eval at the top of a script refuse it, and in
 /// a constructed function see that function.

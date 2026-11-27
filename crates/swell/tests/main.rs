@@ -125,6 +125,8 @@ mod emulated_host;
 mod errors;
 #[cfg(any(not(test_modules), test_modules = "eval"))]
 mod eval;
+#[cfg(any(not(test_modules), test_modules = "eval_private_names"))]
+mod eval_private_names;
 #[cfg(any(not(test_modules), test_modules = "eval_stack"))]
 mod eval_stack;
 #[cfg(any(not(test_modules), test_modules = "exponentiation"))]
@@ -151,6 +153,8 @@ mod host_objects;
 mod host_overrides;
 #[cfg(any(not(test_modules), test_modules = "index_stores"))]
 mod index_stores;
+#[cfg(any(not(test_modules), test_modules = "interpreter_loop"))]
+mod interpreter_loop;
 #[cfg(any(not(test_modules), test_modules = "interrupt"))]
 mod interrupt;
 #[cfg(any(not(test_modules), test_modules = "jobs"))]

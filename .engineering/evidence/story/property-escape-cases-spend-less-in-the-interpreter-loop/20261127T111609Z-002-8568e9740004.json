@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T11:16:09Z",
+  "actor": "human:operator",
+  "artifact": "story:property-escape-cases-spend-less-in-the-interpreter-loop",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/lanefive at dd3c5d41, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax 91 passed (library and main, also with full counts); swell-compiler 25 passed; swell main 1769 passed, 1 skipped (default build) and 1741 passed, 1 skipped (collect build); swell lib 291 passed; task test-stack-profiles 7 passed in each of the two profiles; task clippy exit 0; cargo fmt --all -- --check exit 0"
+  }
+}

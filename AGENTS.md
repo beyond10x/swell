@@ -283,7 +283,8 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   seconds are over the entry for the core count it runs on. A core count without an entry
   gets no CPU bound; there the CPU seconds are printed, and only the wall budget and the
   `deps` check decide. A green there says nothing of the forge's time. The pool's build node
-  (64 cores) and the forge (4 cores) have no entry; on the forge the wall time decides.
+  (32 cores, read from `nproc` in a pool job on 2026-11-27) and the forge (4 cores) have no
+  entry; on the forge the wall time decides.
 - An entry of `CPU_BOUNDS_BY_CORES` is added or changed only together with a pair measured
   on that kind of machine, recorded in the same commit. The pair is the code before the
   change over the entry and the change under it, each a whole check-runner job. The entry is
@@ -533,6 +534,15 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
     went red on this after green runs on the build node.
 - A bare `task` or `cargo` in an agent shell is refused or queued by the build pool's hook;
   inside a pool job (`slot task check`) the scripts call them directly.
+- `sh taskfiles/perf-loop.sh` (task `perf-loop` of `taskfiles/perf.yml`) measures the CPU
+  seconds of the loop of `buildString` (`tests/perf/build-string-loop.js`) on a release
+  `swell` (`PERF_BIN`), alternating with a base binary (`PERF_BASE_BIN`), three runs each, and
+  prints the medians and their ratio. It builds nothing, is in no gate and no lane, asserts
+  nothing about time and is started by its path without the pool's prefix, after the binaries
+  are built and fetched (`slot --fetch .out/perf/<name> sh -c 'cargo build --locked --release
+  -p swell-cli && mkdir -p .out/perf && cp target/release/swell .out/perf/<name>'`). Each run
+  line carries the machine's CPU pressure (`avg10`), so a reading taken beside other work
+  shows it.
 
 ## The gate's numbers
 

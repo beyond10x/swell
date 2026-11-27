@@ -51,9 +51,8 @@ const TE: &str =
 /// initializer reads an earlier field; PrivateGet answers the field's value and PrivateSet
 /// replaces it, on `this` and on another instance; `o?.#x` and `o?.a.#x` read a field and
 /// short-circuit on `null`. A direct `eval` that names a field (`this.#f`, `#f in this`) in a
-/// method, a field initializer and a static block reaches the refusal of direct eval code
-/// (`Agent::private_names_of_direct_eval`, until `story:private-names-in-eval-code`), and a name
-/// no class declares is the early `SyntaxError` there.
+/// method, a field initializer and a static block runs (`story:private-names-in-eval-code`), and
+/// a name no class declares is the early `SyntaxError` there.
 #[test]
 fn a_private_field_is_read_and_written() {
     both_pass(
@@ -75,33 +74,28 @@ c.get() === "1,,2" && c.set(5) === 5 && c.get() === "5,y,2" && C.sum(c, d) === 6
   && Object.getOwnPropertyNames(c).join() === "a,b";"##,
     );
     let script = r##"function said(e) { return (e instanceof SyntaxError ? "SyntaxError: " : "other: ") + e.message; }
-function tried(f) { try { f(); } catch (e) { return said(e); } return "none"; }
+function tried(f) { try { return String(f()); } catch (e) { return said(e); } }
 var block;
 class C {
   #f = 1;
   method() { return [tried(() => eval("this.#f")), tried(() => eval("#f in this")), tried(() => eval("this.#zz"))].join("|"); }
   field = [tried(() => eval("this.#f")), tried(() => eval("#f in this")), tried(() => eval("#zz in this"))].join("|");
-  static { block = [tried(() => eval("this.#f")), tried(() => eval("#f in this"))].join("|"); }
+  static { block = [tried(() => eval("new C().#f")), tried(() => eval("#f in this"))].join("|"); }
 }
 var c = new C();
 [c.method(), c.field, block].join("|");"##;
-    let refused = |at: &str| {
-        format!(
-            "SyntaxError: private name #f in direct eval code is not supported before slice 8 ({at})"
-        )
-    };
     let early = |at: &str| {
         format!("SyntaxError: private name #zz is not declared in an enclosing class ({at})")
     };
     let wanted = [
-        refused("1:6"),
-        refused("1:1"),
+        "1".to_string(),
+        "true".to_string(),
         early("1:6"),
-        refused("1:6"),
-        refused("1:1"),
+        "1".to_string(),
+        "true".to_string(),
         early("1:1"),
-        refused("1:6"),
-        refused("1:1"),
+        "1".to_string(),
+        "false".to_string(),
     ]
     .join("|");
     for text in [script.to_string(), format!("\"use strict\";\n{script}")] {

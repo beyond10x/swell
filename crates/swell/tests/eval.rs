@@ -164,7 +164,7 @@ fn outcome(agent: &mut Agent<EvalHost>, realm: &Realm, source: &str) -> String {
         .unwrap()
 }
 
-/// HOST-116 (`#sec-hostensurecancompilestrings`, `#sec-performeval` step 5): `eval` of a String
+/// HOST-116 (`#sec-hostensurecancompilestrings`, `#sec-performeval`, step 6): `eval` of a String
 /// calls `host_ensure_can_compile_strings` once, before it parses, with the String as
 /// `body_string` and `code_string`, no parameters, and `DirectEval` or `IndirectEval` as it was
 /// called; `eval` of a value that is not a String calls no hook. A `Throw` from the hook is

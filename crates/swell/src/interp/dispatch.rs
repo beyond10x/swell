@@ -44,6 +44,19 @@ pub(crate) enum Flow {
     Suspend(Value),
 }
 
+/// The bytes the enumerators and the Iterator Records among `entries` hold, which leave the
+/// frame's `charged` and are credited when they leave the operand stack
+/// ([`Agent::truncate_stack`]). Inline, so that the instance of the loop a host's crate makes
+/// does not call it in the library for every replace.
+#[inline]
+fn held_bytes(entries: &[Entry]) -> u64 {
+    entries.iter().fold(0u64, |held, entry| match entry {
+        Entry::Enumerator(enumerator) => held.saturating_add(enumerator.bytes),
+        Entry::Iterator(_) => held.saturating_add(super::for_of::record_bytes()),
+        _ => held,
+    })
+}
+
 impl<H: Host> Agent<H> {
     /// Run the frame stack until the frame at index `base` returns or is suspended
     /// (`interp/suspend.rs`), and answer its value; a throw no handler of those frames catches,
@@ -192,17 +205,34 @@ impl<H: Host> Agent<H> {
 
     /// Fetch the running frame's next instruction and run it.
     fn execute_next(&mut self) -> Completion<Flow> {
-        let (instruction, strict) = {
-            let frame = self.top_frame()?;
-            let pc = frame.pc;
-            let instruction = frame.instructions().get(pc).copied();
-            frame.pc = pc.saturating_add(1);
-            (instruction, frame.strict)
-        };
-        match instruction {
-            Some(instruction) => self.execute(instruction, strict),
+        match self.next_instruction() {
+            Some((instruction, strict)) => self.execute(instruction, strict),
             None => Err(self.fault()),
         }
+    }
+
+    /// The running frame's next instruction, the one [`Frame::instructions`] holds at its
+    /// index, and whether its code is strict, with the index moved past it; read in one borrow
+    /// of the frame with no call of [`Frame::instructions`]: that function is not generic, so an
+    /// instance of this loop, made in the crate of its host (`swell-cli`, the test262 runner),
+    /// calls it in the library and cannot inline it. `None` with no frame, and past the end of
+    /// the code, where the index moves all the same.
+    ///
+    /// [`Frame::instructions`]: super::frame::Frame::instructions
+    fn next_instruction(&mut self) -> Option<(Instruction, bool)> {
+        let frame = self.interp.frames.last_mut()?;
+        let pc = frame.pc;
+        let code = &frame.compiled.code;
+        let instruction = match frame.template {
+            None => code.instructions.get(pc),
+            Some(index) => code
+                .functions
+                .get(usize::try_from(index).unwrap_or(usize::MAX))
+                .and_then(|template| template.instructions.get(pc)),
+        }
+        .copied();
+        frame.pc = pc.saturating_add(1);
+        Some((instruction?, frame.strict))
     }
 
     /// The String constant `index` of the running frame's code.
@@ -242,11 +272,117 @@ impl<H: Host> Agent<H> {
         Ok(Flow::Next)
     }
 
-    /// Replace the top `count` entries with `value`.
+    /// Replace the top `count` entries with `value`: with none, a push of `value`; with one or
+    /// more, `value` is written where the lowest of them was and the others are cut, so the
+    /// stack does not grow and nothing is charged. The bytes an enumerator or an Iterator Record
+    /// among the removed entries held leave the frame's `charged` and are credited, as
+    /// [`Agent::truncate_stack`] credits them.
     pub(super) fn replace(&mut self, count: usize, value: Value) -> Completion<Flow> {
-        self.drop_entries(count)?;
-        self.push_value(value)?;
+        if count == 0 {
+            self.push_operand(value)?;
+        } else {
+            self.replace_entries(count, value)?;
+        }
         Ok(Flow::Next)
+    }
+
+    /// Push `value` on the running frame's operand stack: in place while the stack has room
+    /// for it, through [`Agent::push_operand_grown`] when it is full.
+    pub(super) fn push_operand(&mut self, value: Value) -> Completion<()> {
+        if let Some(frame) = self.interp.frames.last_mut()
+            && frame.stack.len() < frame.stack.capacity()
+        {
+            frame.stack.push(Entry::Value(value));
+            return Ok(());
+        }
+        self.push_operand_grown(value)
+    }
+
+    /// The push of [`Agent::push_operand`] on a full stack (or with no frame):
+    /// [`Agent::push_value`], which charges the growth. A function of its own, so that the
+    /// frames of the instructions that push hold none of its locals.
+    #[inline(never)]
+    fn push_operand_grown(&mut self, value: Value) -> Completion<()> {
+        self.push_value(value)
+    }
+
+    /// The work of [`Agent::replace`] for `count` of one or more.
+    fn replace_entries(&mut self, count: usize, value: Value) -> Completion<()> {
+        let held = match self.interp.frames.last_mut() {
+            Some(frame) => {
+                let at = frame.stack.len().checked_sub(count);
+                match at.and_then(|at| frame.stack.get_mut(at..)) {
+                    Some(removed) => {
+                        let held = held_bytes(removed);
+                        if let Some(lowest) = removed.first_mut() {
+                            *lowest = Entry::Value(value);
+                        }
+                        for _ in 1..count {
+                            frame.stack.pop();
+                        }
+                        frame.charged = frame.charged.saturating_sub(held);
+                        Some(held)
+                    }
+                    None => None,
+                }
+            }
+            None => None,
+        };
+        match held {
+            Some(0) => Ok(()),
+            Some(held) => {
+                self.heap.accounting.credit(held);
+                Ok(())
+            }
+            None => Err(self.fault()),
+        }
+    }
+
+    /// The top `N` entries of the operand stack, the lowest first, each a value, left there:
+    /// what `peek_value(N - 1)` to `peek_value(0)` answer, read in one borrow of the frame, with
+    /// the same fault for a missing entry or one that is no value.
+    fn operands<const N: usize>(&mut self) -> Completion<[Value; N]> {
+        let found = self.interp.frames.last().and_then(|frame| {
+            let at = frame.stack.len().checked_sub(N)?;
+            let mut values = [Value::Undefined; N];
+            for (value, entry) in values.iter_mut().zip(frame.stack.get(at..)?) {
+                let Entry::Value(found) = entry else {
+                    return None;
+                };
+                *value = *found;
+            }
+            Some(values)
+        });
+        match found {
+            Some(values) => Ok(values),
+            None => Err(self.fault()),
+        }
+    }
+
+    /// Drop the top entry of the running frame's operand stack, as `drop_entries(1)` does: an
+    /// enumerator or an Iterator Record credits what it held.
+    fn drop_top(&mut self) -> Completion<()> {
+        let held = match self.interp.frames.last_mut() {
+            Some(frame) => match frame.stack.pop() {
+                Some(Entry::Value(_)) => Some(0),
+                Some(entry) => {
+                    let held = held_bytes(core::slice::from_ref(&entry));
+                    drop(entry);
+                    frame.charged = frame.charged.saturating_sub(held);
+                    Some(held)
+                }
+                None => None,
+            },
+            None => None,
+        };
+        match held {
+            Some(0) => Ok(()),
+            Some(held) => {
+                self.heap.accounting.credit(held);
+                Ok(())
+            }
+            None => Err(self.fault()),
+        }
     }
 
     /// The atom of `text`.
@@ -560,10 +696,10 @@ impl<H: Host> Agent<H> {
 
     // ---- the operand stack ----
 
-    /// `Pop`: the entry leaves through [`Agent::truncate_stack`], so an enumerator credits its
-    /// key list.
+    /// `Pop`: the entry leaves as through [`Agent::truncate_stack`], so an enumerator credits
+    /// its key list ([`Agent::drop_top`]).
     fn pop_instruction(&mut self) -> Completion<Flow> {
-        self.drop_entries(1)?;
+        self.drop_top()?;
         Ok(Flow::Next)
     }
 
@@ -749,17 +885,14 @@ impl<H: Host> Agent<H> {
 
     /// `GetIndex`.
     fn get_index(&mut self) -> Completion<Flow> {
-        let base = self.peek_value(1)?;
-        let key = self.peek_value(0)?;
+        let [base, key] = self.operands::<2>()?;
         let value = self.get_value_computed(base, key)?;
         self.replace(2, value)
     }
 
     /// `PutIndex`.
     fn put_index(&mut self, strict: bool) -> Completion<Flow> {
-        let base = self.peek_value(2)?;
-        let key = self.peek_value(1)?;
-        let value = self.peek_value(0)?;
+        let [base, key, value] = self.operands::<3>()?;
         let object = self.require_object_coercible_and_wrap(base)?;
         let keep = self.keep(Value::Object(object));
         let key = self.to_property_key(key);
@@ -1015,16 +1148,14 @@ impl<H: Host> Agent<H> {
 
     /// `Eq` (`equal` true) and `NotEq`.
     fn loose_equality(&mut self, equal: bool) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = self.is_loosely_equal(left, right)? == equal;
         self.replace(2, Value::Boolean(result))
     }
 
     /// `StrictEq` (`equal` true) and `StrictNotEq`.
     fn strict_equality(&mut self, equal: bool) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = self.is_strictly_equal(left, right)? == equal;
         self.replace(2, Value::Boolean(result))
     }
@@ -1035,7 +1166,7 @@ impl<H: Host> Agent<H> {
     fn jump_if(&mut self, target: u32, when: bool) -> Completion<Flow> {
         let value = self.peek_value(0)?;
         let truth = self.to_boolean(value)?;
-        self.drop_entries(1)?;
+        self.drop_top()?;
         if truth == when {
             return self.jump(target);
         }
@@ -1438,8 +1569,7 @@ impl<H: Host> Agent<H> {
 
     /// `[a, b] -> [r]`: ApplyStringOrNumericBinaryOperator.
     fn binary(&mut self, operator: BinaryOperator) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = self.apply_string_or_numeric_binary_operator(left, operator, right)?;
         self.replace(2, result)
     }
@@ -1447,8 +1577,7 @@ impl<H: Host> Agent<H> {
     /// The relational operators (`#sec-relational-operators-runtime-semantics-evaluation`) with
     /// IsLessThan (`#sec-islessthan`): an undefined result is false.
     fn relational(&mut self, instruction: Instruction) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = match instruction {
             Instruction::Lt => self.is_less_than(left, right, true)? == Some(true),
             Instruction::Gt => self.is_less_than(right, left, false)? == Some(true),

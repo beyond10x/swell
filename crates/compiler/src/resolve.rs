@@ -46,7 +46,12 @@
 //!   the call included, lives in an environment whose slots have names, so that the eval code
 //!   finds it by name;
 //! - in eval code ([`crate::compile_eval`]), a reference that the eval code does not bind is looked
-//!   up by name, through the environments of the code that called `eval`.
+//!   up by name, through the environments of the code that called `eval`;
+//! - in eval code, a private reference (`o.#x`, `#x in o`) that no class of the eval code
+//!   declares resolves to the position of the caller's private name of that text
+//!   ([`crate::compile_eval_with`]): its slot, and its hops plus the environments between the
+//!   reference and the top of the eval code and the record of the eval code's top level, never
+//!   by name (`docs/design/engine.md`, "Private names", item 4).
 //!
 //! The `let` and `const` declarations make scopes of their own (`docs/design/engine.md`, decision
 //! 3, "Lexical bindings"): a block, the case block of a `switch`, the head of a `for`, the
@@ -526,6 +531,13 @@ struct Resolver<'a, 'm> {
     this_arrows: BTreeSet<FunctionId>,
     /// [`Resolution::field_classes`].
     field_classes: BTreeMap<FunctionId, (ClassAt, usize)>,
+    /// Of eval code: the private names of the caller of a direct `eval`, each text with its
+    /// hops from the caller's LexicalEnvironment and its slot ([`crate::compile_eval_with`]).
+    caller_private: BTreeMap<&'a str, (u32, u32)>,
+    /// Of eval code: the scope of its top-level lexical names, when it has any.
+    eval_top: Option<usize>,
+    /// Whether the code is strict.
+    strict: bool,
 }
 
 fn malformed(what: &str) -> CompileError {
@@ -533,13 +545,24 @@ fn malformed(what: &str) -> CompileError {
 }
 
 /// Resolves every name of `script`; of eval code when `eval_code` is true, whose context has
-/// inDerivedConstructor when `this_by_name` is ([`Resolution::this_by_name`]).
+/// inDerivedConstructor when `this_by_name` is ([`Resolution::this_by_name`]) and whose caller
+/// has the private names `private_names` ([`crate::compile_eval_with`]; an entry of the map of
+/// them charged for each text, the first of a text kept).
 pub(crate) fn resolve(
     script: &Script,
-    eval_code: bool,
-    this_by_name: bool,
+    (eval_code, this_by_name): (bool, bool),
+    private_names: &[(&str, u32, u32)],
     m: &Meter<'_>,
 ) -> Result<Resolution, CompileError> {
+    let mut caller_private = BTreeMap::new();
+    if eval_code {
+        for &(name, hops, slot) in private_names {
+            if !caller_private.contains_key(name) {
+                m.charge(map_entry_bytes::<&str, (u32, u32)>())?;
+                caller_private.insert(name, (hops, slot));
+            }
+        }
+    }
     let mut scopes = m.with_capacity(1)?;
     scopes.push(ScopeData {
         parent: None,
@@ -578,6 +601,9 @@ pub(crate) fn resolve(
         this_by_name: eval_code && this_by_name,
         this_arrows: BTreeSet::new(),
         field_classes: BTreeMap::new(),
+        caller_private,
+        eval_top: None,
+        strict: script.strict,
     };
     let resolution = resolve_with(&mut r, script, eval_code);
     // The resolver's own structures are dropped with it; on a stop the compile step credits
@@ -604,6 +630,7 @@ fn resolve_with(
     } else {
         None
     };
+    r.eval_top = eval_top;
     r.push_list(&script.body);
     while let Some(task) = r.work.pop() {
         r.m.visit()?;
@@ -767,8 +794,13 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .this_arrows
             .len()
             .saturating_mul(map_entry_bytes::<FunctionId, ()>());
+        let caller_private = self
+            .caller_private
+            .len()
+            .saturating_mul(map_entry_bytes::<&str, (u32, u32)>());
         capacity(&self.work)
             .saturating_add(this_arrows)
+            .saturating_add(caller_private)
             .saturating_add(occurrences)
             .saturating_add(bindings)
             .saturating_add(scopes)
@@ -2436,6 +2468,19 @@ impl<'a, 'm> Resolver<'a, 'm> {
         Ok((names, env))
     }
 
+    /// The record of eval code's own that a walk from a site to the top of the eval code does
+    /// not count, between the eval code and its caller's LexicalEnvironment: the empty
+    /// declarative record strict eval code runs in when none of its top-level bindings lives in a
+    /// record (`#sec-performeval`, steps 17 and 19; the engine's `eval_environments`), 1;
+    /// otherwise 0, the record of the top level being counted as any scope's.
+    fn eval_own_record(&self) -> u32 {
+        let counted = self
+            .eval_top
+            .and_then(|s| self.scopes.get(s))
+            .is_some_and(|s| s.env_slots > 0);
+        u32::from(self.strict && !counted)
+    }
+
     /// The binding of every site.
     fn locate(&mut self) -> Result<BTreeMap<Site, Binding>, CompileError> {
         // At most one entry per binding, charged first.
@@ -2495,6 +2540,21 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 }
             }
             let binding = match found {
+                // A private name the eval code does not declare: the caller's
+                // (`crate::compile_eval_with`), past the environments counted to the top of the
+                // eval code and the eval code's own record, never looked up by name.
+                None if self.eval_code && name.starts_with('#') => {
+                    let Some(&(outer, slot)) = self.caller_private.get(name.as_str()) else {
+                        return Err(malformed(
+                            "a private name no class around eval code declares",
+                        ));
+                    };
+                    let hops = hops
+                        .checked_add(self.eval_own_record())
+                        .and_then(|hops| hops.checked_add(outer))
+                        .ok_or(CompileError::TooMany("environment hops"))?;
+                    Binding::Env { hops, slot }
+                }
                 _ if by_name => Binding::Dynamic(name.clone()),
                 None => Binding::Global(name.clone()),
                 Some(b) => {
