@@ -3644,8 +3644,8 @@ The rule:
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,472 | 2,801 |
-| 8 | `classes` | 9,302 | 18,455 |
-| 9 | `collections-proxy-reflect` | 1,895 | 3,752 |
+| 8 | `classes` | 9,339 | 18,529 |
+| 9 | `collections-proxy-reflect` | 1,858 | 3,678 |
 | 10 | `promises-and-async` | 3,759 | 7,258 |
 | 11 | `modules` | 1,281 | 1,833 |
 | 12 | `bigint` | 381 | 760 |
@@ -3745,15 +3745,16 @@ comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 r
 lines still sum to 53,801 and 103,360.
 
 Slice 9 had 1,787 cases and 3,545 runs by its rules (its `dir` and `feature` lines, the lines of
-the closes of slices 2, 3, 4, 5, 6 and 10 that gave it cases, and the order of delivery). 1,895
-cases and 3,752 runs are what slice 9 counts after its close: 22 cases (44 runs) that need slice
-12 move by the lines of the paragraph "Slice 9's cases that need a later slice", and 130 cases
-(251 runs) come into it from slice 19 by the lines of the same paragraph ("A case that comes into
-a slice from one delivered later" above). Measured on 2026-11-27 with the same check (`awk -f
-slices.awk` over this block and the inventory's `meta.tsv`, counting slice `09`): `09 1895
-3752`, the slice line of `slot task test262` on the code of the slice, every run passed. Every
-moved case goes to slice 12 and every case that comes in leaves slice 19, so slices 1 to 19 still
-hold 44,931 cases and 85,794 runs and the 22 lines still sum to 53,801 and 103,360.
+the closes of slices 2, 3, 4, 5, 6 and 10 that gave it cases, and the order of delivery). 1,858
+cases and 3,678 runs are what slice 9 counts after its close: 59 cases (118 runs) that need a
+later slice move by the lines of the paragraph "Slice 9's cases that need a later slice", 37 to
+slice 8 and 22 to 12, and 130 cases (251 runs) come into it from slice 19 by the lines of the
+same paragraph ("A case that comes into a slice from one delivered later" above). Measured on
+2026-11-27 with the same check (`awk -f slices.awk` over this block and the inventory's
+`meta.tsv`, counting slice `09`): `09 1858 3678`, the slice line of `slot task test262` on the
+code of the slice, every run passed. Every moved case goes to slice 8 or 12 and every case that
+comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
+lines still sum to 53,801 and 103,360.
 
 What each slice builds, and the directories it raises most (paths under `test/`, cases):
 
@@ -4424,22 +4425,34 @@ receiver; of each of the seven set methods of `Set/prototype/` (`difference`, `i
 `isDisjointFrom`, `isSubsetOf`, `isSupersetOf`, `symmetricDifference`, `union`),
 `called-with-object` passes `1n` as the other set, `require-internal-slot` calls the method with
 `1n` as its receiver, and `size-is-a-number` sets the `size` of the other set to `0n`; the other
-cases of those directories pass. The 37 cases that the same file sends to slice 8 (`class` or
-`super`, and `language/expressions/optional-chaining/new-target-optional-call`) pass in every run
-on this code, which holds the classes of slice 8 merged so far, and stay in slice 9 with no line.
-These 37 cases of slice 9 hold a token of slice 8 (`class` 36, 7 of them with `super` too, and
-`new.target` 1) and pass because the code of slice 8 is on the same branch; slice 9 and slice 8
-are delivered by one pull request. All 22 move, each a new line of `conformance/test262/moves.tsv` with `from` 9, kind `part` and a
-token of `conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`.
-The later parts gain no token. The block gains 22 lines `dir <file> 12`, one for a single file
-each, since every directory that holds one of them holds cases of slice 9 that stay. The groups,
-by target slice (lines of the list; in brackets the lines with `from` 9):
+cases of those directories pass. The 37 cases that the same file sends to slice 8 pass in every
+run on this code, but cannot pass in slice 9: each failed at the start of the slice in every one
+of its runs (74 runs) on a refusal of slice 8 (`class is not supported before slice 8` 36,
+`new.target is not supported before slice 8` 1), holds that token in the case file itself
+(`class` 36, 7 of them with `super` too; `new.target` 1), and passes only because the code of
+slice 8 merged so far is on the same branch. Slice 8 is delivered after slice 9, so they move to
+slice 8; the plan of slice 8 counts them as its incoming cases (`docs/plan/slice-08/incoming.tsv`).
+All 59 move, each a line of `conformance/test262/moves.tsv` with kind `part` and a token of
+`conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`: 58 lines are
+new, with `from` 9; 1 is the line of a case moved to slice 9 earlier,
+`language/expressions/optional-chaining/new-target-optional-call` (`from` 2, by the close of
+slice 2, evidence `Reflect`), which keeps its `from` and gets the `to` 8 and the evidence
+`new.target`, and its line of the block `dir <file> 9` becomes `dir <file> 8`. The later parts
+gain no token. The block gains 58 lines `dir <file> <slice>`, 22 to slice 12 and 36 to slice 8,
+one for a single file each, since every directory that holds one of them holds cases of slice 9
+that stay. The groups, by target slice (lines of the list; in brackets the lines with `from` 9):
 
+- to slice 8, 37 (36): `class` 36 (`allows-set-like-class`, `receiver-not-set`,
+  `set-like-class-order` and `subclass-receiver-methods` of each of the seven set methods, and
+  `subclass-symbol-species` and `subclass` of `difference`, `intersection`,
+  `symmetricDifference` and `union`), `new.target` 1
+  (`optional-chaining/new-target-optional-call`, `from` 2);
 - to slice 12, 22 (22): `1n` 15 (`Map/prototype/getOrInsertComputed/this-not-object-throw` and
   the `called-with-object` and `require-internal-slot` cases of the seven set methods), `0n` 7
   (their `size-is-a-number` cases).
 
-The counts sum to the 22 lines this change adds to the list, all with `from` 9.
+The counts sum to the 59 lines this change adds to or changes in the list, 58 of them with
+`from` 9.
 
 130 cases (251 runs) come into slice 9, by the rule "A case that comes into a slice from one
 delivered later" above. Each is counted by the block in slice 19 (`dir test/staging/ 19`), failed
@@ -5042,7 +5055,7 @@ dir test/language/expressions/optional-chaining/iteration-statement-for-of-type-
 dir test/language/expressions/optional-chaining/iteration-statement-for.js 6
 dir test/language/expressions/optional-chaining/iteration-statement-while.js 6
 dir test/language/expressions/optional-chaining/member-expression.js 8
-dir test/language/expressions/optional-chaining/new-target-optional-call.js 9
+dir test/language/expressions/optional-chaining/new-target-optional-call.js 8
 dir test/language/expressions/optional-chaining/optional-call-preserves-this.js 6
 dir test/language/expressions/optional-chaining/optional-chain-expression-optional-expression.js 6
 dir test/language/expressions/optional-chaining/optional-chain-prod-arguments.js 6
@@ -6466,6 +6479,42 @@ dir test/built-ins/Set/prototype/symmetricDifference/size-is-a-number.js 12
 dir test/built-ins/Set/prototype/union/called-with-object.js 12
 dir test/built-ins/Set/prototype/union/require-internal-slot.js 12
 dir test/built-ins/Set/prototype/union/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/difference/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/difference/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/difference/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/difference/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/difference/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/difference/subclass.js 8
+dir test/built-ins/Set/prototype/intersection/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/intersection/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/intersection/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/intersection/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/intersection/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/intersection/subclass.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/subclass.js 8
+dir test/built-ins/Set/prototype/union/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/union/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/union/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/union/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/union/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/union/subclass.js 8
 dir test/staging/set-is-subset-of-empty-index.js 9
 dir test/staging/set-is-subset-on-set-like.js 9
 dir test/staging/set-is-subset-table-receiver-cleared.js 9
@@ -7067,8 +7116,8 @@ Its output on this document:
 05 2724 5441
 06 3898 7351
 07 1472 2801
-08 9302 18455
-09 1895 3752
+08 9339 18529
+09 1858 3678
 10 3759 7258
 11 1281 1833
 12 381 760
