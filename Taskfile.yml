@@ -730,9 +730,10 @@ tasks:
       task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones,
       the SITE_DATA_ ones (taskfiles/site.yml, included flat) and TEST_RUSTFLAGS and
       TEST_NEXTEST_ARGS (taskfiles/realm-places.yml, included flat; the steps that read them
-      refuse a value that is not the file's, task test-vars-check) always show, with their
-      defaults; any other name on the line was set by the caller. A new gate variable is added
-      to GATE_VARIABLES in the change that adds it.
+      refuse a value that is not the file's, task test-vars-check) and the lane's COLLECT_MAIN,
+      COLLECT_RUSTFLAGS, SLOW_COLLECT_WAIT and NO_STACK_TESTS (the top of this file) always
+      show, with their defaults; any other name on the line was set by the caller. A new gate
+      variable is added to GATE_VARIABLES in the change that adds it.
 
       It fails in one case, after that line: a flag variable of cargo in the environment
       (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or a
@@ -762,6 +763,7 @@ tasks:
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS GATE_SELFTEST_TREE
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
         TEST_RUSTFLAGS TEST_NEXTEST_ARGS
+        COLLECT_MAIN COLLECT_RUSTFLAGS SLOW_COLLECT_WAIT NO_STACK_TESTS
         REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
