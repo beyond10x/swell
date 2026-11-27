@@ -35,6 +35,8 @@ enum Answer {
     ThrowNew,
     /// `Ok(())` after it set the interrupt flag through [`HookHost::interrupt`].
     Interrupt,
+    /// What this function answers.
+    Custom(fn(&mut HookCx<'_, HookHost>, ObjectRef) -> Completion<()>),
 }
 
 /// A host that records each call of `host_ensure_can_add_private_element` and of the host
@@ -86,6 +88,7 @@ impl Host for HookHost {
                 }
                 Ok(())
             }
+            Answer::Custom(answer) => answer(cx, obj),
         }
     }
 
@@ -524,35 +527,44 @@ fn assert_faulted(agent: &mut Agent<HookHost>, realm: &Realm, script: &swell::Sc
 /// `Terminated(EngineFault)`, the hook called once with `h`, no code after the add (the
 /// `catch`, the `log` after it) run, and then the faulted agent's answers. Whether the element
 /// is on `h` cannot be read afterwards: every entry point answers `Err(Faulted)`, so the test
-/// reads what the run did before the fault, through the calls.
+/// reads what the run did before the fault, through the calls. Each class runs twice, with the
+/// construction in a `try` and with it uncaught: an uncaught throw leaves the script without a
+/// handler that holds the value, so with a collection at every safe point no collection reaches
+/// the handle before the run ends, and only the check of the hook's answer faults the agent.
 fn assert_bad_throw_faults(bad: impl Fn(&mut Agent<HookHost>, &Realm) -> Value) {
     for (class, element) in [("C", "#x = log('x');"), ("M", "#m() {}")] {
-        let (mut agent, realm) = hook_agent();
-        let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
-        let source = format!(
-            "var target = h; function Base() {{ return target; }}
-             class {class} extends Base {{ {element} }}
-             0;"
-        );
-        assert_eq!(outcome(&mut agent, &realm, &source), "normal 0");
-        let script = parse(
-            &mut agent,
-            &realm,
-            &format!(
-                "try {{ new {class}(); log('added'); }} catch (e) {{ log('caught'); }} log('after');"
-            ),
-        );
-        let value = bad(&mut agent, &realm);
-        agent.host_mut().answer = Answer::Throw(value);
-        assert!(matches!(
-            agent.evaluate_script(&script),
-            Ok(HostOutcome::Terminated(swell::Termination::EngineFault))
-        ));
-        let initializer: &[&str] = if class == "C" { &["x"] } else { &[] };
-        let mut expected: Vec<String> = initializer.iter().map(|c| c.to_string()).collect();
-        expected.push("hook".to_string());
-        assert_eq!(take_calls(&mut agent), (expected, vec![h]), "{class}");
-        assert_faulted(&mut agent, &realm, &script);
+        for caught in [true, false] {
+            let (mut agent, realm) = hook_agent();
+            let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
+            let source = format!(
+                "var target = h; function Base() {{ return target; }}
+                 class {class} extends Base {{ {element} }}
+                 0;"
+            );
+            assert_eq!(outcome(&mut agent, &realm, &source), "normal 0");
+            let run = if caught {
+                format!(
+                    "try {{ new {class}(); log('added'); }} catch (e) {{ log('caught'); }} log('after');"
+                )
+            } else {
+                format!("new {class}(); log('after');")
+            };
+            let script = parse(&mut agent, &realm, &run);
+            let value = bad(&mut agent, &realm);
+            agent.host_mut().answer = Answer::Throw(value);
+            let answered = match agent.evaluate_script(&script) {
+                Ok(HostOutcome::Terminated(termination)) => format!("{termination:?}"),
+                Ok(HostOutcome::Normal(_)) => "Normal".to_string(),
+                Ok(HostOutcome::Throw(_)) => "Throw".to_string(),
+                Err(error) => format!("Err({error:?})"),
+            };
+            assert_eq!(answered, "EngineFault", "{run}");
+            let initializer: &[&str] = if class == "C" { &["x"] } else { &[] };
+            let mut expected: Vec<String> = initializer.iter().map(|c| c.to_string()).collect();
+            expected.push("hook".to_string());
+            assert_eq!(take_calls(&mut agent), (expected, vec![h]), "{run}");
+            assert_faulted(&mut agent, &realm, &script);
+        }
     }
 }
 
@@ -702,4 +714,414 @@ fn an_interrupt_set_in_the_hook_ends_the_run() {
     agent.host_mut().answer = Answer::Allow;
     assert_eq!(outcome(&mut agent, &realm, "C.has(h);"), "normal false");
     assert_eq!(agent.state(), AgentState::Alive);
+}
+
+/// A host that breaks the same-kind rule of `#sec-hostensurecanaddprivateelement` (one object
+/// allowed, then refused, in one construction) gets the adds made before the refusal, in
+/// source order, each half of an accessor where it stands (`host_ensure_can_add_private_element`,
+/// its documentation): for `get #a; #m; set #a` a throw at the second call (the add of `#m`)
+/// leaves `#a` with its getter only, `#m` is not added, a write of `#a` throws the `TypeError`
+/// "no setter", and the run does not fault. A later construction on a fresh host object whose
+/// hook answers `Ok(())` has both halves.
+#[test]
+fn a_throw_between_the_halves_of_an_accessor_keeps_the_getter_added_before_it() {
+    let (mut agent, realm) = hook_agent();
+    let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "var target = h; function Base() { return target; }
+             class S extends Base {
+               get #a() { return 'got'; }
+               #m() {}
+               set #a(v) { log('set ' + v); }
+               static has(o) { return [#a in o, #m in o].join(); }
+               static read(o) { return o.#a; }
+               static write(o) { o.#a = 2; return 'written'; }
+             }
+             0;"
+        ),
+        "normal 0"
+    );
+    let host = agent.host_mut();
+    host.answer = Answer::Throw(Value::Number(2.0));
+    host.at = 2;
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "try { new S(); 'added'; } catch (e) { e + ' ' + S.has(h); }"
+        ),
+        "normal 2 true,false"
+    );
+    assert_eq!(
+        take_calls(&mut agent),
+        (vec!["hook".to_string(); 2], vec![h, h])
+    );
+    assert_eq!(outcome(&mut agent, &realm, "S.read(h);"), "normal got");
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "try { S.write(h); } catch (e) { (e instanceof TypeError) + ' ' + e.message; }"
+        ),
+        "normal true the private accessor #a has no setter"
+    );
+    assert_eq!(take_calls(&mut agent), (vec![], vec![]));
+    assert_eq!(agent.state(), AgentState::Alive);
+
+    let fresh = bind_host(&mut agent, &realm, "target", Some(&TABLE));
+    let host = agent.host_mut();
+    host.answer = Answer::Allow;
+    host.at = 0;
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "[new S() === target, S.has(target), S.read(target), S.write(target)].join();"
+        ),
+        "normal true,true,true,got,written"
+    );
+    assert_eq!(
+        take_calls(&mut agent),
+        (
+            ["hook", "hook", "set 2"].map(String::from).to_vec(),
+            vec![fresh; 2]
+        )
+    );
+}
+
+/// A hook that answers `Ok(())` after the run was terminated inside it (a `charge_host_bytes`
+/// over the budget, its `Err` dropped).
+fn swallow_memory_budget(cx: &mut HookCx<'_, HookHost>, _obj: ObjectRef) -> Completion<()> {
+    let refused = cx.charge_host_bytes(u64::MAX);
+    assert!(matches!(
+        refused,
+        Err(Abrupt::Terminated(swell::Termination::MemoryBudget))
+    ));
+    Ok(())
+}
+
+/// The same, answering a `Throw` of a Number.
+fn swallow_then_throw(cx: &mut HookCx<'_, HookHost>, obj: ObjectRef) -> Completion<()> {
+    swallow_memory_budget(cx, obj)?;
+    Err(Abrupt::Throw(Value::Number(5.0)))
+}
+
+/// Decision 10: a hook inside which the run was terminated, and which then
+/// answers `Ok(())` or a `Throw`, ends the run in `Terminated(MemoryBudget)`; the element is not
+/// added and no `catch` runs. Holds `self.running()?` after the hook.
+#[test]
+fn a_termination_the_hook_swallowed_ends_the_run_and_adds_nothing() {
+    let (mut agent, realm) = hook_agent();
+    let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
+    assert_eq!(outcome(&mut agent, &realm, FIELD_CLASS), "normal 0");
+    let answers: [fn(&mut HookCx<'_, HookHost>, ObjectRef) -> Completion<()>; 2] =
+        [swallow_memory_budget, swallow_then_throw];
+    for answer in answers {
+        agent.host_mut().answer = Answer::Custom(answer);
+        assert_eq!(
+            outcome(
+                &mut agent,
+                &realm,
+                "target = h; try { new C(); log('added'); } catch (e) { log('caught'); } log('after');"
+            ),
+            "MemoryBudget"
+        );
+        assert_eq!(take_calls(&mut agent), (vec!["hook".to_string()], vec![h]));
+        agent.host_mut().answer = Answer::Allow;
+        assert_eq!(outcome(&mut agent, &realm, "C.has(h);"), "normal false");
+    }
+}
+
+/// The code units of the String [`big_string_every_second_throws`] makes: 256 KiB.
+const BIG: usize = 1 << 18;
+
+/// A hook that makes a String of [`BIG`] code units each call and throws it at every second
+/// call.
+fn big_string_every_second_throws(
+    cx: &mut HookCx<'_, HookHost>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    let call = cx.host().objects.len();
+    let made = cx.new_string(&"x".repeat(BIG))?;
+    if call % 2 == 0 {
+        return Err(Abrupt::Throw(Value::String(made)));
+    }
+    Ok(())
+}
+
+/// A hook that makes a short String each call and throws it at every second call.
+fn small_string_every_second_throws(
+    cx: &mut HookCx<'_, HookHost>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    let call = cx.host().objects.len();
+    let made = cx.new_string("made in the hook")?;
+    if call % 2 == 0 {
+        return Err(Abrupt::Throw(Value::String(made)));
+    }
+    Ok(())
+}
+
+/// An agent of [`HookHost`] with `memory_bytes`, a realm, `log`, the host object `h` with a
+/// table and the class of [`FIELD_CLASS`]; and its heap reading after a collection.
+fn growth_agent(memory_bytes: u64) -> (Agent<HookHost>, Realm, u64) {
+    let limits = swell::Limits {
+        memory_bytes,
+        ..limits()
+    };
+    let mut agent = Agent::new(HookHost::default(), limits, seeds()).unwrap();
+    let HostOutcome::Normal(realm) = create_realm(&mut agent, None, None).unwrap() else {
+        panic!("create_realm did not answer Normal");
+    };
+    bind(&mut agent, &realm, "log", |cx, realm_ref| {
+        let made = cx.new_host_function(realm_ref, "log", 1, log, false, None);
+        Value::Object(made.unwrap().unwrap())
+    });
+    bind_host(&mut agent, &realm, "h", Some(&TABLE));
+    assert_eq!(outcome(&mut agent, &realm, FIELD_CLASS), "normal 0");
+    let reading = collected_bytes(&mut agent);
+    (agent, realm, reading)
+}
+
+/// The script of `n` constructions on `h`, which answers how many Strings it caught.
+fn growth_script(agent: &mut Agent<HookHost>, realm: &Realm, n: usize) -> swell::Script {
+    parse(
+        agent,
+        realm,
+        &format!(
+            "target = h; var thrown = 0;
+             for (var i = 0; i < {n}; i++) {{
+               try {{ new C(); }} catch (e) {{ if (typeof e === 'string') thrown++; }}
+             }}
+             thrown;"
+        ),
+    )
+}
+
+/// What a hook makes leaves the scope when it returns (the scope truncated
+/// after the call). With a memory budget of twice the agent's reading plus 2 MiB, enough hook
+/// calls in one run, each making a String of 256 KiB (every second one thrown and caught), to
+/// hold more than the reading plus 4 MiB if they were kept, end normally (the default build
+/// only: a collection at every safe point adds nothing to it and costs seconds). Then a hook
+/// that throws a short String at every second call across 500 constructions (10 with a
+/// collection at every safe point), three runs: from the second on, each leaves the heap
+/// reading after a collection where the one before left it (the first grows the arenas).
+#[test]
+fn what_a_hook_makes_is_not_kept_across_many_adds() {
+    let collect = cfg!(feature = "collect-every-safe-point");
+    let (_, _, reading) = growth_agent(limits().memory_bytes);
+    let (mut agent, realm, _) = growth_agent(2 * reading + (2 << 20));
+    if !collect {
+        let unit = u64::try_from(BIG).unwrap();
+        let calls = usize::try_from((reading + (4 << 20)) / unit + 2).unwrap() / 2 * 2;
+        agent.host_mut().answer = Answer::Custom(big_string_every_second_throws);
+        let big = growth_script(&mut agent, &realm, calls);
+        let expected = f64::from(u32::try_from(calls / 2).unwrap());
+        assert_eq!(number(&mut agent, &realm, &big), expected);
+        assert_eq!(take_calls(&mut agent).0.len(), calls);
+        // The next run starts at an even count of calls.
+    }
+
+    let small_calls = if collect { 10 } else { 500 };
+    agent.host_mut().answer = Answer::Custom(small_string_every_second_throws);
+    let small = growth_script(&mut agent, &realm, small_calls);
+    let expected = f64::from(u32::try_from(small_calls / 2).unwrap());
+    let mut readings = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(number(&mut agent, &realm, &small), expected);
+        readings.push(collected_bytes(&mut agent));
+    }
+    println!("readings after each run: {readings:?}");
+    assert!(
+        readings[1..].iter().all(|reading| *reading == readings[1]),
+        "a run of the hook left bytes: {readings:?}"
+    );
+    assert_eq!(take_calls(&mut agent).0.len(), 3 * small_calls);
+}
+
+/// A getter and a setter of one name are one element in either source order:
+/// one hook call each, and both halves work on the host object afterwards.
+#[test]
+fn an_accessor_pair_in_either_order_is_one_element_with_both_halves() {
+    let (mut agent, realm) = hook_agent();
+    let p = bind_host(&mut agent, &realm, "p", Some(&TABLE));
+    let q = bind_host(&mut agent, &realm, "q", Some(&TABLE));
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "var target; function Base() { return target; }
+             class P extends Base {
+               set #a(v) { log('P set ' + v); }
+               get #a() { return 'P got'; }
+               static use(o) { o.#a = 3; return o.#a; }
+             }
+             class Q extends Base {
+               get #a() { return 'Q got'; }
+               set #a(v) { log('Q set ' + v); }
+               static use(o) { o.#a = 4; return o.#a; }
+             }
+             target = p; var a = new P() === p;
+             target = q; var b = new Q() === q;
+             [a, b, P.use(p), Q.use(q)].join();"
+        ),
+        "normal true,true,P got,Q got"
+    );
+    assert_eq!(
+        take_calls(&mut agent),
+        (
+            ["hook", "hook", "P set 3", "Q set 4"]
+                .map(String::from)
+                .to_vec(),
+            vec![p, q]
+        )
+    );
+}
+
+/// `#sec-privatemethodoraccessoradd`, steps 1 to 3: a second construction
+/// of one class on one host object through the return override calls the hook once, for its
+/// first element (an accessor pair here, then a method and a field), and throws the `TypeError`;
+/// no initializer runs. A method and a getter of one name are an early error.
+#[test]
+fn a_second_construction_calls_the_hook_once_and_throws() {
+    let (mut agent, realm) = hook_agent();
+    let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "var target = h; function Base() { return target; }
+             class D extends Base {
+               get #a() { return 1; }
+               set #a(v) {}
+               #m() {}
+               #x = log('x');
+             }
+             var first = new D() === h;
+             try { new D(); 'added twice'; } catch (e) { [first, e instanceof TypeError].join(); }"
+        ),
+        "normal true,true"
+    );
+    assert_eq!(
+        take_calls(&mut agent),
+        (
+            ["hook", "hook", "x", "hook", "hook"]
+                .map(String::from)
+                .to_vec(),
+            vec![h; 4]
+        )
+    );
+    let early = agent
+        .parse_script(
+            &realm,
+            Source::Utf8("class X { #m() {} get #m() {} }"),
+            None,
+        )
+        .unwrap();
+    assert!(!matches!(early, Parsed::Parsed(_)), "{early:?}");
+}
+
+/// HOST-119: a Proxy over a host object with a table, a revoked Proxy, an
+/// Array and a bound function get every element with no hook call (the hook would throw), and
+/// the Proxy's target gets nothing.
+#[test]
+fn other_kinds_call_no_hook() {
+    let (mut agent, realm) = hook_agent();
+    bind_host(&mut agent, &realm, "h", Some(&TABLE));
+    agent.host_mut().answer = Answer::Throw(Value::Number(1.0));
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "var target; function Base() { return target; }
+             class K extends Base {
+               #x = 1;
+               #m() {}
+               get #a() { return 1; }
+               set #a(v) {}
+               static has(o) { return #x in o && #m in o && #a in o; }
+             }
+             var results = [];
+             function add(o) {
+               target = o;
+               try { results.push(new K() === o && K.has(o)); } catch (e) { results.push('threw ' + e); }
+             }
+             add(new Proxy(h, {}));
+             var r = Proxy.revocable({}, {}); r.revoke(); add(r.proxy);
+             add([]);
+             add(function () {}.bind(null));
+             results.push(K.has(h));
+             results.join();"
+        ),
+        "normal true,true,true,true,false"
+    );
+    assert_eq!(take_calls(&mut agent), (vec![], vec![]));
+}
+
+/// HOST-119: a global object the host made as a host object with a table
+/// gets one hook call per element, each with the global object.
+#[test]
+fn a_host_global_with_a_table_calls_the_hook_once_per_element() {
+    let mut agent = Agent::new(HookHost::default(), limits(), seeds()).unwrap();
+    let mut setup = |cx: &mut HookCx<'_, HookHost>,
+                     realm: swell::RealmRef|
+     -> Completion<swell::GlobalObjects> {
+        let global = cx
+            .new_host_object(spec(Prototype::ObjectPrototypeOf(realm), Some(&TABLE)))
+            .unwrap()?;
+        Ok(swell::GlobalObjects { global, this: None })
+    };
+    let HostOutcome::Normal(realm) = create_realm(&mut agent, Some(&mut setup), None).unwrap()
+    else {
+        panic!("create_realm did not answer Normal");
+    };
+    let global = agent.global_object(&realm).unwrap();
+    let global = agent
+        .with_cx(&realm, |cx| match cx.get(&global).unwrap() {
+            Value::Object(object) => object,
+            other => panic!("the global is {other:?}"),
+        })
+        .unwrap();
+    take_calls(&mut agent);
+    assert_eq!(
+        outcome(
+            &mut agent,
+            &realm,
+            "function Base() { return globalThis; }
+             class G extends Base {
+               #x = 1;
+               #m() {}
+               get #a() { return 1; }
+               set #a(v) {}
+               static has(o) { return #x in o && #m in o && #a in o; }
+             }
+             [new G() === globalThis, G.has(globalThis)].join();"
+        ),
+        "normal true,true"
+    );
+    let (calls, objects) = take_calls(&mut agent);
+    let hooks = calls.iter().filter(|call| *call == "hook").count();
+    assert_eq!((hooks, objects), (3, vec![global; 3]));
+}
+
+/// HOST-223, as HOST-222 checks a String: a `Throw` value that is a String
+/// of another agent, or a stale String of this one, faults the agent.
+#[test]
+fn a_string_handle_of_another_agent_or_stale_in_the_throw_faults_the_agent() {
+    let (mut other, other_realm) = hook_agent();
+    let foreign = bind(&mut other, &other_realm, "kept", |cx, _| {
+        Value::String(cx.new_string("other").unwrap())
+    });
+    assert_bad_throw_faults(|_, _| foreign);
+    assert_eq!(other.state(), AgentState::Alive);
+    assert_bad_throw_faults(|agent, realm| {
+        let made = agent
+            .with_cx(realm, |cx| cx.new_string("stale").unwrap())
+            .unwrap();
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+        Value::String(made)
+    });
 }

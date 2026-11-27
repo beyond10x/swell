@@ -198,6 +198,15 @@ pub trait Host: Sized + 'static {
     /// or a handle of another agent ends the run in `Terminated(EngineFault)` (decision 6). A set
     /// interrupt flag ends the run before the element is added. The `HookCx` runs no code and
     /// is no safe point.
+    ///
+    /// The host's duty (`#sec-hostensurecanaddprivateelement`): "Any two calls of this abstract
+    /// operation with the same argument must return the same kind of Completion Record", so one
+    /// object is either always refused or never. The engine does not check it. A host that
+    /// breaks it gets what the adds made before the refusal: the elements of the class are
+    /// added in source order, each half of an accessor where it stands (the first half calls
+    /// the hook, the second joins it), up to the refused one, which throws; nothing is taken
+    /// back, the run does not fault, and an accessor whose second half stands after the refused
+    /// element keeps only its first half.
     fn host_ensure_can_add_private_element(
         _cx: &mut HookCx<'_, Self>,
         _obj: ObjectRef,
