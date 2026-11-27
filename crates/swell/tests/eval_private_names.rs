@@ -1144,3 +1144,402 @@ if (f(c) !== 5) wrong.push("later " + f(c));
 wrong.join();"##,
     );
 }
+
+/// A direct eval whose String holds no `#` answers what it answered when every direct eval
+/// walked: in a method of a class with private names and in a sloppy function with no class,
+/// eval texts without `#` give the answer, the error and its kind, `typeof`, `new.target` and
+/// `super` as before, and the code they make (a function, an arrow, a generator, a class, a field
+/// initializer, a static block, a computed key and a computed field key, `new Function`) reads
+/// the outer class's names through a nested direct eval whose text gets its `#` at run time,
+/// also when it runs after the eval returned; nesting three deep with the `#` only at the
+/// innermost counts every record of the levels between. `this.\u0023x` and `this.\uFF03x` (an
+/// escape of `#` and the fullwidth number sign) name no private name: a `SyntaxError`.
+#[test]
+fn eval_texts_without_a_hash_answer_as_when_they_walked() {
+    let source = r##"var wrong = [];
+var H = String.fromCharCode(35);
+function check(name, got, want) { if (got !== want) wrong.push(name + " => " + String(got)); }
+function kind(f) { try { f(); return "none"; } catch (e) { return e.name; } }
+class C {
+  #x = 1;
+  #m() { return 2; }
+  static #s = 4;
+  run(src) { return eval(src); }
+}
+var c = new C();
+check("plain", c.run("1 + 1"), 2);
+check("typeof this", c.run("typeof this"), "object");
+check("var", c.run("var q = 1; q"), 1);
+check("let", c.run("let a = 3; (() => a)()"), 3);
+check("new.target", c.run("new.target"), undefined);
+check("super", c.run("super.constructor === Object"), true);
+check("TypeError", kind(() => c.run("this.nope.y")), "TypeError");
+check("ReferenceError", kind(() => c.run("nope")), "ReferenceError");
+check("SyntaxError", kind(() => c.run("(")), "SyntaxError");
+check("escape", kind(() => c.run("this.\\u0023x")), "SyntaxError");
+check("fullwidth", kind(() => c.run("this.\uFF03x")), "SyntaxError");
+check("three deep", c.run("eval(\"eval('this.' + H + 'x')\")"), 1);
+check("three deep records", c.run("let a = 1; (() => a)(); eval(\"let b = 2; (() => b)(); eval('let d = 3; (() => d)(); this.' + H + 'x + a + b + d')\")"), 7);
+check("three deep class", c.run("eval(\"class K { m(o) { return eval('o.' + H + 'x'); } } new K().m(this)\")"), 1);
+var f1 = c.run("(function (o) { return eval('o.' + H + 'x'); })");
+var f2 = c.run("let a = 5; (() => a)(); (o) => eval('o.' + H + 'x + a')");
+var g = c.run("(function* (o) { yield eval('o.' + H + 'x'); yield eval('o.' + H + 'm()'); })");
+var K = c.run("class K { m(o) { return eval('o.' + H + 'x + o.' + H + 'm()'); } } K");
+check("function later", f1(c), 1);
+check("arrow later", f2(c), 6);
+var it = g(c);
+check("generator later", it.next().value + it.next().value, 3);
+check("class of eval code later", new K().m(c), 3);
+check("new Function", kind(() => c.run("new Function('o', 'return o.' + H + 'x')")), "SyntaxError");
+check("new Function without", c.run("new Function('return 3')()"), 3);
+check("field initializer", c.run("var o = this; class K { f = eval('o.' + H + 'x'); } new K().f"), 1);
+check("static block", c.run("var o = this; class K { static { K.v = eval('o.' + H + 'x'); } } K.v"), 1);
+check("computed key", c.run("var o = this; class K { [eval('o.' + H + 'x')]() { return 1; } } typeof K.prototype[1]"), "function");
+check("computed field key", c.run("let k = 'p'; var o = this; class K { [k] = eval('o.' + H + 'x'); } new K().p"), 1);
+check("computed field key plain", c.run("let k = 'p'; class K { [k] = 2; } new K().p"), 2);
+check("in", c.run("eval(H + 'x in this')"), true);
+check("typeof method", c.run("typeof eval('this.' + H + 'm')"), "function");
+check("static", c.run("eval('C.' + H + 's')"), 4);
+check("undeclared", kind(() => c.run("eval('this.' + H + 'nope')")), "SyntaxError");
+check("brand", kind(() => c.run("eval('({}).' + H + 'x')")), "TypeError");
+function sloppy(src) { var local = 2; return eval(src); }
+check("sloppy var", sloppy("var w = 5; w + local"), 7);
+check("sloppy with", sloppy("with ({ a: 1 }) eval('a + local')"), 3);
+check("sloppy outside", kind(() => sloppy("eval('this.' + H + 'x')")), "SyntaxError");
+check("sloppy function later", sloppy("(function () { return local; })")(), 2);
+wrong.join(" ;; ");"##;
+    assert_eq!(support::script::run(limits(), source), nothing());
+}
+
+/// The scan for `#` (`Agent::source_holds_hash`) reads every String a direct eval can get: a
+/// String of one code unit and the empty String, a `#` as the first and as the last code unit,
+/// a Latin1 String and a two-byte one (a `#` beside U+2603), and Strings made by concatenation,
+/// `slice` (also a slice of a two-byte String that holds only Latin1 code units), `String.
+/// fromCharCode(35)`, a template and `replace`. A String that holds a `#` walks (a step per
+/// slot past the first 8 in a sloppy function of 1,000 `var`s, 24 with a collection at every
+/// safe point and ten of the forms there, beyond an indirect eval of the same String); one without
+/// does not (no step beyond). U+FF03 and an escape `\u0023` in the text are no `#`. A direct and an indirect
+/// eval of each String give the same answer or the same error.
+#[test]
+fn the_scan_finds_a_hash_in_every_form_of_a_string() {
+    let count = if cfg!(feature = "collect-every-safe-point") {
+        24
+    } else {
+        1000
+    };
+    let vars: String = (0..count).map(|k| format!("var v{k} = {k}; ")).collect();
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let setup = format!(
+        "function sloppy(direct, s) {{ {vars}try {{ return String(direct ? eval(s) : (0, eval)(s)); }} catch (e) {{ return e.name; }} }}\nvar H = String.fromCharCode(35), S = \"\\u2603\";\n0;"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &r, &setup),
+        Outcome::Normal("0".to_string())
+    );
+    let cases: [(&str, bool); 23] = [
+        (r##""#""##, true),
+        (r##""""##, false),
+        (r##""1""##, false),
+        (r##""#!x\n1""##, true),
+        (r##""1 //#""##, true),
+        (r##""'" + S + "#'""##, true),
+        (r##"H + S"##, true),
+        (r##"S + H"##, true),
+        (r##""'" + S + "'""##, false),
+        (r##""1 /" + "/ #""##, true),
+        (r##""x1 //#y".slice(1, 6)"##, true),
+        (r##""#1#".slice(1, 2)"##, false),
+        (r##""1 //" + String.fromCharCode(35)"##, true),
+        (r##"`1 // ${H}`"##, true),
+        (r##"`1 // ${1}`"##, false),
+        (r##""1 // @".replace("@", "#")"##, true),
+        (r##""1 // #".replace("#", "@")"##, false),
+        (r##""1 // \uFF03""##, false),
+        (r##""this.\uFF03x""##, false),
+        (r##""this.\\u0023x""##, false),
+        (r##"(S + "1 //#").slice(1)"##, true),
+        (r##"(S + "1").slice(1)"##, false),
+        (r##""'\u00e9#'""##, true),
+    ];
+    let floor = count as i64 - 8;
+    let mut wrong = Vec::new();
+    let mut table = Vec::new();
+    // With a collection at every safe point: ten of the forms, so that the test stays in its time.
+    let collect = [0, 1, 4, 6, 7, 8, 17, 19, 20, 22];
+    for (k, (expr, holds)) in cases.into_iter().enumerate() {
+        if cfg!(feature = "collect-every-safe-point") && !collect.contains(&k) {
+            continue;
+        }
+        let mut run = |direct: bool| {
+            let script = parse(&mut agent, &r, &format!("sloppy({direct}, {expr});"));
+            let outcome = agent.evaluate_script(&script).unwrap();
+            let steps = agent.last_entry_steps().unwrap() as i64;
+            (steps, support::script::describe(&mut agent, &r, outcome))
+        };
+        let (direct, answer) = run(true);
+        let (indirect, indirect_answer) = run(false);
+        let extra = direct - indirect;
+        table.push(format!("{expr}: {extra} {answer:?}"));
+        if answer != indirect_answer {
+            wrong.push(format!(
+                "{expr}: direct {answer:?}, indirect {indirect_answer:?}"
+            ));
+        }
+        if (holds && extra < floor) || (!holds && extra > 0) {
+            wrong.push(format!("{expr}: {extra} steps beyond an indirect eval"));
+        }
+    }
+    println!("scan, {count} vars: {}", table.join("; "));
+    assert!(wrong.is_empty(), "{}", wrong.join("; "));
+}
+
+/// A host whose HostGetCodeForEval answers a String of `code`, made by the host, and whose
+/// HostEnsureCanCompileStrings sets the interrupt flag of `interrupt` once, when it holds one.
+#[derive(Default)]
+struct HashHost {
+    code: Vec<u16>,
+    interrupt: Option<swell::InterruptHandle>,
+}
+
+impl swell::Host for HashHost {
+    fn host_ensure_can_compile_strings(
+        cx: &mut swell::Cx<'_, Self>,
+        _request: &swell::CompileStrings<'_>,
+    ) -> swell::Completion<()> {
+        if let Some(handle) = cx.host_mut().interrupt.take() {
+            handle.interrupt();
+        }
+        Ok(())
+    }
+
+    fn host_get_code_for_eval(
+        cx: &mut swell::HookCx<'_, Self>,
+        _arg: swell::ObjectRef,
+    ) -> Option<swell::StringRef> {
+        let units = cx.host().code.clone();
+        cx.new_string_utf16(&units).ok()
+    }
+
+    fn host_enqueue_generic_job(_cx: &mut swell::HookCx<'_, Self>, _job: swell::Job) {}
+
+    fn host_enqueue_timeout_job(
+        _cx: &mut swell::HookCx<'_, Self>,
+        _job: swell::Job,
+        _milliseconds: f64,
+    ) {
+    }
+
+    fn host_enqueue_finalization_registry_cleanup_job(
+        _cx: &mut swell::HookCx<'_, Self>,
+        _job: swell::Job,
+    ) {
+    }
+
+    fn host_load_imported_module(_cx: &mut swell::HookCx<'_, Self>, _request: swell::LoadRequest) {}
+
+    fn host_system_utc_epoch_nanoseconds(
+        _cx: &mut swell::HookCx<'_, Self>,
+        _global: swell::ObjectRef,
+    ) -> i128 {
+        0
+    }
+}
+
+/// An agent of [`HashHost`] with `limits` and its realm.
+fn hash_agent(limits: swell::Limits) -> (swell::Agent<HashHost>, swell::Realm) {
+    let mut agent = swell::Agent::new(HashHost::default(), limits, support::host::seeds()).unwrap();
+    let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
+    else {
+        panic!("create_realm did not answer Normal");
+    };
+    (agent, realm)
+}
+
+/// The steps of the entry `source` and its answer as text: the String of a normal answer,
+/// `throw`, or the termination.
+fn hash_entry(
+    agent: &mut swell::Agent<HashHost>,
+    realm: &swell::Realm,
+    source: &str,
+) -> (u64, String) {
+    let swell::Parsed::Parsed(script) = agent
+        .parse_script(realm, swell::Source::Utf8(source), None)
+        .unwrap()
+    else {
+        panic!("{source} did not parse");
+    };
+    let outcome = agent.evaluate_script(&script).unwrap();
+    let steps = agent.last_entry_steps().unwrap();
+    let answer = match outcome {
+        HostOutcome::Normal(root) => agent
+            .with_cx(realm, |cx| {
+                let value = cx.get(&root).unwrap();
+                let string = cx.to_string(value).unwrap().unwrap();
+                cx.to_rust_string_lossy(string).unwrap()
+            })
+            .unwrap(),
+        HostOutcome::Throw(_) => "throw".to_string(),
+        HostOutcome::Terminated(termination) => format!("{termination:?}"),
+    };
+    (steps, answer)
+}
+
+/// A String a host made (HostGetCodeForEval of an object) is scanned as one a script made: in
+/// a sloppy function of 1,000 `var`s (100 with a collection at every safe point), a direct eval
+/// of a host String with a `#` (Latin1, and two-byte beside U+2603) walks and one without does
+/// not.
+#[test]
+fn a_string_from_the_host_is_scanned_as_one_from_a_script() {
+    let count = if cfg!(feature = "collect-every-safe-point") {
+        100
+    } else {
+        1000
+    };
+    let vars: String = (0..count).map(|k| format!("var v{k} = {k}; ")).collect();
+    let (mut agent, r) = hash_agent(limits());
+    let setup = format!(
+        "function sloppy(direct, o) {{ {vars}return String(direct ? eval(o) : (0, eval)(o)); }}\nvar o = {{}};\n0;"
+    );
+    assert_eq!(hash_entry(&mut agent, &r, &setup).1, "0");
+    let floor = count as i64 - 8;
+    let mut table = Vec::new();
+    for (text, holds) in [
+        ("1", false),
+        ("1 // #", true),
+        ("'\u{2603}' // #", true),
+        ("'\u{2603}'", false),
+    ] {
+        agent.host_mut().code = text.encode_utf16().collect();
+        let (direct, answer) = hash_entry(&mut agent, &r, "sloppy(true, o);");
+        let (indirect, indirect_answer) = hash_entry(&mut agent, &r, "sloppy(false, o);");
+        let extra = direct as i64 - indirect as i64;
+        table.push(format!("{text:?}: {extra} {answer}"));
+        assert_eq!(answer, indirect_answer, "{text:?}");
+        assert!(
+            if holds { extra >= floor } else { extra <= 16 },
+            "{text:?}: {extra} steps beyond an indirect eval"
+        );
+    }
+    println!("host strings, {count} vars: {}", table.join("; "));
+}
+
+/// The scan runs before the step charge of the parse and after HostEnsureCanCompileStrings: an
+/// interrupt set by that hook ends the direct eval in `Terminated(Interrupted)`, with and
+/// without a `#` in its String, and the next entry answers; with a step budget of 10 (more if
+/// one eval of `1` needs it) a direct eval of a host String of 1,000,000 code units without `#`
+/// (Latin1 and two-byte) ends in `Terminated(StepBudget)`, and the next entry answers.
+#[test]
+fn an_interrupt_or_the_step_budget_ends_the_eval_around_the_scan() {
+    let (mut agent, r) = hash_agent(limits());
+    let setup = "class C { #x = 1; m(o) { var a = 1, b = 2; return String(eval(o)); } }\nvar c = new C(), o = {};\n0;";
+    assert_eq!(hash_entry(&mut agent, &r, setup).1, "0");
+    for (text, answer) in [("1", "1"), ("this.#x", "1"), ("'#'", "#")] {
+        agent.host_mut().code = text.encode_utf16().collect();
+        let handle = agent.interrupt_handle();
+        agent.host_mut().interrupt = Some(handle);
+        assert_eq!(
+            hash_entry(&mut agent, &r, "c.m(o);").1,
+            "Interrupted",
+            "{text}"
+        );
+        assert_eq!(hash_entry(&mut agent, &r, "c.m(o);").1, answer, "{text}");
+    }
+
+    let mut probe = hash_agent(limits());
+    assert_eq!(hash_entry(&mut probe.0, &probe.1, "var o = {}; 0;").1, "0");
+    probe.0.host_mut().code = "1".encode_utf16().collect();
+    let (needed, one) = hash_entry(&mut probe.0, &probe.1, "eval(o);");
+    assert_eq!(one, "1");
+    let mut l = limits();
+    l.steps_per_entry = needed.max(10);
+    let (mut agent, r) = hash_agent(l);
+    assert_eq!(hash_entry(&mut agent, &r, "var o = {}; 0;").1, "0");
+    let mut times = Vec::new();
+    for tail in ["1", "'\u{2603}'"] {
+        let mut code: Vec<u16> = vec![u16::from(b' '); 1_000_000 - tail.encode_utf16().count()];
+        code.extend(tail.encode_utf16());
+        agent.host_mut().code = code;
+        let start = std::time::Instant::now();
+        let (_, answer) = hash_entry(&mut agent, &r, "eval(o);");
+        times.push(format!("{tail}: {:?}", start.elapsed()));
+        assert_eq!(answer, "StepBudget", "{tail}");
+        agent.host_mut().code = "1".encode_utf16().collect();
+        assert_eq!(hash_entry(&mut agent, &r, "eval(o);").1, "1");
+    }
+    println!(
+        "a String of 1,000,000 code units under a budget of {}: {}",
+        needed.max(10),
+        times.join(", ")
+    );
+}
+
+/// [`step_budget_sweep`] over the budgets below its lowest one, from `from` to `to` steps before
+/// the end of the run: the stops at each record of the walk (one step per record, 64 blocks and
+/// the method's record, before the compares of the class's record that the sweep's lowest
+/// budget stops in). Each run ends in `Terminated(StepBudget)`, and a second run at the same
+/// budget leaves `heap_bytes()` after a collection where the first left it. The default build.
+fn step_budget_sweep_below(from: u64, to: u64) {
+    const RUN: &str = "c = new C(); c.m();";
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let setup = sweep_setup();
+    let (setup_steps, total) = {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let mut steps = |source: &str| {
+            let script = parse(&mut agent, &r, source);
+            assert!(matches!(
+                agent.evaluate_script(&script).unwrap(),
+                HostOutcome::Normal(_)
+            ));
+            agent.last_entry_steps().unwrap()
+        };
+        (steps(&setup), steps(RUN))
+    };
+    assert!(setup_steps + 10 < total - from, "{setup_steps} {total}");
+    let mut ended = 0;
+    for budget in total - from..=total - to {
+        let mut l = limits();
+        l.steps_per_entry = budget;
+        let mut agent = agent_with(l).unwrap();
+        let r = realm(&mut agent);
+        assert_eq!(
+            eval_text(&mut agent, &r, &setup),
+            Outcome::Normal("0".to_string())
+        );
+        let run = parse(&mut agent, &r, RUN);
+        let mut readings = Vec::new();
+        for _ in 0..2 {
+            match agent.evaluate_script(&run).unwrap() {
+                HostOutcome::Terminated(Termination::StepBudget) => ended += 1,
+                other => panic!("{budget}: {other:?}"),
+            }
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            readings.push(agent.heap_bytes().unwrap());
+        }
+        assert_eq!(
+            readings[0], readings[1],
+            "{budget}: a stopped eval kept bytes"
+        );
+    }
+    println!(
+        "total {total}: budgets {}..={}, {ended} runs ended at the budget",
+        total - from,
+        total - to
+    );
+}
+
+/// [`step_budget_sweep_below`], 285 to 229 steps before the end: the inner records of the walk.
+#[test]
+fn step_budget_across_the_inner_records_of_the_walk_keeps_nothing() {
+    step_budget_sweep_below(285, 229);
+}
+
+/// [`step_budget_sweep_below`], 228 to 172 steps before the end: the outer records of the walk
+/// and the start of the compares of the class's record.
+#[test]
+fn step_budget_across_the_outer_records_of_the_walk_keeps_nothing() {
+    step_budget_sweep_below(228, 172);
+}
