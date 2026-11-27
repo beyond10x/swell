@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 use swell_compiler::bytecode::{Handler, Instruction};
 
 use crate::env::NameReference;
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::object::property::Key;
@@ -100,12 +101,17 @@ impl SlotValue {
 /// `object` is `None` for the empty enumerator of `undefined` and `null`. `bytes` is what the
 /// list of keys was charged (0 for the empty enumerator): it is part of the frame's `charged`
 /// while the enumerator is on the operand stack, and credited when it leaves it
-/// (`Agent::truncate_stack`) or with the frame.
+/// (`Agent::truncate_stack`) or with the frame. `chain` is the chain of objects the walk went
+/// through when it met a Proxy, which the loop reads instead of asking [[GetPrototypeOf]] again
+/// (D66), traced with the enumerator; its charge is its own and is credited when it drops, with
+/// the entry or with the frame (a generator's frame with the generator). Empty for a chain
+/// without a Proxy.
 pub(crate) struct Enumerator {
     pub(crate) object: Option<ObjectRef>,
     pub(crate) keys: Vec<Key>,
     pub(crate) next: usize,
     pub(crate) bytes: u64,
+    pub(crate) chain: ChargedVec<ObjectRef>,
 }
 
 /// One ECMAScript code execution context.
@@ -214,6 +220,9 @@ impl Frame {
                     }
                     for key in &enumerator.keys {
                         key.trace(mark);
+                    }
+                    for &object in &enumerator.chain {
+                        mark.object(object);
                     }
                 }
                 Entry::Iterator(record) => {

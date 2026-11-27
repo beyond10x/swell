@@ -1097,10 +1097,22 @@ chain_test!(
     proxy_prototype_chain_walk_on_the_promised_stack,
     PROXY_PROTOTYPE_CHAIN_WALK
 );
+chain_test!(for_in_chain_on_the_promised_stack, FOR_IN);
+
+/// The route of `for`-`in` over a trapless chain whose base's `getOwnPropertyDescriptor` trap
+/// calls `parseDeep`: the walk reaches the base through every Proxy for the key's descriptor,
+/// and so does the loop for that key's turn, which reads the chain the walk recorded (D66); the
+/// parser runs at the deepest point of both.
+const FOR_IN: Route = route(
+    "{}",
+    "new Proxy({ x: 1 }, { getOwnPropertyDescriptor: function (t, k) { parseDeep(); return Reflect.getOwnPropertyDescriptor(t, k); } })",
+    "for (var k in p) {}",
+    1,
+);
 
 /// The routes of the chain tests.
 #[cfg(feature = "collect-every-safe-point")]
-const ROUTES: [&Route; 21] = [
+const ROUTES: [&Route; 22] = [
     &BUILTIN_GET,
     &BUILTIN_SET,
     &BUILTIN_HAS,
@@ -1122,6 +1134,7 @@ const ROUTES: [&Route; 21] = [
     &BUILTIN_DEFINE_PROPERTY,
     &OWN_KEYS,
     &PROXY_PROTOTYPE_CHAIN_WALK,
+    &FOR_IN,
 ];
 
 /// The `reentry_depth` of [`chains_of_every_route_on_the_promised_stack`].

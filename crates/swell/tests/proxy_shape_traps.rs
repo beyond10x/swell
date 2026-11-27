@@ -595,9 +595,9 @@ fn i21_own_keys_of_a_non_extensible_target_must_list_no_other_key() {
 /// test262's `for-in` cases read it): `ownKeys` of the Proxy, then `getOwnPropertyDescriptor`
 /// for each String key in the order of the answer, then `getPrototypeOf`, and the walk goes on
 /// with the prototype the trap answered, whose `c` is visited though the target has no such
-/// prototype. Before each key's turn the walk of [[GetOwnProperty]] and [[GetPrototypeOf]] along
-/// that chain reads whether it is still a property ("A property that is deleted before it is
-/// processed is ignored"); no `has` trap is called.
+/// prototype. Before each key's turn [[GetOwnProperty]] of each object of the chain the walk
+/// recorded, in order, reads whether it is still a property ("A property that is deleted before
+/// it is processed is ignored"); no `has` trap is called, and `getPrototypeOf` only by the walk.
 #[test]
 fn for_in_over_a_proxy_calls_own_keys_and_get_own_property_descriptor_in_order() {
     answers(
@@ -614,7 +614,7 @@ fn for_in_over_a_proxy_calls_own_keys_and_get_own_property_descriptor_in_order()
         for (var k in p) log.push("body:" + k);
         log.join();"#,
         "ownKeys,gopd:b,gopd:hidden,gopd:a,getPrototypeOf,\
-         gopd:b,body:b,gopd:a,body:a,gopd:c,getPrototypeOf,body:c",
+         gopd:b,body:b,gopd:a,body:a,gopd:c,body:c",
     );
 }
 
@@ -1256,8 +1256,8 @@ fn for_in_visits_the_keys_of_the_prototype_the_trap_answers() {
 }
 
 /// Whether a key of a `for`-`in` over a Proxy is still a property when its turn comes is read by
-/// [[GetOwnProperty]] and [[GetPrototypeOf]] along the chain the enumeration walked, never by a
-/// `has` trap: a key of the prototype the trap answers is visited, one deleted from it before
+/// [[GetOwnProperty]] of each object of the chain the enumeration walked, never by a `has`
+/// trap: a key of the prototype the trap answers is visited, one deleted from it before
 /// its turn is not, and a key of the target shadows the same name of the prototype.
 #[test]
 fn for_in_over_a_proxy_calls_no_has_trap() {
@@ -1272,6 +1272,282 @@ fn for_in_over_a_proxy_calls_no_has_trap() {
         r.join();"#,
         "a,b,c",
     );
+}
+
+/// `for`-`in` over a Proxy of `{ a: 1, b: 2 }` whose target's prototype is a Proxy of
+/// `{ c: 3 }`, both with handlers that log each trap and forward it: the walk asks each object
+/// for its own keys, the descriptor of each String key and its prototype, once; then before
+/// each key's turn the loop asks [[GetOwnProperty]] of the objects of the chain the walk
+/// recorded, in order, until one has the key, and no object for its prototype again (D66).
+/// 11 trap calls; at `61b14ed2` there were 12 (the filter asked `p` for its prototype again
+/// before `c`), and the clause's informative definition makes 7 (it reads each object's keys
+/// and descriptors once, when it reaches them, and filters nothing).
+#[test]
+fn for_in_asks_each_object_of_the_chain_for_its_prototype_once() {
+    answers(
+        r#"var log = [];
+        function logAll(name) {
+          return {
+            ownKeys: function (t) { log.push(name + ".ownKeys"); return Reflect.ownKeys(t); },
+            getOwnPropertyDescriptor: function (t, k) { log.push(name + ".gopd:" + String(k)); return Reflect.getOwnPropertyDescriptor(t, k); },
+            getPrototypeOf: function (t) { log.push(name + ".getPrototypeOf"); return Reflect.getPrototypeOf(t); },
+            has: function (t, k) { log.push(name + ".has:" + String(k)); return Reflect.has(t, k); },
+            get: function (t, k, r) { log.push(name + ".get:" + String(k)); return Reflect.get(t, k, r); }
+          };
+        }
+        var q = new Proxy({ c: 3 }, logAll("q"));
+        var p = new Proxy(Object.setPrototypeOf({ a: 1, b: 2 }, q), logAll("p"));
+        for (var k in p) log.push("body:" + k);
+        log.join();"#,
+        "p.ownKeys,p.gopd:a,p.gopd:b,p.getPrototypeOf,q.ownKeys,q.gopd:c,q.getPrototypeOf,\
+         p.gopd:a,body:a,p.gopd:b,body:b,p.gopd:c,q.gopd:c,body:c",
+    );
+}
+
+/// A key deleted from the object that listed it is still visited while a later object of the
+/// chain the walk recorded has it (the name is still a property of the chain, found on the
+/// later object, though that one's own `b` was shadowed during the walk), and a key deleted
+/// from every object of the chain before its turn is not ("A property that is deleted before
+/// it is processed is ignored", `#sec-enumerate-object-properties`).
+#[test]
+fn a_key_deleted_where_it_was_listed_is_visited_while_a_later_object_has_it() {
+    answers_once(
+        r#"var proto = { b: 3, c: 4 };
+        var t = { a: 1, b: 2 };
+        var p = new Proxy(t, { getPrototypeOf: function () { return proto; } });
+        var r = [];
+        for (var k in p) { if (k === "a") { delete t.b; delete proto.c; } r.push(k); }
+        r.join();"#,
+        "a,b",
+    );
+}
+
+/// A key that an earlier object of the recorded chain gains after the walk, not enumerable,
+/// does not hide the same key of a later object the walk found: the clause lets the loop
+/// ignore a key only when it was deleted before its turn, and `c` never was; the clause's
+/// informative definition reads each object's keys when it reaches that object, so `c` is in
+/// no visited set when it is yielded. No case of the pinned test262 asks otherwise
+/// (`order-enumerable-shadowed.js` and `12.6.4-2.js` shadow by a property that exists before
+/// the loop starts). The loop finds `c` on the earlier object and visits it.
+#[test]
+fn a_key_an_earlier_object_gains_after_the_walk_is_visited() {
+    answers_once(
+        r#"var proto = { c: 4 };
+        var t = { a: 1 };
+        var p = new Proxy(t, { getPrototypeOf: function () { return proto; } });
+        var r = [];
+        for (var k in p) {
+          if (k === "a") Object.defineProperty(t, "c", { value: 0, enumerable: false, configurable: true });
+          r.push(k);
+        }
+        r.join();"#,
+        "a,c",
+    );
+}
+
+/// The loop keeps the chain the walk found (D66): when the body cuts an ordinary object off it
+/// (`Object.setPrototypeOf` of the object before it to `null`), a key the walk found on the
+/// object cut off is still read there and visited, and that object, held by nothing but the
+/// loop, stays held while each key's [[GetOwnProperty]] of the Proxy runs a trap that collects.
+/// At `61b14ed2` the loop asked [[GetPrototypeOf]] again, found `null` and dropped `c1`.
+#[test]
+fn the_loop_keeps_the_chain_it_found_when_a_prototype_changes() {
+    answers_with_junk(
+        r#"function cut() {
+          var y = {}; y["c" + 1] = 2;
+          return Object.create(y, { b: { value: 1, enumerable: true, configurable: true } });
+        }
+        var x = cut();
+        var p = new Proxy({ a: 1 }, {
+          getPrototypeOf: function () { return x; },
+          getOwnPropertyDescriptor: function (t, k) { junk(); return Reflect.getOwnPropertyDescriptor(t, k); }
+        });
+        var r = [];
+        for (var k in p) { if (k === "a") Object.setPrototypeOf(x, null); r.push(k); }
+        r.join();"#,
+        "a,b,c1",
+    );
+}
+
+/// The walk records the ordinary objects before the first Proxy of the chain too, and holds
+/// them from that Proxy on: here the Proxy's `ownKeys` trap cuts the object between the
+/// receiver and the Proxy off the chain (held by nothing else) and collects, and the loop still
+/// reads it at the turn of its key `m1`, which no other object of the chain has.
+#[test]
+fn the_walk_holds_the_ordinary_objects_before_the_first_proxy() {
+    answers_with_junk(
+        r#"var o = { o1: 1 };
+        var q = new Proxy({}, { ownKeys: function () { Object.setPrototypeOf(o, null); junk(); return []; } });
+        function mid() { var m = Object.create(q); m["m" + 1] = 1; return m; }
+        Object.setPrototypeOf(o, mid());
+        var r = [];
+        for (var k in o) r.push(k);
+        r.join();"#,
+        "o1,m1",
+    );
+}
+
+/// The setup of [`every_way_out_of_a_loop_over_a_proxy_gives_back_its_chain`]: `chained()` is a
+/// Proxy of three keys whose `getPrototypeOf` trap answers a new object of one key, so the walk
+/// records a chain of three objects; `trapped(mode)` is a Proxy whose `getOwnPropertyDescriptor`
+/// trap, once the walk is over (its `getPrototypeOf` trap ran), loops until the step budget
+/// (`"steps"`) or makes Strings until the memory budget (`"memory"`); `g` is a generator whose
+/// body yields inside a loop over `chained()`.
+const EXITS: &str = "function chained() { return new Proxy({ a: 1, b: 2, c: 3 }, { getPrototypeOf: function () { return { d: 4 }; } }); }\n\
+     function trapped(mode) { var walked = false; return new Proxy({ a: 1, b: 2 }, {\n\
+       getOwnPropertyDescriptor: function (t, k) {\n\
+         if (walked && mode === \"steps\") for (;;) {}\n\
+         if (walked && mode === \"memory\") { var a = []; for (;;) a.push(\"x\".repeat(4096) + a.length); }\n\
+         return Reflect.getOwnPropertyDescriptor(t, k); },\n\
+       getPrototypeOf: function () { walked = true; return null; } }); }\n\
+     function* g() { for (var k in chained()) yield k; }\n\
+     var it = null; 0;";
+
+/// Each entry of `exits` with its outcome, run in rounds on `agent` after [`EXITS`]: before
+/// and after each, one collection and a reading of `heap_bytes()`. The first two rounds grow
+/// the arenas to what a round needs; in the third every reading after an entry is the reading
+/// before it. The readings are printed.
+fn gives_back(
+    agent: &mut swell::Agent<support::host::TestHost>,
+    realm: &swell::Realm,
+    exits: &[(&str, Outcome)],
+) {
+    assert_eq!(
+        eval_text(agent, realm, EXITS),
+        Outcome::Normal("0".to_string())
+    );
+    let mut rounds = Vec::new();
+    for _ in 0..3 {
+        let mut readings = Vec::new();
+        for (source, outcome) in exits {
+            collect(agent);
+            let before = agent.heap_bytes().unwrap();
+            assert_eq!(&eval_text(agent, realm, source), outcome, "{source}");
+            assert_eq!(agent.state(), AgentState::Alive);
+            collect(agent);
+            readings.push((before, agent.heap_bytes().unwrap()));
+        }
+        rounds.push(readings);
+    }
+    println!("heap_bytes before and after each way out, per round: {rounds:?}");
+    for ((source, _), (before, after)) in exits.iter().zip(&rounds[2]) {
+        assert_eq!(before, after, "{source}");
+    }
+}
+
+/// The room of the memory exit of [`every_way_out_of_a_loop_over_a_proxy_gives_back_its_chain`]:
+/// 1 MiB, 64 KiB with the feature `collect-every-safe-point`, where each String the trap makes
+/// passes safe points that collect the realm.
+const EXIT_ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
+    1 << 16
+} else {
+    1 << 20
+};
+
+/// The chain a `for`-`in` over a Proxy recorded is given back on every way out of the loop:
+/// its end, a `break`, a throw in the body caught outside, a termination at the step budget
+/// and one at the memory budget inside the `getOwnPropertyDescriptor` trap of a key's turn,
+/// and a generator suspended in the body and then collected; after a collection
+/// `heap_bytes()` reads what it read before each ([`gives_back`]). The memory budget is the
+/// realm's reading after the setup plus [`EXIT_ROOM`], on an agent of its own with steps to
+/// spare.
+#[test]
+fn every_way_out_of_a_loop_over_a_proxy_gives_back_its_chain() {
+    let zero = || Outcome::Normal("0".to_string());
+    let mut budget = limits();
+    budget.steps_per_entry = if cfg!(feature = "collect-every-safe-point") {
+        300
+    } else {
+        20_000
+    };
+    let mut agent = agent_with(budget).unwrap();
+    let stepped = realm(&mut agent);
+    gives_back(
+        &mut agent,
+        &stepped,
+        &[
+            ("for (var k in chained()) {} 0;", zero()),
+            ("for (var k in chained()) break; 0;", zero()),
+            (
+                "try { for (var k in chained()) throw 1; } catch (e) {} 0;",
+                zero(),
+            ),
+            (
+                "for (var k in trapped(\"steps\")) {}",
+                Outcome::Terminated(Termination::StepBudget),
+            ),
+            (
+                "it = g(); var v = it.next().value; it = null; v;",
+                Outcome::Normal("\"a\"".to_string()),
+            ),
+        ],
+    );
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    let mut probe = agent_with(budget).unwrap();
+    let probe_realm = realm(&mut probe);
+    assert_eq!(eval_text(&mut probe, &probe_realm, EXITS), zero());
+    collect(&mut probe);
+    budget.memory_bytes = probe.heap_bytes().unwrap() + EXIT_ROOM;
+    let mut agent = agent_with(budget).unwrap();
+    let bounded = realm(&mut agent);
+    gives_back(
+        &mut agent,
+        &bounded,
+        &[(
+            "for (var k in trapped(\"memory\")) {}",
+            Outcome::Terminated(Termination::MemoryBudget),
+        )],
+    );
+}
+
+/// A Proxy whose `getPrototypeOf` trap answers the Proxy itself makes the walk of `for`-`in` go
+/// round without end: each round charges a step, the room of the kept stack for the object and
+/// its key, and the growth of the chain it records, so with steps to spare the memory budget
+/// ends it, in the walk, before the loop's first key (the step budget ends it with less steps:
+/// [`for_in_ends_at_a_revoked_proxy_and_at_a_cycle_of_trap_answers_and_gives_back_its_bytes`]).
+/// The budget is the realm's reading after the setup plus 128 KiB (4 KiB with the feature
+/// `collect-every-safe-point`, where each round's trap call collects the realm and what
+/// the walk kept); after a collection `heap_bytes()` reads what it read after the second of
+/// three rounds.
+#[test]
+fn a_cycle_of_get_prototype_of_answers_ends_at_the_memory_budget() {
+    let setup =
+        "var cyc = new Proxy({ a: 1 }, { getPrototypeOf: function () { return cyc; } }); 0;";
+    let room: u64 = if cfg!(feature = "collect-every-safe-point") {
+        1 << 12
+    } else {
+        1 << 17
+    };
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    let mut probe = agent_with(budget).unwrap();
+    let probe_realm = realm(&mut probe);
+    assert_eq!(
+        eval_text(&mut probe, &probe_realm, setup),
+        Outcome::Normal("0".to_string())
+    );
+    collect(&mut probe);
+    budget.memory_bytes = probe.heap_bytes().unwrap() + room;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(&mut agent, &realm, setup),
+        Outcome::Normal("0".to_string())
+    );
+    let mut readings = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(
+            eval_text(&mut agent, &realm, "var n = 0; for (var k in cyc) n++; n;"),
+            Outcome::Terminated(Termination::MemoryBudget)
+        );
+        let spent = agent.last_entry_steps().unwrap();
+        assert_eq!(agent.state(), AgentState::Alive);
+        collect(&mut agent);
+        readings.push((spent, agent.heap_bytes().unwrap()));
+    }
+    println!("steps and heap_bytes after each round: {readings:?}");
+    assert_eq!(readings[1].1, readings[2].1, "{readings:?}");
 }
 
 /// The steps of a `for`-`in` over an object with three own keys, and over a chain of three
@@ -1557,4 +1833,330 @@ fn define_property_checks_i12_before_i13() {
         r.join();"#,
         "I12,value,true,get+set",
     );
+}
+
+// The cases of the adversary's second pass: the walk of `for`-`in`, what it holds and gives
+// back, and the memory budget through it.
+
+/// `for`-`in` over a Proxy whose `getPrototypeOf` trap answers `{ a: 1 }` at its first
+/// call and `{ b: 2 }` after: the enumeration walked `{ a: 1 }`, whose `a` is enumerable and is
+/// never deleted, so the loop visits `a` (`#sec-enumerate-object-properties`: the iterator
+/// iterates over all the String keys of enumerable properties, its prototype's included; only
+/// a property deleted before it is processed is ignored). The filter of `ForInNext` reads the
+/// chain the walk recorded (D66) and does not ask the trap for the prototype a second time; at
+/// `61b14ed2` it walked from the receiver again, got `{ b: 2 }` and dropped `a`.
+#[test]
+fn for_in_visits_the_keys_of_the_prototype_the_trap_answered_first() {
+    answers_once(
+        r#"var n = 0;
+        var p = new Proxy({}, { getPrototypeOf: function () { n++; return n === 1 ? { a: 1 } : { b: 2 }; } });
+        var r = [];
+        for (var k in p) r.push(k);
+        r.join();"#,
+        "a",
+    );
+}
+
+/// `c`, a chain of three Proxies of 20 keys each (`k<level>_<i>`), whose traps answer
+/// arrays and descriptor objects made once, so that a run makes little garbage; `pads` holds
+/// the Strings that take the room of the memory sweep.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const THREE: &str = "var c = null;\n\
+  for (var d = 2; d >= 0; d--) (function (d, proto) {\n\
+    var t = {}, keys = [], descs = {};\n\
+    for (var i = 0; i < 20; i++) { var k = \"k\" + d + \"_\" + i; t[k] = i; keys.push(k); descs[k] = { value: i, writable: true, enumerable: true, configurable: true }; }\n\
+    c = new Proxy(t, { ownKeys: function () { return keys; }, getOwnPropertyDescriptor: function (t, k) { return descs[k]; }, getPrototypeOf: function () { return proto; } });\n\
+  })(d, c);\n\
+  var pads = [], started = 0; 0;";
+
+/// The room above the reading after [`THREE`] and one run that the sweep's agent has.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const SWEEP_ROOM: u64 = 1 << 17;
+
+/// The least room the sweep leaves above its pads: a String of 512 code units, which
+/// needs twice its 1,024 bytes while it is made, and the short entries between runs fit in it.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const FLOOR: u64 = 3_072;
+
+/// The memory budget cut at every 64 bytes of what `op` needs over [`THREE`]. Entries
+/// push Strings to `pads`, each half of the room left above a target (a String costs twice its
+/// length while it is made), until the room left, `memory_bytes` less `heap_bytes()` after a
+/// collection, is near the target. Then `op` (an expression) runs in a function of its own
+/// after `var h = "x".repeat(n)` in it, for `n` down to 0 by 32 (from a quarter of the first
+/// target's room, then from at least 512), so that the room `op` has grows by 64 bytes per
+/// run with no gap between targets; `h` is garbage once the entry ends, and the short
+/// entry after it that reads `started` has the target's room. The target starts at [`FLOOR`]
+/// and grows by 512 bytes (the last pads are popped first) until `op` has answered 8 runs in
+/// a row. Every outcome is the answer or
+/// `Terminated(MemoryBudget)`; after each, one collection gives `live_bytes()` and
+/// `heap_bytes()` back their readings before the run, and at the end `pads = []` and one
+/// collection give them back their readings after the warm-up. No two rooms `op` started with,
+/// sorted, are more than 64 bytes apart below the last that ended.
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn memory_sweep(op: &str) {
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    let source = |units: u64| {
+        format!(
+            "started = 0; (function () {{ var h = \"x\".repeat({units}); started = 1; \
+             return {op}; }})();"
+        )
+    };
+    let mut probe = agent_with(budget).unwrap();
+    let probe_realm = realm(&mut probe);
+    let zero = Outcome::Normal("0".to_string());
+    assert_eq!(eval_text(&mut probe, &probe_realm, THREE), zero);
+    let answer = eval_text(&mut probe, &probe_realm, &source(0));
+    assert!(matches!(answer, Outcome::Normal(_)), "{op}: {answer:?}");
+    collect(&mut probe);
+    let base = probe.heap_bytes().unwrap();
+    budget.memory_bytes = base + SWEEP_ROOM;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(eval_text(&mut agent, &realm, THREE), zero);
+    let room_now = |agent: &swell::Agent<support::host::TestHost>| {
+        budget
+            .memory_bytes
+            .saturating_sub(agent.heap_bytes().unwrap())
+    };
+    // The room left above `target` taken by pads.
+    let fill = |agent: &mut swell::Agent<support::host::TestHost>, target: u64| {
+        let mut shift = 0;
+        loop {
+            let units = (room_now(agent).saturating_sub(target) / 2) >> shift;
+            if room_now(agent) <= target + 64 || units == 0 {
+                return;
+            }
+            let pushed = eval_text(
+                agent,
+                &realm,
+                &format!("pads.push(\"x\".repeat({units})); 0;"),
+            );
+            if pushed == zero {
+                shift = 0;
+            } else {
+                shift += 1;
+                // What the refused entry made is garbage.
+                collect(agent);
+            }
+        }
+    };
+    let run = |agent: &mut swell::Agent<support::host::TestHost>, units: u64| {
+        let outcome = eval_text(agent, &realm, &source(units));
+        // What the run made, `h` with it, is garbage.
+        collect(agent);
+        let started = match eval_text(agent, &realm, "started;") {
+            Outcome::Normal(s) if s == "1" => true,
+            Outcome::Normal(s) if s == "0" => false,
+            other => panic!("reading `started` after {outcome:?}: {other:?}"),
+        };
+        (outcome, started)
+    };
+    // The warm-up: `op` twice with pads, then alone.
+    for target in [FLOOR, FLOOR + 4_096] {
+        fill(&mut agent, target);
+        run(&mut agent, 0);
+        assert_eq!(eval_text(&mut agent, &realm, "pads = []; 0;"), zero);
+        collect(&mut agent);
+    }
+    assert_eq!(run(&mut agent, 0).0, answer);
+    collect(&mut agent);
+    let live = agent.live_bytes().unwrap();
+    let heap = agent.heap_bytes().unwrap();
+    let (mut in_op, mut before_op, mut answered, mut streak) = (0u32, 0u32, 0u32, 0u32);
+    let mut rooms: Vec<u64> = Vec::new();
+    let mut last_ended = 0;
+    let mut target = FLOOR;
+    let mut last_room: Option<u64> = None;
+    while streak < 8 && target < SWEEP_ROOM / 2 {
+        while room_now(&agent) < target {
+            assert_eq!(eval_text(&mut agent, &realm, "pads.pop(); 0;"), zero);
+            collect(&mut agent);
+        }
+        fill(&mut agent, target);
+        collect(&mut agent);
+        let readings = (agent.live_bytes().unwrap(), agent.heap_bytes().unwrap());
+        let room = room_now(&agent);
+        // The first target's runs start at half its room (`h` needs twice its bytes while it is
+        // made); a later one's one run below the room the last target had, the pads leaving
+        // the room anywhere up to 64 bytes over the target.
+        let mut units = match last_room {
+            None => room / 4,
+            Some(top) => (room.saturating_sub(top) / 2 + 32).max(512).min(room / 4),
+        };
+        last_room = Some(room);
+        loop {
+            let (outcome, started) = run(&mut agent, units);
+            let left = room.saturating_sub(2 * units);
+            match &outcome {
+                Outcome::Terminated(Termination::MemoryBudget) if started => {
+                    in_op += 1;
+                    streak = 0;
+                    last_ended = last_ended.max(left);
+                }
+                Outcome::Terminated(Termination::MemoryBudget) => before_op += 1,
+                o if *o == answer => {
+                    answered += 1;
+                    streak += 1;
+                }
+                other => panic!("{op} with {left} bytes of room: {other:?}"),
+            }
+            if started {
+                rooms.push(left);
+            }
+            assert_eq!(agent.state(), AgentState::Alive);
+            collect(&mut agent);
+            assert_eq!(
+                (agent.live_bytes().unwrap(), agent.heap_bytes().unwrap()),
+                readings,
+                "{op} with {left} bytes of room: {outcome:?}"
+            );
+            if units < 32 {
+                break;
+            }
+            units -= 32;
+        }
+        target += 512;
+    }
+    assert_eq!(eval_text(&mut agent, &realm, "pads = []; 0;"), zero);
+    collect(&mut agent);
+    assert_eq!(agent.live_bytes().unwrap(), live);
+    assert_eq!(agent.heap_bytes().unwrap(), heap);
+    let mut sorted: Vec<u64> = rooms
+        .into_iter()
+        .filter(|&r| r <= last_ended + 64)
+        .collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+    let gap = sorted
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .max()
+        .unwrap_or(0);
+    println!(
+        "{op}: base {base}, heap {heap}; {in_op} ended in it, {before_op} before it, \
+         {answered} answered; rooms {:?} to {:?} below the last that ended, the widest step \
+         {gap} bytes",
+        sorted.first(),
+        sorted.last()
+    );
+    assert!(
+        in_op > 0 && answered > 0,
+        "{in_op} ended, {answered} answered"
+    );
+    assert!(gap <= 64, "a step of {gap} bytes: {sorted:?}");
+}
+
+/// The memory budget at every 64 bytes through a `for`-`in` over [`THREE`]
+/// ([`memory_sweep`]). Default mode only: with `collect-every-safe-point` each step of the
+/// loop collects, and a run costs about a second.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn memory_budget_at_every_64_bytes_through_for_in_over_three_proxies() {
+    memory_sweep("(function () { var n = 0; for (var k in c) n++; return n; })()");
+}
+
+/// The same through `JSON.stringify` of [`THREE`].
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn memory_budget_at_every_64_bytes_through_json_stringify_of_three_proxies() {
+    memory_sweep("JSON.stringify(c).length");
+}
+
+/// A `for`-`in` that meets a Proxy revoked by its body ends in the TypeError of the next
+/// key's turn, and one over a Proxy whose `getPrototypeOf` trap answers the Proxy itself ends
+/// at the step budget in the walk (with steps to spare, at the memory budget:
+/// [`a_cycle_of_get_prototype_of_answers_ends_at_the_memory_budget`]); after three rounds of
+/// both and a collection, `heap_bytes()` is what it was after the second.
+#[test]
+fn for_in_ends_at_a_revoked_proxy_and_at_a_cycle_of_trap_answers_and_gives_back_its_bytes() {
+    let mut budget = limits();
+    budget.steps_per_entry = if cfg!(feature = "collect-every-safe-point") {
+        2_000
+    } else {
+        100_000
+    };
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "function revoked() { var r = Proxy.revocable({ a: 1, b: 2 }, {}); var o = Object.create(r.proxy); o.z = 1; var seen = [];\n\
+               try { for (var k in o) { seen.push(k); if (k === \"z\") r.revoke(); } } catch (e) { seen.push(e.name); }\n\
+               return seen.join(); }\n\
+             var cyc = new Proxy({ a: 1 }, { getPrototypeOf: function () { return cyc; } });\n\
+             0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    let mut readings = Vec::new();
+    for _ in 0..3 {
+        assert_eq!(
+            eval_text(&mut agent, &realm, "revoked();"),
+            Outcome::Normal("\"z,TypeError\"".to_string())
+        );
+        assert_eq!(
+            eval_text(&mut agent, &realm, "for (var k in cyc) {}"),
+            Outcome::Terminated(Termination::StepBudget)
+        );
+        assert_eq!(agent.state(), AgentState::Alive);
+        collect(&mut agent);
+        readings.push(agent.heap_bytes().unwrap());
+    }
+    println!("heap_bytes after each round: {readings:?}");
+    assert_eq!(readings[1], readings[2], "{readings:?}");
+}
+
+/// The steps of `for`-`in` over ordinary shapes, the same as with the filter of
+/// `c8e54d7f` (HasProperty, planted back at the head of the correction in a copy): a chain of
+/// ten objects, the same with a key of the third deleted in the loop, an Array with a named
+/// key, `arguments`, a String object with a named key, a String, a function with a named key.
+#[test]
+fn for_in_over_ordinary_shapes_spends_the_steps_it_spent() {
+    for (source, steps, answer) in [
+        ("var n = 0; for (var k in o) n++; n;", 244, "10"),
+        (
+            "var n = 0; for (var k in o) { if (k === \"k0\") delete Object.getPrototypeOf(Object.getPrototypeOf(o)).k3; n++; } n;",
+            317,
+            "10",
+        ),
+        (
+            "var a = [1, 2, 3]; a.x = 4; var n = 0; for (var k in a) n++; n;",
+            157,
+            "4",
+        ),
+        (
+            "(function () { var n = 0; for (var k in arguments) n++; return n; })(1, 2, 3);",
+            71,
+            "3",
+        ),
+        (
+            "var s = new String(\"abc\"); s.x = 1; var n = 0; for (var k in s) n++; n;",
+            149,
+            "4",
+        ),
+        ("var n = 0; for (var k in \"abc\") n++; n;", 117, "3"),
+        (
+            "function f() {} f.x = 1; var n = 0; for (var k in f) n++; n;",
+            69,
+            "1",
+        ),
+    ] {
+        let mut agent = agent_with(limits()).unwrap();
+        let realm = realm(&mut agent);
+        let setup = "var o = { k9: 9 }; for (var i = 8; i >= 0; i--) { o = Object.create(o); o[\"k\" + i] = i; } 0;";
+        assert_eq!(
+            eval_text(&mut agent, &realm, setup),
+            Outcome::Normal("0".to_string())
+        );
+        let outcome = eval(&mut agent, &realm, source);
+        let spent = agent.last_entry_steps().unwrap();
+        let shown = describe(&mut agent, &realm, outcome);
+        assert_eq!(
+            (spent, shown),
+            (steps, Outcome::Normal(answer.to_string())),
+            "{source}"
+        );
+    }
 }

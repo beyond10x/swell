@@ -18,6 +18,7 @@
 //! each grows, credits the set when it returns, and answers the list with its charge, which
 //! the `for`-`in` enumerator holds (`story:for-in-key-list-charged-while-the-loop-holds-it`).
 
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
 use crate::heap::map::KeyedMap;
 use crate::host::agent::Agent;
@@ -48,6 +49,15 @@ pub(crate) enum PropertyKind {
 struct Visited {
     keys: KeyedMap<Key, ()>,
     bytes: u64,
+}
+
+/// What EnumerateObjectProperties answers a `for`-`in`: the keys found, with their charge, and
+/// the chain of objects the walk went through when it met a Proxy (the object and each
+/// prototype in the order [[GetPrototypeOf]] answered them), charged by its capacity before it
+/// grows; empty, with nothing charged, for a chain without a Proxy.
+pub(crate) struct Enumeration {
+    pub(crate) found: KeyList,
+    pub(crate) chain: ChargedVec<ObjectRef>,
 }
 
 impl<H: Host> Agent<H> {
@@ -741,7 +751,18 @@ impl<H: Host> Agent<H> {
     /// ([`Agent::reserve_kept`]), until the walk ends; the keys found are among them. The room
     /// is given back and its charge credited on every way out. A chain of ordinary objects
     /// keeps nothing and costs what it cost.
-    pub(crate) fn enumerate_object_properties(&mut self, object: ObjectRef) -> Completion<KeyList> {
+    ///
+    /// From the first Proxy on the walk also records the chain it goes through, which the
+    /// `for`-`in` loop reads instead of asking [[GetPrototypeOf]] again (D66, "the loop follows
+    /// the chain the walk found, once"): the ordinary objects before that Proxy, then each
+    /// object it reaches, in the list [`Enumeration::chain`], charged by capacity before it
+    /// grows ([`Agent::reserve_vec`]). Its charge is credited when it drops: here on an abrupt
+    /// completion, with the loop's enumerator otherwise. A chain of ordinary objects records
+    /// nothing.
+    pub(crate) fn enumerate_object_properties(
+        &mut self,
+        object: ObjectRef,
+    ) -> Completion<Enumeration> {
         let mut found = KeyList {
             keys: Vec::new(),
             bytes: 0,
@@ -750,13 +771,14 @@ impl<H: Host> Agent<H> {
             keys: KeyedMap::with_hasher(self.heap.hasher),
             bytes: 0,
         };
+        let mut chain = ChargedVec::new();
         let mark = self.kept.len();
         let mut room = self.kept_room();
-        let walked = self.enumerate_chain(object, &mut found, &mut visited, &mut room);
+        let walked = self.enumerate_chain(object, &mut found, &mut visited, &mut chain, &mut room);
         self.end_kept_room(mark, &room);
         self.heap.accounting.credit(visited.bytes);
         match walked {
-            Ok(()) => Ok(found),
+            Ok(()) => Ok(Enumeration { found, chain }),
             Err(abrupt) => {
                 self.drop_key_list(found);
                 Err(abrupt)
@@ -767,27 +789,32 @@ impl<H: Host> Agent<H> {
     /// The objects of EnumerateObjectProperties, `object` and its prototype chain, each with a
     /// step before its own keys are asked for; each list of own keys is credited once it is
     /// consumed, on every way out. From the first Proxy on, what the walk holds is kept in
-    /// `room` ([`Agent::enumerate_object_properties`]).
+    /// `room` and each object is recorded in `chain` ([`Agent::enumerate_object_properties`]).
     fn enumerate_chain(
         &mut self,
         object: ObjectRef,
         found: &mut KeyList,
         visited: &mut Visited,
+        chain: &mut ChargedVec<ObjectRef>,
         room: &mut KeptRoom,
     ) -> Completion<()> {
         let mut held = false;
+        let mut before = 0usize;
         let mut current = Some(object);
         while let Some(o) = current {
             self.charge_steps(1)?;
             if !held && self.kind_of(o)? == KindTag::Proxy {
                 held = true;
                 self.keep_visited(visited, room)?;
+                self.record_chain_before(object, before, chain, room)?;
             }
             let own_keys = if held {
                 self.reserve_kept(room, 1)?;
                 self.keep(Value::Object(o));
+                self.push_vec(chain, o)?;
                 self.held_own_keys(o, room)?
             } else {
+                before = before.saturating_add(1);
                 self.own_property_keys(o)?
             };
             let walked = self.enumerate_own_keys(o, &own_keys, visited, found);
@@ -798,16 +825,42 @@ impl<H: Host> Agent<H> {
         Ok(())
     }
 
-    /// Whether `key`, found by EnumerateObjectProperties, is still a property when its turn in
-    /// a `for`-`in` comes ("A property that is deleted before it is processed is ignored",
-    /// `#sec-enumerate-object-properties`): [[GetOwnProperty]] of `object` and then of each
-    /// prototype its [[GetPrototypeOf]] answers, the methods the enumeration itself calls. No
-    /// `has` trap runs: unlike HasProperty, the walk does not hand over to a Proxy's
-    /// [[HasProperty]], so a key of the prototype a `getPrototypeOf` trap answers is found where
-    /// the enumeration found it. A step per prototype, as OrdinaryHasProperty charges, so a
-    /// chain of ordinary objects costs what HasProperty cost. The caller holds `object` and
-    /// `key`; a Proxy met on the way is kept while its traps run (one value outside a room, the
-    /// next one replaces it) and released on every way out.
+    /// At the first Proxy of the walk, the `count` ordinary objects before it, from `object` on,
+    /// recorded in `chain` and kept in room charged to `room` first: a trap may cut one of them
+    /// off the chain while the loop still reads it. No code ran since the walk passed them, so
+    /// their [[GetPrototypeOf]], ordinary, answers the same objects again, with no step.
+    fn record_chain_before(
+        &mut self,
+        object: ObjectRef,
+        count: usize,
+        chain: &mut ChargedVec<ObjectRef>,
+        room: &mut KeptRoom,
+    ) -> Completion<()> {
+        self.reserve_vec(chain, count)?;
+        self.reserve_kept(room, count)?;
+        let mut current = Some(object);
+        for _ in 0..count {
+            let Some(o) = current else {
+                return Err(self.fault());
+            };
+            self.keep(Value::Object(o));
+            self.push_vec(chain, o)?;
+            current = self.get_prototype_of(o)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `key`, found by EnumerateObjectProperties over a chain in which the walk met no
+    /// Proxy, is still a property when its turn in a `for`-`in` comes ("A property that is
+    /// deleted before it is processed is ignored", `#sec-enumerate-object-properties`):
+    /// [[GetOwnProperty]] of `object` and then of each prototype its [[GetPrototypeOf]] answers,
+    /// the methods the enumeration itself calls. A chain that had a Proxy is read from the list
+    /// the walk recorded instead (`for_in_next` in `interp/dispatch.rs`). No `has` trap runs:
+    /// a Proxy put into the chain after the walk is asked [[GetOwnProperty]] and
+    /// [[GetPrototypeOf]], not [[HasProperty]]. A step per prototype, as OrdinaryHasProperty
+    /// charges, so a chain of ordinary objects costs what HasProperty cost. The caller holds
+    /// `object` and `key`; a Proxy met on the way is kept while its traps run (one value outside
+    /// a room, the next one replaces it) and released on every way out.
     pub(crate) fn enumeration_has_property(
         &mut self,
         object: ObjectRef,
@@ -1083,9 +1136,10 @@ mod tests {
         agent
             .create_data_property(child, length, Value::Number(2.5))
             .unwrap();
-        let list = agent.enumerate_object_properties(child).unwrap();
-        assert_eq!(*list, [Key::Index(0), length, a, c]);
-        agent.drop_key_list(list);
+        let enumeration = agent.enumerate_object_properties(child).unwrap();
+        assert_eq!(*enumeration.found, [Key::Index(0), length, a, c]);
+        assert!(enumeration.chain.is_empty());
+        agent.drop_key_list(enumeration.found);
         assert_eq!(agent.has_own_property(child, b), Ok(true));
         assert_eq!(agent.has_own_property(child, a), Ok(false));
         assert_eq!(agent.length_of_array_like(child), Ok(2.0));
@@ -1743,6 +1797,35 @@ mod tests {
         let thrown = agent.create_data_property_or_throw(object, b, Value::Number(2.0));
         assert!(is_type_error(&mut agent, thrown));
         assert_eq!(agent.has_own_property(object, b), Ok(false));
+    }
+
+    /// An object of 40 keys made at run time, from a script.
+    const FORTY_KEYS: &str = "var o = {}; for (var i = 0; i < 40; i++) o[\"k\" + i] = i;";
+
+    /// EnumerateObjectProperties over a chain of ordinary objects (40 keys and their prototype)
+    /// records no chain and charges what it charged before D66: the account rises by the list
+    /// of keys found and nothing else, and the kept stack is as it was.
+    #[test]
+    fn an_ordinary_chain_records_no_chain_and_charges_only_its_keys() {
+        let (mut agent, realm) = roomy_agent();
+        let object = script_object(
+            &mut agent,
+            &realm,
+            &format!("{FORTY_KEYS} Object.create(o, {{ z: {{ value: 1, enumerable: true }} }})"),
+        );
+        let (length, capacity) = (agent.kept.len(), agent.kept.capacity());
+        let used = agent.heap.accounting.used();
+        let enumeration = agent.enumerate_object_properties(object).unwrap();
+        assert_eq!(enumeration.found.len(), 41);
+        assert!(enumeration.chain.is_empty());
+        assert_eq!(enumeration.chain.capacity(), 0);
+        assert_eq!(agent.heap.accounting.used(), used + enumeration.found.bytes);
+        assert_eq!(
+            (agent.kept.len(), agent.kept.capacity()),
+            (length, capacity)
+        );
+        agent.drop_key_list(enumeration.found);
+        assert_eq!(agent.heap.accounting.used(), used);
     }
 
     /// An agent in an entry of a realm, with a budget of 256 MiB and no step limit to reach.
