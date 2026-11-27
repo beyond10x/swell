@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T20:57:36Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-08-conformance-close",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/close8 at d61ed17b, the unit's two full runs on the build node and the coordinator's checks over the run files, before the merge into wave/big-2",
+    "reference": "test262-slice 08 9478 18803 0 0 9478 9478 0 0; test262 total 53801 8982 7 44812 37097 7713 2; checks (1) to (7) of the story hold; no outcome differs from the base run; test262-check exit 0; test262-moves: 2031 case(s) moved; host-requirements-check with 8 delivered exit 0"
+  }
+}
