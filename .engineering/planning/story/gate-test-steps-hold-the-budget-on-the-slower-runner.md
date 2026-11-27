@@ -4,11 +4,11 @@ id: story:gate-test-steps-hold-the-budget-on-the-slower-runner
 kind: story
 status: active
 title: The gate's test steps hold 120 s on the forge's slower runner
-summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in 147.6 s of their 120: one runner took 1.94 times the CPU seconds. The steps end within 120 s on that runner (about 62 s on the faster one) with the budget unchanged, the log of check names the runner''s CPU, and the local gate bounds the CPU seconds on the build node. Lane unit 6 of wave big-2.'
+summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in 147.6 s of their 120: one runner took 1.94 times the CPU seconds. The steps end within 120 s and within 29.5 yardsticks on that runner with the budget unchanged, the log of check names the runner''s CPU. Lane unit 6 of wave big-2 took the tests of swell::main to opt-level 1 (117.6 s, 30.2 yardsticks on the forge); lane unit 7 takes more of the step test there.'
 relations:
 - informed_by: story:realm-size-lane-within-its-share
 - informed_by: story:slow-lane-holds-its-bound-on-the-slower-runner
-revision: 8
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T10:38:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T10:38:24Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
@@ -99,8 +99,8 @@ collect step. The forge's job `check` took 6 min 49 s in run 45972624878.
 The gate's test steps end within 120 s on a forge runner that takes 1.94 times the CPU
 seconds of run 45972624878 for the same work, with the budget as it is. `GATE_TIME_BUDGET`
 is not raised, no step leaves the clock, and no test leaves the gate. No test moves into the
-lane `slow` and the lane does not change: it has no room
-(`story:slow-lane-holds-its-bound-on-the-slower-runner`).
+lane `slow` and no task of the lane changes (item 5 says what the lane then runs): it has
+no room (`story:slow-lane-holds-its-bound-on-the-slower-runner`).
 
 1. Built (`92f3d55`). The runner is named: `check` prints, after `gate-time-start` and
    before the first test step, one line `gate-runner: <n> cores, <model name>, <MemTotal> kB,
@@ -178,10 +178,102 @@ lane `slow` and the lane does not change: it has no room
    cannot see the forge's wall time; the report says so in one line, and what is left is
    the coordinator's to file.
 
+5. The seventh unit of the lane. The forge read the sixth unit's head at 117.6 s of 120 and
+   30.2 yardsticks ("As delivered"); the bound of the acceptance is 29.5. More of the step
+   `test` runs at opt-level 1, inside option A of
+   `approval-record:wave-big-2-lane-unit-6-cut` (the step `test` at opt-level 1, the stack
+   tests at opt-level 0 behind the guard, debug assertions and overflow checks on). The
+   lists of item 2 give what the step still runs at opt-level 0, in CPU seconds on the
+   build node: the library tests of swell 24.1, the tests of the test262 runner 19.6, of
+   the parser 17.2, the tests of `swell::main` outside the run at opt-level 1 24.6 (of
+   them the 17 tests of `round_trip_planes!` 8.0), of swell-num 8.9, of the other crates
+   11.8.
+   - What moves into the run at opt-level 1:
+     - every test of the library of swell (the binary `swell`). No test under
+       `crates/swell/src` sets a thread's stack size, and the step `test-collect` runs
+       them at opt-level 1 already;
+     - every test of the package `swell-num` (the binaries `swell-num::main` and
+       `swell-num`): the crate has no dependency, and no test of it reads a stack, a clock
+       it judges by, or a child process;
+     - every test of the package `swell-test262` (the binaries `swell-test262::main` and
+       `swell-test262`; its executable holds no test) but for the two tests of the list
+       below;
+     - the 17 tests that the macro `round_trip_planes!` of
+       `crates/swell/tests/builtins_uri.rs` writes. They call no stack helper. The unit
+       writes the macro's calls in the form `language_parts!` of
+       `crates/swell/tests/language.rs` has (a `#[test]` line and a `fn <name>` line for
+       each test), so the rule prints them "other"; the tests' names and bodies do not
+       change, and `taskfiles/realm-room-tests.awk` does not change.
+   - What stays at opt-level 0, by name: a new variable of `Taskfile.yml`,
+     `TEST_OPT0_TESTS`, one plain line of pairs `<binary> <test>`, names tests of a moved
+     binary that stay in the run at opt-level 0. `test-opt1-vars-check` holds its value
+     as it holds the other three, and `GATE_VARIABLES` gets it on a line of its own. The
+     reason of each pair stands in the summary of the task `test`, not in a comment. It
+     starts with two tests of `swell-test262::main`:
+     `run::eval_script_cases_declare_throw_answer_and_fail_on_a_refusal_and_the_nesting_limit`
+     and `run::runs_file_names_the_refusal_and_the_thrown_error`. They are a sample, one
+     for each fixture tree that holds a case at the parser's nesting limit (`eval-script`
+     and `refused`): with them the gate still runs the runner's worker thread at that
+     limit with unoptimized frames. The other tests that read those trees move; what they
+     hold is what the runner prints. The bound of the stack itself is held at opt-level 0
+     by the parser's tests and by the stack tests of `swell::main`, which do not move. A
+     moved test that fails at opt-level 1 goes on the list with its output in the report;
+     the unit changes no test and no engine code to make one pass. A pair that names a
+     test the list without a filter does not hold fails the step, naming the pair.
+   - What stays at opt-level 0 as it is: the tests of `swell::main` the rule prints "stack"
+     or does not print (the 33 tests of the macros `reaches_the_reentry_limit!` and
+     `chain_test!` call `stack_with_room`), and every test of the packages of the parser,
+     the compiler, the regexp and unicode crates and the command line.
+   - The run at opt-level 1 stays one `cargo nextest run` in the profile `collect` without
+     the feature, built by one `cargo nextest run --no-run` in `build-tests` before
+     `build-collect`; `TEST_OPT1_ARGS` names the packages, and what holds its value
+     (`test-opt1-vars-check`, the summaries, the planted scripts) follows the new value.
+     The guard `SWELL_NO_STACK_TESTS=1` is set for the whole run, as now. The executable
+     `swell-test262` that the runner's tests start is the one cargo builds for the run
+     they are in (`CARGO_BIN_EXE_swell-test262`).
+   - The two filters. `test-split` writes the `default-filter` of each run from the rule's
+     list, the moved binaries and `TEST_OPT0_TESTS`, and its check of the written line
+     (today: as many `test(=` as the rule prints "other") follows the new form. The filter
+     of the run at opt-level 0 is the complement of the other, as now.
+   - Every test runs once: the check of `test-split` over the three lists holds for every
+     binary. The step prints the line `test: swell::main <a> at opt-level 1, <b> at
+     opt-level 0` as now, and after it one new line `test: <n> tests at opt-level 1, <m>
+     at opt-level 0` over the workspace: n is the count of `.out/test-list-opt1.txt`, m
+     that of `.out/test-list-opt0.txt`, and n plus m is the count of the list without a
+     filter. `TEST_OPT1_PROFILE_TEST` stays in the run at opt-level 1.
+   - The summed line keeps its form and its meaning: p and f are sums over both runs; i is
+     the count of the list without a filter less p and f; b is the count of test binaries
+     of the workspace, each counted once, 19 on the base. Today `test-sum` reads b and i
+     from the run at opt-level 0, whose filter then leaves whole binaries out; the unit
+     says in its report where it reads them from. The ten `gate-slowest test` lines are
+     taken over both runs, as now.
+   - The lane `slow` reads the same rule, so two of its parts run the 17 tests in another
+     place, with no task of the lane changed. In `slow-tests` the collect mode runs them
+     in its part at opt-level 1, where it ran them at opt-level 0 (the module is one of
+     the lane's: it holds a stack test). `test-realm-sizes` runs what the room rule does
+     not print "other", and ran the 17 only because it could not read them; it no longer
+     runs them at each size of the realm. They read no heap and set no budget, which is
+     that rule's reason for leaving a test out.
+   - Not changed: `taskfiles/realm-room-tests.awk`, `taskfiles/gate-time.yml`,
+     `taskfiles/collect-mode.yml`, `taskfiles/stack-profiles.yml`, `taskfiles/test262.yml`,
+     `taskfiles/nextest.yml`, `taskfiles/forge.yml`, `.cargo/`, `.config/`, `Cargo.toml`,
+     every `crates/*/Cargo.toml`, every file under `crates/*/src`, `.github/workflows/`,
+     `conformance/`, and in `Taskfile.yml` the tasks of the lane `slow`. The unit changes
+     `crates/swell/tests/builtins_uri.rs`, in `Taskfile.yml` the tasks `test`,
+     `test-split`, `test-sum`, `build-tests`, `test-opt1-vars-check`, the variables of the
+     run at opt-level 1 and `GATE_VARIABLES`, and under `tests/gate/` the scripts that
+     hold the old forms (`test-runs-each-test-once-at-one-opt-level.sh`,
+     `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh`,
+     `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh` and any other that reads
+     `--test main` or the filter line) and new ones. `AGENTS.md`, `CHANGELOG.md` and
+     `README.md` are the coordinator's: the unit writes their text into its notes.
+
 ## Acceptance
 
-Checked by the coordinator on the wave's second pull request, not a condition of the
-unit's report:
+Checked by the coordinator on the pull request that carries a unit of this story, not a
+condition of a unit's report. Read on the wave's second pull request for the sixth unit:
+the first line did not hold ("As delivered"). Read again on the pull request that carries
+the seventh unit:
 
 - The log of the first attempt of `check` on the forge holds one line `gate-runner: <n>
   cores, <model name>, <kB> kB, sh is <sh>` before the first `gate-time <step>` line, and
@@ -253,16 +345,88 @@ Checked on the unit's report:
 - `slot --timeout 30m task check-runner` exits 0 on the head with the digest line set as
   above, and `task gate-selftest` passes with the new scripts.
 
+Checked on the report of the seventh unit (item 5):
+
+- Base and head: the base is `9a8ad008`, the commit of `wave/big-2` the unit's branch
+  starts at; the head is the unit's last commit. A run on the base is a run on a detached
+  checkout of it in the unit's worktree, with a clean tree. The digest line is set for the
+  gate runs and put back as written above for the sixth unit; base and head have the same
+  line (the digest does not cover `crates/*/tests/`, `Taskfile.yml` or `tests/gate/`).
+- The moved tests: the lines of `.out/test-list-opt1.txt` on the head that
+  `.out/test-list-opt1.txt` on the base does not hold. The report gives their count for
+  each binary (`swell`, `swell-num`, `swell-num::main`, `swell-test262`,
+  `swell-test262::main`, and 17 of `swell::main`).
+- The cut, read in one pool job on the head (`slot --timeout 30m --fetch <a directory
+  under .out/> sh <the script>`; the script is not committed). The job builds both
+  profiles first. Then it runs the moved tests twice with the repository's
+  `.config/nextest.toml` (not the step's two files) and one `-E` that names them: once
+  with `TEST_NEXTEST_ARGS`, once with `TEST_OPT1_ARGS` and the environment of the run at
+  opt-level 1. Each test is started through a runner script
+  (`CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`) that writes the CPU seconds, user plus
+  system, of the test's own process and its children. Neither run compiles a crate, and
+  each runs as many tests as there are moved tests. The sum over all moved tests at
+  opt-level 1 is at most 0.40 of the sum at opt-level 0; a sum over 0.40 stops the unit
+  with the two lists. The report gives both sums, the sums for each binary (not bounded)
+  and the load at the start and the end of the job.
+- Nothing left the gate: the line `<b> test binaries: <p> passed, <f> failed, <i>
+  ignored` of `test` is the same on base and head (19, 2532, 0, 1), and so are those of
+  `test-collect` and `test-doc`. The line `test: swell::main <a> at opt-level 1, <b> at
+  opt-level 0` reads a 17 higher and b 17 lower than on the base (1647 and 123). In the
+  new line `test: <n> tests at opt-level 1, <m> at opt-level 0`, n plus m is p plus f plus
+  i of the summed line (2533), and n is a plus the counts of the other moved binaries
+  given above.
+- The list holds, for each test t of `TEST_OPT0_TESTS`: `cargo nextest list
+  --message-format oneline` with the arguments, the configuration file and the
+  environment of the run at opt-level 1 and `-E 'test(=<t>)'` prints no line for it, and
+  with those of the run at opt-level 0 it prints one. The report quotes the lines, and
+  for a test it added to the two of item 5 the test's output at opt-level 1.
+- The split holds: `slot task gate-selftest` runs planted scripts that show the step red,
+  with the test named, when a test of a moved binary other than `swell::main` is in
+  neither run and when one is in both; red, with the pair named, when `TEST_OPT0_TESTS`
+  names a test the list without a filter does not hold; and red before any test runs when
+  a caller gives `TEST_OPT0_TESTS` or `TEST_OPT1_ARGS` a value. They plant the filter, the
+  list or the variable; nothing is built. Every script under `tests/gate/` that passed on
+  the base passes on the head; the report lists the scripts it changed and the new ones,
+  each with its seconds run alone.
+- The diff: `git diff --name-only <base>..<head>` lists `Taskfile.yml`,
+  `crates/swell/tests/builtins_uri.rs` and files under `tests/gate/`, and nothing else.
+  The lines of `cargo nextest list --message-format oneline` that hold
+  `every_code_point_of_plane_` are 17 and the same on base and head (`diff` prints
+  nothing).
+- The lane, without a run: `awk -f taskfiles/realm-room-tests.awk` over the files
+  `test-realm-sizes` hands it prints the same lines on base and head but for 17 more
+  "other" lines, the 17 tests; with `-v rule=stack` over the files `slow-tests` hands it,
+  the same. The report quotes the two counts of each.
+- The lane, one run: `slot --timeout 30m task slow-tests` on base and on head. Its lines
+  differ only in the two lines of the collect mode: 17 tests less in the part at
+  opt-level 0 and 17 more in the part at opt-level 1, with the sum of passed over the two
+  the same and no test failed. The report quotes the lines of both runs.
+- The build before the clock: `CARGO_TARGET_DIR=target/<name> slot --timeout 30m task
+  build-tests` once on base and once on head, each with a name of its own whose directory
+  does not exist before the job. The report gives the seconds the pool prints for each
+  job, the line `build-tests opt-level 1: Finished ... in <t>` of each, the load, the
+  line `build-collect: <n> test executables in <target>/collect/deps, none with a .debug_
+  section` of each, and the crates that the build of the run at opt-level 1 compiles on
+  the head and not on the base (the `Compiling` lines of `.out/build-tests-opt1.log`).
+- `slot --timeout 30m task check-runner` exits 0 on the head with the digest line set as
+  above. The report quotes its lines `gate-runner`, both `test:` lines, the summed line,
+  `gate-time test`, `gate-time test-steps`, `gate-cpu test-steps` and `build-tests
+  opt-level 1`, and the same lines of one such run on the base taken in the job before or
+  after it. No bound is set on these two runs: the node gives two levels of CPU seconds
+  for one code ("As delivered").
+
 ## Out of scope
 
 - The forge's choice of runner, a larger or a paid runner, more jobs for `check`: the
   operator's.
-- The tests of the other crates and the library tests of swell at opt-level 1: their tests
-  of a stack bound (`crates/syntax/tests/sources.rs`, `crates/compiler/tests/compile.rs`,
-  the regexp and unicode crates, the test262 runner, the command line) read unoptimized
-  frames and have no rule and no guard.
-- The tests a macro writes in `swell::main` (52, 8.9 CPU seconds at opt-level 0): the rule
-  does not print them; they stay at opt-level 0.
+- The tests of the parser, the compiler, the regexp and unicode crates and the command
+  line at opt-level 1: their tests of a stack bound (`crates/syntax/tests/sources.rs`,
+  `crates/compiler/tests/compile.rs`) read unoptimized frames and have no rule and no
+  guard. The 17 parts of `every_nesting_kind_fits_the_stack_bound` are most of the
+  parser's seconds.
+- The 33 tests of `swell::main` that the macros `reaches_the_reentry_limit!` and
+  `chain_test!` write: they call `stack_with_room` and stay at opt-level 0, not printed
+  by the rule.
 - The step `test-collect` and the collect step's modules: unchanged.
 - The cuts of the second body (merged cases, shared realms, sweeps by a stride, scripts
   that read one product): not taken; their limit is in the context above.
