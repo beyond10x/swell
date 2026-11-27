@@ -48,7 +48,7 @@ scope:
   path: crates/syntax/tests/sources/refused/class-declaration.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/class-expression.js
-revision: 12
+revision: 13
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:45Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
@@ -114,3 +114,37 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Running a class (`story:class-definition-evaluation`); the parse of fields, private names and static blocks and their early errors (`story:class-element-syntax-and-early-errors`); SuperCall and the heritage's run (`story:derived-classes-and-super-call`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `classsyntax` of wave big-2 delivered the story on `impl/classsyntax` (`1e671094`,
+correction at `7494b14c`), merged into `wave/big-2` at `8af6770`. Where the delivery differs
+from the text above:
+
+- Class methods do not pass `method_head` of `parser/expression.rs`, which appends a `Property`
+  to an object literal under construction. `parser/class.rs` reads an element with `key_or`,
+  `computed_name` and `accessor_kind` (made `pub(super)`, bodies unchanged) and with
+  `begin_function` and `function_rest`.
+- `crates/syntax/src/parser/function.rs` is written, outside the Writes line, by the smallest
+  change that compiles: the exhaustive match in `Parser::parameters` takes the three new
+  kinds (`FieldInitializer` and `StaticBlock` with `Getter`, no parameter list;
+  `ClassConstructor` with the methods, FormalParameters).
+- `class_early_errors` in `early.rs` is a function of its own, called by the walk for each node
+  before its own checks; it makes the class's children strict for the walk, with a `Restore`
+  step. A constructor's duplicate parameters answer the method's message.
+- `HOLDS` carries `#[rustfmt::skip]`, so the list keeps one line per construct.
+- Counts that differ from the text: `NESTING_KINDS` was `[&str; 62]` on the unit's base (the
+  text: 61) and is `[&str; 64]`, so the acceptance's `grep` reads `[&str; 64]`;
+  `crates/syntax/tests/sources/refused/` went from 14 files to 12 (the text: 16 on its base);
+  `early-errors/class-*.js` are 24 files (the text: 22), the two more being
+  `class-method-name-octal.js` and `class-method-name-octal-escape.js`; `held/` has 5 files
+  (the text: 4), the one more being `held/class-string-constructor.js`.
+- The correction added the test `sources::code_after_a_class_is_not_strict` (36 sources through
+  the three parse entries, 108 answers) after the adversary's pass showed that two planted
+  changes of the strictness after a class passed every test of the unit.
+- The hold `class heritage` could not be seen while `class` was held. Its fixture
+  `held/class-expression-heritage.js` and the test `sources::the_heritage_hold_stands_at_extends`
+  come with `story:class-definition-evaluation`, which lifts the hold of `class`.
+- Measured by the unit at `SWELL_FULL_COUNTS=1`:
+  `sources::every_nesting_kind_fits_the_stack_bound_part_8` takes 2.69 CPU s on the unit's base
+  and 2.66 s with the unit, over the 2.5 s bound; the unit did not move it.

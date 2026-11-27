@@ -328,10 +328,16 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
   (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
   `builtins_iterators::each_next_is_charged`, 4.2 CPU seconds, was still killed while the
-  load rose from 37 to 165 (`story:lane-tests-under-2-5-cpu-seconds`). Two tests are over
-  the bound and stay so: `determinism::host_133_same_calls_same_hooks_same_outcomes` (4.2 to
-  4.4 s in collect mode, gate and lane, three runs of its corpus) and `language` part 3 (2.2
-  to 2.5 s in the collect gate). The full count of the parser's stack-bound check is 7,500
+  load rose from 37 to 165 (`story:lane-tests-under-2-5-cpu-seconds`).
+  `determinism::host_133_same_calls_same_hooks_same_outcomes` takes 1.65 s alone in collect
+  mode (300 steps per entry, 5 squares), and the `language` scripts run in 47 parts of at
+  most 1.36 s. The parts read no room of the realm, so `taskfiles/realm-room-tests.awk`
+  leaves them to the gate's `test-collect`; `test-realm-sizes` does not run them. A file of
+  `crates/swell/tests/language/` other than a script `*.js` fails
+  `language::the_language_directory_holds_only_scripts_the_parts_run`. A test whose count in
+  collect mode is made smaller for the bound keeps the earlier count under
+  `SWELL_FULL_COUNTS=1` when that count takes at most 2.5 s alone there; a smaller count is
+  shown red in collect mode with the defect the test exists for planted. The full count of the parser's stack-bound check is 7,500
   levels on three quarters of the stack of `parser_nesting` 10,000, and the gate count 2,500
   on a quarter; the derivation is in `crates/syntax/tests/sources.rs`.
 - A new language script stays under 0.5 CPU seconds per run, and a new test under 2 s alone,
@@ -366,7 +372,24 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `use crate::support;`, runs the generator and commits `tests/main.rs` with it; on a merge
   conflict in `tests/main.rs` the generator is run again. A test is named by
   `--test main -E 'test(/^<stem>::/)'`; a test that starts its own binary again passes
-  `test_path!("<name>")`; the test list keeps `<package>::<module>::<test>`.
+  `test_path!("<name>")`; the test list keeps `<package>::<module>::<test>`. In `swell`'s
+  `tests/main.rs` the generator writes `#[cfg(any(not(test_modules), test_modules =
+  "<stem>"))]` before each module but `support` (for the packages its arguments name, default
+  `swell`; no variable chooses them). `crates/swell/Cargo.toml` declares the cfg (`[lints.rust]
+  unexpected_cfgs` with `check-cfg = ["cfg(test_modules, values(any()))"]`), so a misspelled
+  feature or cfg name in a test module still fails the build under `-D warnings`. The gate's
+  builds pass no such cfg and compile every module, and `gate-vars`, the first step of the
+  gate and of the lane `slow`, fails when `RUSTFLAGS`, `CARGO_ENCODED_RUSTFLAGS`,
+  `CARGO_BUILD_RUSTFLAGS` or a `CARGO_TARGET_<triple>_RUSTFLAGS` names `test_modules`. The
+  lane's stack builds pass `--cfg test_modules` and one `--cfg test_modules="<stem>"` per
+  module of `STACK_MODULE_LIST` (`taskfiles/stack-profiles.yml`) through `cargo rustc ...
+  --test main -- <cfgs>`, which reaches the test target alone, so the library's release build
+  stays the test262 runner's. A story that adds a stack test to `test-stack-profiles` adds its
+  module's line to `STACK_MODULE_LIST` and its own line to `STACK_TEST_LIST`;
+  `stack-modules-check` refuses a listed test whose module the list does not name and a test
+  the list names twice. One more module costs the release build about 0.6 s when its tests
+  use the shared `TestHost`, about 15 s when it declares a `Host` of its own (each host type
+  is a monomorphized copy of the engine in the test binary).
 - The repository's `.cargo/config.toml` builds the dev and test profiles without debug
   information (`debug = false`, `strip = "debuginfo"`), on the forge and here alike;
   `test-binaries-check` shows it with `readelf -S` on every test executable. A stack bound is
@@ -738,7 +761,7 @@ session coordinates; this section is its procedure, taken from how surf is run
   `crates/syntax/src/` runs `SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell-syntax
   --profile default --test main` in its rounds, and a unit that changes a test with a gate
   count runs that test at its full count in both collection modes; a unit that adds anything
-  to the realm (a builtin, an intrinsic, a property of one) runs `slot --timeout 30m task
+  to the realm (a builtin, an intrinsic, a property of one) runs `slot task
   test-realm-sizes` before it reports and names every red test with its size and mode; the
   coordinator runs every part of `task slow` on the wave branch's tip beside the gate before
   each push of a wave branch (one pool job per part where the whole exceeds a job's time),
@@ -749,6 +772,35 @@ session coordinates; this section is its procedure, taken from how surf is run
   `Math.random` to every realm without that run, and two tests that made a String between
   two readings of `heap_bytes()`, or read an answer as a String in a room of 39,310 bytes,
   met the arena of Strings growing by 53,248 bytes. The same command failed here.
+  The lane states its bound (the operator, 2026-11-26): 900 s for `task slow` on the forge
+  and 600 s for each of its parts. Its last step `slow-time-sum` (`taskfiles/gate-time.yml`,
+  whose defaults `SLOW_LANE_BUDGET` and `SLOW_PART_BUDGET` are the one place of both) prints
+  `slow-time lane <sum> of 900, longest part <part> <s> of 600` and fails the lane over
+  either bound, naming the part and its seconds or the sum and its three slowest parts; it
+  reads the lane's clock as well (`.out/gate-time/start`, which `gate-time-start` writes as
+  the first step of `task slow`) and fails the lane when the clock is over 900 s, naming the
+  clock's seconds and the sum of the timed parts, so a step without its own `slow-time` line
+  is bounded too. It runs only as the last step of `task slow`, in the same task process:
+  called on its own it refuses the clock an earlier run left (the PID in
+  `.out/gate-time/cpu`), and a part run as its own pool job (`slot task slow-test262`, ...)
+  has no lane sum; the lane's sum on this host comes from one `slot --timeout 30m task slow`
+  run in one job. `tests/gate/slow-time-refuses-a-part-over-its-bound.sh`,
+  `tests/gate/slow-time-refuses-the-lane-over-its-bound.sh`,
+  `tests/gate/slow-time-refuses-a-lane-whose-untimed-part-ran-over-its-bound.sh` and
+  `tests/gate/slow-time-refuses-a-clock-of-another-run.sh` hold the refusals. A bound is not
+  raised to make a run pass; a part over it gets a story. `test-realm-sizes` runs the tests
+  that read the realm's room (`taskfiles/realm-room-tests.awk`) in the default mode and the
+  collect mode at every size (`REALM_COLLECT=all`; the collect mode found seven of the eight
+  size-red tests of `story:tests-hold-at-any-size-of-the-realm` alone, each at one size), on
+  the two test-profile builds `slow-tests` makes (`story:realm-size-lane-within-its-share`);
+  it hands nextest the tests it does not run in a generated file,
+  `.out/realm-sizes-nextest.toml` (a copy of `.config/nextest.toml` with one `default-filter`
+  line), given with `--config-file`, never on the command line
+  (`tests/gate/test-realm-sizes-hands-nextest-a-long-list-of-tests.sh`).
+  `build-stack-profiles` compiles only the modules of `STACK_MODULE_LIST` in the release and
+  the `stack-debug` profile; `test-stack-profiles` runs `build-stack-profiles` first (a fresh
+  tree costs it about a second) and then those binaries through cargo-nextest
+  (`--binaries-metadata`), so it never runs a binary older than the sources.
 - **A merged wave branch is compiled before a unit is based on it.** On 2026-11-22 the twelfth
   unit of slice 3 was merged on its own report into a branch that had moved since its base:
   the merge applied without a conflict and the crate did not compile, because two units had

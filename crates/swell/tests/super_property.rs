@@ -1123,32 +1123,60 @@ function t(f) { try { f(); return 'none'; } catch (e) { return e.constructor ===
     );
 }
 
-/// The body of the stack test: re-entries through a getter and a setter reached through
-/// `super`, and through the `toString` of the key of `super[k]` and of `super[k] += 1`, one
-/// agent each.
-fn reach_through_super() {
-    for through in [
-        "({ __proto__: { get a() { return f(); } }, m() { return super.a; } }).m()",
-        "({ __proto__: { set a(v) { f(); } }, m() { super['a'] = 1; } }).m()",
-        "({ __proto__: {}, m() { return super[{ toString: function () { f(); return 'a'; } }]; } }).m()",
-        "({ __proto__: { a: 1 }, m() { super[{ toString: function () { f(); return 'a'; } }] += 1; } }).m()",
-    ] {
-        support::stack::reach_through(through, support::stack::BUILTINS_REENTRY);
-    }
-}
+/// The forms of the stack tests below: re-entries through a getter and a setter reached through
+/// `super`, and through the `toString` of the key of `super[k]` and of `super[k] += 1`. Each
+/// form is a test of its own, on an agent of its own, at the depth the four had as one test
+/// (2.4 s alone with a collection at every safe point in the test profile, opt-level 0, on
+/// 2026-11-27, over the bound of 2 s).
+const THROUGH_SUPER: [&str; 4] = [
+    "({ __proto__: { get a() { return f(); } }, m() { return super.a; } }).m()",
+    "({ __proto__: { set a(v) { f(); } }, m() { super['a'] = 1; } }).m()",
+    "({ __proto__: {}, m() { return super[{ toString: function () { f(); return 'a'; } }]; } }).m()",
+    "({ __proto__: { a: 1 }, m() { super[{ toString: function () { f(); return 'a'; } }] += 1; } }).m()",
+];
 
 /// `Limits::min_stack_bytes` through `super` (decision 3): on seven eighths of the promised
-/// stack, a script reaches `reentry_depth` re-entries through the accessors and keys of Super
-/// References and parses 1,000 nested brackets at the deepest, without a stack overflow.
-#[test]
-fn super_re_enters_the_interpreter_on_the_promised_stack() {
+/// stack, the script of `body` reaches `reentry_depth` re-entries through `super` and parses
+/// 1,000 nested brackets at the deepest, without a stack overflow; `name` is the test's.
+fn re_enters_through_super(name: &str, body: fn()) {
     let stack = support::host::stack_with_room(support::stack::stack_limits(
         support::stack::BUILTINS_REENTRY,
     ));
-    support::stack::on_bounded_stack(
-        crate::support::stack::test_path!("super_re_enters_the_interpreter_on_the_promised_stack"),
-        stack,
-        reach_through_super,
-    )
-    .unwrap();
+    support::stack::on_bounded_stack(crate::support::stack::test_path!(name), stack, body).unwrap();
+}
+
+/// [`re_enters_through_super`] through a getter reached through `super.a`.
+#[test]
+fn super_re_enters_the_interpreter_on_the_promised_stack() {
+    re_enters_through_super(
+        "super_re_enters_the_interpreter_on_the_promised_stack",
+        || support::stack::reach_through(THROUGH_SUPER[0], support::stack::BUILTINS_REENTRY),
+    );
+}
+
+/// [`re_enters_through_super`] through a setter reached through `super['a'] = 1`.
+#[test]
+fn super_re_enters_the_interpreter_through_a_setter_on_the_promised_stack() {
+    re_enters_through_super(
+        "super_re_enters_the_interpreter_through_a_setter_on_the_promised_stack",
+        || support::stack::reach_through(THROUGH_SUPER[1], support::stack::BUILTINS_REENTRY),
+    );
+}
+
+/// [`re_enters_through_super`] through the `toString` of the key of `super[k]`.
+#[test]
+fn super_re_enters_the_interpreter_through_a_key_on_the_promised_stack() {
+    re_enters_through_super(
+        "super_re_enters_the_interpreter_through_a_key_on_the_promised_stack",
+        || support::stack::reach_through(THROUGH_SUPER[2], support::stack::BUILTINS_REENTRY),
+    );
+}
+
+/// [`re_enters_through_super`] through the `toString` of the key of `super[k] += 1`.
+#[test]
+fn super_re_enters_the_interpreter_through_a_compound_key_on_the_promised_stack() {
+    re_enters_through_super(
+        "super_re_enters_the_interpreter_through_a_compound_key_on_the_promised_stack",
+        || support::stack::reach_through(THROUGH_SUPER[3], support::stack::BUILTINS_REENTRY),
+    );
 }

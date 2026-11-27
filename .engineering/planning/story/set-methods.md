@@ -19,7 +19,7 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
@@ -66,3 +66,46 @@ test262. The full run is not the unit's: the unit runs the runner on a part of t
 ## Out of scope
 
 The rest of `Set` (`story:map-and-set`); the cases of these methods that define a `class` or use a BigInt (`docs/plan/slice-09/close-later.tsv`, the conformance close); `Iterator` helpers (slice 15).
+
+## As delivered
+
+The unit `setmethods` of wave big-2 delivered the story on `impl/setmethods` (`d5791fc9`,
+corrections at `8022f1c`, `d86c630` and `18c744e1`), merged into `wave/big-2` at `fbddbb5`.
+Where the delivery differs from the text above:
+
+- `crates/swell/tests/builtins_set_methods.rs` has 25 tests, not 13: the story's 13, the
+  adversary's 8 cases of its pass (two of them red before the correction: `union` through
+  `next` and through the getter of `size` on the promised stack) and 4 stack tests of the
+  correction (`intersection` through `has`, `keys` and `next`, `isDisjointFrom` through
+  `return`). The acceptance's first command counts 25 under `builtins_set_methods::`.
+- The frames of a re-entry got smaller; `STACK_BYTES_PER_REENTRY` did not change.
+  GetSetRecord runs in `run_set_methods_builtin` before the method's own steps, which run in
+  one function per method; `take_key`, `take_entry` and `set_record_error` hold the work that
+  runs no code. Bytes per re-entry in the dev profile, before and after: the getter of `size`
+  13,503 and 10,304, `has` 12,463 and 9,824, `keys` 11,792 and 9,503, `next` 13,568 and
+  10,287, `return` 13,375 and 9,999. In the profile `stack-debug` the largest route of the
+  seven methods needs 12,385,880 bytes at depth 1,000 of the 12,838,560 the tests run on.
+- Four tests keep the story's count in the default mode only and take a smaller one with
+  `collect-every-safe-point`, each shown red there with its defect planted (at the story's
+  counts they took 2.1 to 5.9 CPU seconds in the lane's collect build):
+  `a_throwing_callback_leaves_no_cursor` 1,000 rounds and 10;
+  `the_result_keeps_its_keys_across_a_collection` 50 objects and 2;
+  `get_set_record_rejects_a_nan_size_a_negative_size_and_a_non_callable_has_or_keys` all
+  seven methods in both codes and `union` and `isDisjointFrom` in sloppy code;
+  `union_with_an_endless_set_like_ends_at_the_memory_budget` a room of 64 KiB and 32 KiB.
+  These counts do not read `SWELL_FULL_COUNTS`.
+- `crates/swell/tests/builtins_map_and_set.rs` is written, outside the Writes line: the
+  expected own keys of `%Set.prototype%` in `the_surface_of_map_set_and_their_iterators` gain
+  the seven methods in the order of the clauses (a second list, `METHODS_AFTER_SIZE`, beside
+  `PROTOTYPE_METHODS` in `builtins/set/mod.rs`).
+- Three tests of other stories read `heap_bytes()` before the realm's first growth and were
+  red at realm size 128 with the seven functions:
+  `builtins_map_and_set::a_set_of_10000_keys_is_charged_and_credited`,
+  `builtins_number_format::a_room_below_the_temporary_ends_in_the_memory_budget` and
+  `builtins_object_enumeration::for_in_over_a_long_string_object_is_charged_before_its_keys_exist`.
+  Each now makes its first object before its first reading. A fourth,
+  `promise_statics::the_values_of_a_pending_promise_all_are_charged_until_it_settles`, was red
+  in the collect mode at the real size of the realm; since `18c744e1` its first round runs
+  over twice as many promises and its bounds are compared with a round of `Promise.race`.
+- No row of `crates/swell/tests/builtins_symbol_values.rs` changes: each of the seven throws
+  the `TypeError` of RequireInternalSlot before it reads a Symbol.

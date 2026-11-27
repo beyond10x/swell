@@ -42,7 +42,7 @@ scope:
   path: crates/swell/tests/builtins_weak_collections.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
@@ -90,3 +90,31 @@ test262. The full run is not the unit's: the unit runs the runner on a part of t
 ## Out of scope
 
 `WeakRef`, `FinalizationRegistry` and `$262.gc` (slice 16; the cases of the slice that read them are in no list of this slice); `Map.prototype.getOrInsert*` and `Map.groupBy` (`story:map-upsert-and-group-by`); the cases of slice 9 that need slice 8 or 12 (`docs/plan/slice-09/close-later.tsv`, the conformance close).
+
+## As delivered
+
+The unit `weak` of wave big-2 delivered the story on `impl/weak` (`34c0e5d5`, correction at
+`17f4ef5d`), merged into `wave/big-2` at `6e9b7fa`. Where the delivery differs from the text
+above:
+
+- `crates/swell/src/heap/map.rs` is written, though the story lists it under "Not written":
+  `KeyedMap::growth_for(additional)` answers the room of the next table, or nothing when the
+  map has the room or rehashes in place, and `KeyedMap::reserve` takes its decision from it.
+  The adversary's first pass showed that `weak_insert` charged the bytes of a larger table
+  when the map then rehashed in place and took no byte; the rule "grow or rehash in place"
+  now exists once. The acceptance's `git diff --quiet` check exits 1 for `heap/map.rs` and
+  leaves that file out.
+- The file `crates/swell/tests/builtins_weak_collections.rs` and the unit tests of the
+  collector hold 29 tests of the unit, not 13: the story's 13, the adversary's 10 cases of its
+  pass (one of them red before the correction) and the correction's own (among them
+  `a_rehash_in_place_counts_no_byte_toward_the_next_collection` and
+  `get_or_insert_computed_reentered_on_one_map_ends_at_the_reentry_limit`).
+- Measured by the coordinator on the merged unit head in the lane's collect build, one
+  thread: the slowest of the 23 tests whose name holds `weak` or `ephemeron` takes 1.231 s
+  (`weak_collections_at_the_edges_of_their_clauses`), 1.175 s at the full counts. Measured by
+  the unit alone in the default build: the slowest of its 29 takes 0.539 s.
+- The reading of `heap_bytes()` after `create_realm` rose with the four intrinsics and the
+  head word per slot of the collector's workspace; the figure of the wave's tip is in
+  `CHANGELOG.md`.
+- test262 on the unit's merged head: the story's 247 cases with the guard,
+  `passed 403 bound 403 B 156 F 247 R 0`.

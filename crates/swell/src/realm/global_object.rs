@@ -97,6 +97,8 @@ impl<H: Host> Agent<H> {
             ),
             ("Date", Intrinsic::Date),
             ("Reflect", Intrinsic::Reflect),
+            ("WeakMap", Intrinsic::WeakMap),
+            ("WeakSet", Intrinsic::WeakSet),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;

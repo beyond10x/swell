@@ -162,20 +162,23 @@ tasks:
       conformance/test262/expected.txt, and the digest of its sources checked against
       conformance/test262/expected.digest; slow-tests, the tests with a gate count at their
       full counts; test-realm-sizes, the tests of swell that read the realm's room with each
-      realm padded by k host functions for several k, in the default mode at each k and with a
-      collection at every safe point at the smallest and the largest, on the two builds
-      slow-tests made; and build-stack-profiles with test-stack-profiles, the
-      stack tests in the release profile and in stack-debug, the dev profile with full debug
-      information (the gate runs them in the dev profile without it). The
-      workflow .github/workflows/slow.yml runs it on a push to main and on a pull request, each
-      only when it changes a path of the workflow's list (a source of the digest, the expected
-      file or the digest file among them), and on a run started by hand on a branch.
+      realm padded by k host functions for several k, in the default mode and with a
+      collection at every safe point at each k, on the two builds slow-tests made; and
+      test-stack-profiles, which builds first (build-stack-profiles), the stack tests in the
+      release profile and in stack-debug, the dev profile with full debug information (the
+      gate runs them in the dev profile without it), built with the modules of swell's tests
+      that hold them only (taskfiles/stack-profiles.yml, STACK_MODULES). The workflow
+      .github/workflows/slow.yml runs it on a push to main and on a pull request, each only
+      when it changes a path of the workflow's list (a source of the digest, the expected file
+      or the digest file among them), and on a run started by hand on a branch.
       Prints "slow-time <part> <seconds>" after each part. Last, slow-time-sum
       (taskfiles/gate-time.yml) prints "slow-time lane <sum> of 900, longest part <part>
-      <seconds> of 600" and fails the lane when a part ran over 600 s or the lane over 900 s,
+      <seconds> of 600" and fails the lane when a part ran over 600 s, or the sum of the parts
+      or the lane's clock (.out/gate-time/start, written by the lane's first step) over 900 s,
       the operator's bounds of 2026-11-26 (story realm-size-lane-within-its-share), naming the
-      part and its seconds or the lane's sum. A part that fails stops the lane there, as
-      before, and slow-time-sum does not run.
+      part and its seconds, the lane's sum or the clock's seconds, so a step without its own
+      time line is bounded too. A part that fails stops the lane there, as before, and
+      slow-time-sum does not run.
     silent: true
     cmds:
       - task: gate-vars
@@ -189,7 +192,6 @@ tasks:
       - task: test-realm-sizes
       - task: gate-time
         vars: {STEP: test-realm-sizes, LABEL: slow-time}
-      - task: build-stack-profiles
       - task: test-stack-profiles
       - task: gate-time
         vars: {STEP: stack-profiles, LABEL: slow-time}
@@ -294,10 +296,10 @@ tasks:
         LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" .out/realm-sizes-build.log | awk '/^ *Finished / { sub(/^ */, ""); print "build-realm-sizes: " $0 }'
 
   test-realm-sizes:
-    desc: Run the tests of swell that read the realm's room with each realm padded by k host functions, for each k of REALM_SIZES in the default mode and at its ends with a collection at every safe point too; a part of the lane slow, and the command a unit that adds to the realm runs before it reports.
+    desc: Run the tests of swell that read the realm's room with each realm padded by k host functions, for each k of REALM_SIZES in the default mode and with a collection at every safe point at each k; a part of the lane slow, and the command a unit that adds to the realm runs before it reports.
     summary: |
-      Run the tests of swell that read the realm's room in the mode of the step test, and at
-      the ends of the list with the feature collect-every-safe-point too, with
+      Run the tests of swell that read the realm's room in the mode of the step test, and with
+      the feature collect-every-safe-point at each k too, with
       SWELL_TEST_REALM_FUNCTIONS=<k>, for each k of REALM_SIZES (default "4 11 17 38 64 128
       200"; a value given replaces the list): every
       realm a test makes through support::host::create_realm or support::host::realm is padded
@@ -320,18 +322,19 @@ tasks:
       tests run too, whole). Each test found red for the size of the realm before (the eight of
       story tests-hold-at-any-size-of-the-realm, the two of 5078361a) is a "room" test.
 
-      The modes: the default mode at every k, the collect mode at the ends of the list, its
-      smallest and its largest k (REALM_COLLECT, default "ends"; "all" runs the collect mode at
-      every k as before). The two of 5078361a were red at 200, one of them in the collect mode
-      only, so 200 keeps both modes; a test turned red at 128 in both modes on 2026-11-26, and
-      the default mode there finds it. What the collect mode no longer runs is the sizes between
-      the ends, for a test that only that mode turns red there and the default mode at the
-      same k does not. Why: the collect mode runs in the test profile with the feature
-      (opt-level 0), the build slow-tests makes, not in the profile collect of the step
-      test-collect (opt-level 1), which the lane would build for this part alone (point 2); at
-      opt-level 0 a collect run costs about four times a default one, most of it one test
-      (builtins_json_parse::parse_gives_back_its_charges_on_every_way_out, 24 to 28 s alone),
-      and five of them cost more than the lane's room. build-realm-sizes builds both.
+      The modes: the default mode and the collect mode at every k (REALM_COLLECT, default
+      "all"; "ends" runs the collect mode at the smallest and the largest k only, for a quicker
+      look by hand). The collect mode keeps every size because the defects this step exists for
+      show at single sizes, and most of them in that mode alone: seven of the eight of story
+      tests-hold-at-any-size-of-the-realm were red in the collect mode only, each at one growth
+      of the realm; of the two of 5078361a, termination was red at 200 in the collect mode only;
+      the proxy test of 2026-11-26 is red at 128 alone. Both modes run in the test profile
+      (opt-level 0), the builds slow-tests makes, not in the profile collect of the step
+      test-collect (opt-level 1), which the lane would build for this part alone (story
+      realm-size-lane-within-its-share, point 2). There a test stays under 2 CPU seconds in
+      the collect mode too: builtins_json_parse::parse_gives_back_its_charges_on_every_way_out,
+      21.5 s of the 22.7 s collect run at k = 4 before, nests 200 levels in that mode and 2,000
+      under SWELL_FULL_COUNTS=1 (its way_out_depth). build-realm-sizes builds both.
       First it prints "realm-sizes: <r> of <n> tests of swell::main read the realm's room
       (taskfiles/realm-room-tests.awk); <o> others do not run here" and fails when r is 0,
       then "realm-sizes: the default mode at k = <list>, the collect mode at k = <list>".
@@ -362,7 +365,7 @@ tasks:
       file. tests/gate/test-realm-sizes-hands-nextest-a-long-list-of-tests.sh holds this.
     vars:
       REALM_SIZES: '{{.REALM_SIZES | default "4 11 17 38 64 128 200"}}'
-      REALM_COLLECT: '{{.REALM_COLLECT | default "ends"}}'
+      REALM_COLLECT: '{{.REALM_COLLECT | default "all"}}'
     env:
       RUSTFLAGS: -D warnings
     silent: true
@@ -486,8 +489,21 @@ tasks:
       task prints each of them that has a value from the command line, the environment or a
       task file's own defaults, as "gate: variables in effect: NAME=value ...". The SPEC_ ones and
       the SITE_DATA_ ones (taskfiles/site.yml, included flat) always show, with their defaults;
-      any other name on the line was set by the caller. It never
-      fails. A new gate variable is added to GATE_VARIABLES in the change that adds it.
+      any other name on the line was set by the caller. A new gate variable is added to
+      GATE_VARIABLES in the change that adds it.
+
+      It fails in one case, after that line: a flag variable of cargo in the environment
+      (RUSTFLAGS, CARGO_ENCODED_RUSTFLAGS, CARGO_BUILD_RUSTFLAGS or a
+      CARGO_TARGET_<triple>_RUSTFLAGS) whose value names test_modules, the cfg that makes swell's
+      one test binary compile only some of its modules (taskfiles/test-main.sh). go-task lets an
+      exported variable win over a task's own env, so such a value would reach every build of
+      the gate and of the lane slow, which run gate-vars first, and leave swell::main with a
+      part of its tests in silence. It prints "gate: <variable> names test_modules (<value>);
+      the gate and the lane slow build every module of swell's tests, and only
+      build-stack-profiles selects some, by cargo rustc arguments" for each. build-stack-profiles
+      passes the cfg after "cargo rustc ... --", not in the environment, and is not refused.
+      The planted script tests/gate/gate-vars-refuses-rustflags-naming-test-modules.sh holds
+      it.
     vars:
       GATE_VARIABLES: >-
         GATE_ROOT GATE_CRATES GATE_LOCK
@@ -503,13 +519,27 @@ tasks:
         TEST262_MOVES TEST262_LATER_PARTS
         GATE_NEXTEST_STEPS GATE_TIME_BUDGET GATE_CPU_BOUNDS GATE_SELFTEST_DIR GATE_SELFTEST_JOBS GATE_SELFTEST_TREE
         GATE_RUNNER_ENV GATE_TEST_BUILD_JSON
-        REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET
+        REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
     cmds:
       - |
         set="{{range $n := splitList " " .GATE_VARIABLES}}{{with index $ $n}} {{$n}}={{.}}{{end}}{{end}}"
         if [ -n "$set" ]; then echo "gate: variables in effect:$set"; else echo "gate: variables in effect: none"; fi
+        env | LC_ALL=C awk '
+          {
+            eq = index($0, "=")
+            if (eq == 0) next
+            n = substr($0, 1, eq - 1)
+            v = substr($0, eq + 1)
+            if (n != "RUSTFLAGS" && n != "CARGO_ENCODED_RUSTFLAGS" && n != "CARGO_BUILD_RUSTFLAGS" && n !~ /^CARGO_TARGET_[A-Z0-9_]+_RUSTFLAGS$/) next
+            if (index(v, "test_modules") == 0) next
+            gsub(/\037/, " ", v)
+            printf "gate: %s names test_modules (%s); the gate and the lane slow build every module of swell'"'"'s tests, and only build-stack-profiles selects some, by cargo rustc arguments\n", n, v
+            bad = 1
+          }
+          END { exit bad }
+        '
 
   python-check:
     desc: Fail, naming each, when a file of the tree is a Python file.

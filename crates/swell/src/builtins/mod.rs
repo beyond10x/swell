@@ -66,6 +66,8 @@ pub(crate) mod regexp;
 pub(crate) mod set;
 pub(crate) mod string;
 pub(crate) mod symbol;
+pub(crate) mod weak_map;
+pub(crate) mod weak_set;
 
 use crate::host::Host;
 use crate::host::agent::Agent;

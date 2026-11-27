@@ -110,9 +110,72 @@ Every number below comes from the gate, `task check`, on the released commit.
   (`story:super-property-and-super-syntax`).
 - `new.target` parses and runs in functions, arrow functions, generators, `async` functions
   and direct eval code (`story:new-target-meta-property`).
+- `WeakMap` and `WeakSet` (`#sec-weakmap-objects`, `#sec-weakset-objects`), a story of the ninth
+  slice: the constructors with their adders `set` and `add` (the loop of `Map` and `Set`, a step
+  per entry), `WeakMap.prototype.delete`, `get`, `has`, `set`, `getOrInsert` and
+  `getOrInsertComputed`, `WeakSet.prototype.add`, `delete` and `has`, and their
+  `@@toStringTag`. A key is an object or a Symbol that CanBeHeldWeakly (`#sec-canbeheldweakly`):
+  a Symbol of `Symbol.for` is refused with a `TypeError` by `set`, `add` and `getOrInsert*`, a
+  well-known Symbol is accepted. The table is the keyed hash map of `heap/map.rs` with the
+  heap's hasher, each growth charged before it and credited when the object is freed; a rehash
+  of the table in place, once deleted entries used up its room, is charged nothing; the box of
+  the kind is charged with the object. The collector holds the entries weakly by linear
+  ephemeron marking: a WeakMap's trace reports the value of an entry whose key is marked and
+  puts any other entry on a pending list headed at its key's slot, which the mark phase empties
+  when the key is marked; after marking, every marked weak table drops its entries whose key is
+  not marked, so a key reachable only through the values of such entries is freed with them,
+  in one collection (`story:weak-map-and-weak-set`).
+- The set methods of `Set.prototype`, a story of the ninth slice: `union`, `intersection`,
+  `difference`, `symmetricDifference`, `isSubsetOf`, `isSupersetOf` and `isDisjointFrom`, with
+  GetSetRecord over a set-like (its `size`, `has` and `keys`). Each picks the side it iterates
+  by the clause's size comparison, walks `this` with a cursor of its table (an entry a `has`
+  callback deletes before the walk reaches it is skipped, one it adds is visited), closes the
+  set-like's iterator where the clause closes it, and answers a new plain `Set` of the current
+  realm (no species). One step per entry of `this` visited and per key read from the set-like,
+  the result's table charged to the memory budget, every callback counted against the depth
+  bounds. The own keys of `%Set.prototype%` stand in the order of the clauses
+  (`story:set-methods`).
 
 ### Changed
 
+- The lane `slow` states its bound: `task slow` fails when it ran over 900 s or one of its
+  parts over 600 s, naming the part and its seconds (`slow-time-sum`); it also fails a lane
+  whose clock ran over 900 s, so a step without its own time line is bounded. `test-realm-sizes`
+  runs the tests that read the realm's room (by the rule of `taskfiles/realm-room-tests.awk`)
+  in the default mode and with a collection at every safe point at every size of
+  `REALM_SIZES`, on the builds `slow-tests` makes; it no longer builds the profile `collect`,
+  and it hands nextest its list of tests in a generated configuration file, so it runs at any
+  count of tests. `builtins_json_parse::parse_gives_back_its_charges_on_every_way_out` nests
+  200 levels in the collect mode without `SWELL_FULL_COUNTS` (2,000 with it and in the
+  default mode). The workflow `slow` starts on a change of `taskfiles/gate-time.yml`,
+  `taskfiles/realm-room-tests.awk` and `.config/nextest.toml` too
+  (`story:realm-size-lane-within-its-share`).
+- The lane `slow` builds the stack tests' binary with their modules only:
+  `build-stack-profiles` passes `--cfg test_modules` and the modules of `STACK_MODULE_LIST`
+  (`taskfiles/stack-profiles.yml`) to the test target of `swell` through `cargo rustc`, so
+  the release and `stack-debug` builds compile `limits_scripts`, `eval_stack` and `support`
+  (9 tests) and not every test, and the library's release build stays the test262 runner's.
+  `test-stack-profiles` builds them first and runs them through cargo-nextest.
+  `stack-modules-check` refuses a stack test outside the listed modules and a test named
+  twice. The generator `taskfiles/test-main.sh` writes the module cfgs into `swell`'s
+  `tests/main.rs`, and `crates/swell/Cargo.toml` declares the cfg `test_modules`, so the lint
+  `unexpected_cfgs` still refuses a misspelled feature in a test module; every build of the
+  gate compiles every module, as before, and `gate-vars` fails when a caller's `RUSTFLAGS`
+  (or `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`, `CARGO_TARGET_<triple>_RUSTFLAGS`)
+  names `test_modules`.
+- The tests over 2 CPU seconds alone in the lane's collect build (a collection at every safe
+  point, opt-level 0) run under that bound: smaller counts in collect mode for `host_133`, the
+  memory-budget fill of `termination`, five tests of Map and Set, two of async generators,
+  `for_await`, `property_index`, `tagged_templates` and two of `new_target`; with
+  `SWELL_FULL_COUNTS=1` four of them run their earlier count again, under 2.5 s. The surface
+  test of Map and Set is three tests, its random operations two tests over two seeds, the
+  re-entry through `super` four, the parse cases of `new.target` two; the `language` scripts
+  run in 47 parts, the 13 try-completion scripts each split by `break` and `continue`, and
+  `test-realm-sizes` no longer runs the parts, which read no room of the realm. Every smaller
+  count was shown red with the defect it tests planted. The collect runs of
+  `test-realm-sizes` went from 2,588 to 1,626 test-seconds on the build node (the sums of
+  cargo-nextest's JUnit files, measured at different loads)
+  (`story:realm-size-lane-within-its-share`).
 - `swell_syntax::parse_eval` and `parse_eval_with` take `context: impl Into<EvalContext>` in
   place of `strict_caller: bool`: the new public `EvalContext` holds the caller's strictness
   and PerformEval's four flags (`in_function`, `in_method`, `in_derived_constructor`,

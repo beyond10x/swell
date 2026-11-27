@@ -229,6 +229,14 @@ pub(crate) enum Intrinsic {
     DatePrototype,
     /// `%Reflect%` (28.1), `story:reflect-namespace`: the global `Reflect`.
     Reflect,
+    /// `%WeakMap%` (24.3.1), `story:weak-map-and-weak-set`: the global `WeakMap`.
+    WeakMap,
+    /// `%WeakMap.prototype%` (24.3.3).
+    WeakMapPrototype,
+    /// `%WeakSet%` (24.4.1): the global `WeakSet`.
+    WeakSet,
+    /// `%WeakSet.prototype%` (24.4.3).
+    WeakSetPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -301,6 +309,10 @@ pub(crate) struct Intrinsics {
     date: ObjectRef,
     date_prototype: ObjectRef,
     reflect: ObjectRef,
+    weak_map: ObjectRef,
+    weak_map_prototype: ObjectRef,
+    weak_set: ObjectRef,
+    weak_set_prototype: ObjectRef,
 }
 
 impl Intrinsics {
@@ -372,6 +384,10 @@ impl Intrinsics {
             Intrinsic::Date => self.date,
             Intrinsic::DatePrototype => self.date_prototype,
             Intrinsic::Reflect => self.reflect,
+            Intrinsic::WeakMap => self.weak_map,
+            Intrinsic::WeakMapPrototype => self.weak_map_prototype,
+            Intrinsic::WeakSet => self.weak_set,
+            Intrinsic::WeakSetPrototype => self.weak_set_prototype,
         }
     }
 
@@ -451,6 +467,10 @@ impl Intrinsics {
             self.date,
             self.date_prototype,
             self.reflect,
+            self.weak_map,
+            self.weak_map_prototype,
+            self.weak_set,
+            self.weak_set_prototype,
         ] {
             mark.object(object);
         }
@@ -652,6 +672,8 @@ impl<H: Host> Agent<H> {
         )?;
         let (date, date_prototype) = self.create_date_constructor(making)?;
         let reflect = self.create_reflect_object(making)?;
+        let (weak_map, weak_map_prototype) = self.create_weak_map_constructor(making)?;
+        let (weak_set, weak_set_prototype) = self.create_weak_set_constructor(making)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -709,6 +731,10 @@ impl<H: Host> Agent<H> {
             date,
             date_prototype,
             reflect,
+            weak_map,
+            weak_map_prototype,
+            weak_set,
+            weak_set_prototype,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

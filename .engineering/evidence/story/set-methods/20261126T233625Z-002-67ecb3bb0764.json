@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T23:36:25Z",
+  "actor": "human:operator",
+  "artifact": "story:set-methods",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/setmethods at 18c744e1, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1336 passed and 1 skipped in both modes; lib 251 passed; clippy 0; fmt 0"
+  }
+}

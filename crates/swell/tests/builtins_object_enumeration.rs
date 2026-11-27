@@ -442,19 +442,34 @@ fn global_long_string(agent: &mut Agent<TestHost>, realm: &Realm) {
 /// (`size_of::<Key>()` bytes each) before it builds it. With 1 MiB left beyond the String,
 /// `for (var k in new String(s)) break;` ends in `Terminated(MemoryBudget)` at that list:
 /// nothing the walk over the keys would make is charged (the heap holds less than 64 KiB more
-/// than before the script when the run ends), and the agent answers the next script.
+/// than before the script when the run ends), and the agent answers the next script. Each
+/// agent runs the script once over a String of two code units and collects before its reading,
+/// so the arenas the script needs have grown for it before (at some sizes of the realm the
+/// first object it makes grows the arena of objects by about 104 KiB, which stays charged).
 #[test]
 fn for_in_over_a_long_string_object_is_charged_before_its_keys_exist() {
     let mut limits = limits();
     limits.steps_per_entry = 10_000_000;
+    let warm = |agent: &mut Agent<TestHost>, realm: &Realm| {
+        assert_eq!(
+            eval_text(agent, realm, "for (var k in new String(\"ab\")) break; 1"),
+            Outcome::Normal("1".to_string())
+        );
+        assert!(matches!(
+            agent.collect().unwrap(),
+            swell::Outcome::Normal(_)
+        ));
+    };
     let mut measure = agent_with(limits).unwrap();
     let measured = realm(&mut measure);
     global_long_string(&mut measure, &measured);
+    warm(&mut measure, &measured);
     let base = measure.heap_bytes().unwrap();
     limits.memory_bytes = base + (1 << 20);
     let mut agent = agent_with(limits).unwrap();
     let realm = realm(&mut agent);
     global_long_string(&mut agent, &realm);
+    warm(&mut agent, &realm);
     let before = agent.heap_bytes().unwrap();
     assert_eq!(
         eval_text(&mut agent, &realm, "for (var k in new String(s)) break; 1"),

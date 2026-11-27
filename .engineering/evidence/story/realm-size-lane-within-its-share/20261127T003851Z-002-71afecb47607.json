@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T00:38:51Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/lanetests at 4f4d1a28, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1389 passed and 1 skipped in both modes; lib 269 passed; clippy 0; fmt 0; test-stack-profiles: release 4 passed, stack-debug 3 passed and 1 failed (limits_scripts::min_stack_bytes_is_enough_through_builtins, red on wave/big-2 without the unit, corrected by the unit stackjoin)"
+  }
+}

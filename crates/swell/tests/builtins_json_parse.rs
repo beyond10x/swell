@@ -940,14 +940,36 @@ fn parse_readings(limits: Limits, units: &[u16], reviver: Option<&str>) -> Vec<(
     readings
 }
 
+/// The nesting of the valid text and of the text that ends in the middle of
+/// [`parse_gives_back_its_charges_on_every_way_out`]: 2,000 in the default mode and under
+/// `SWELL_FULL_COUNTS=1` (the lane `slow`'s `slow-tests`); 200 with the feature
+/// `collect-every-safe-point` otherwise (the gate's `test-collect`, `test-realm-sizes`). There
+/// every call of the reviver collects and traces every level the walk holds, so the cost grows
+/// with the square of the nesting: at 2,000 the test took 21.5 s of the 22.7 s collect run of
+/// `test-realm-sizes` at k = 4, and 20.3 to 29.9 CPU seconds alone in that build (the test
+/// profile, opt-level 0; 2.1 to 2.5 in the gate's profile `collect`), against the bound of
+/// 2 CPU seconds a test has there. Each way out still opens and closes every level, so an
+/// entry, a record or a copy whose charge a way out keeps changes the reading at 200 as at
+/// 2,000.
+fn way_out_depth() -> usize {
+    if cfg!(feature = "collect-every-safe-point")
+        && !std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        200
+    } else {
+        2_000
+    }
+}
+
 /// The bytes `JSON.parse` charges for its open values, its records and its copy of the text
 /// are given back on every way out, so the charged reading after a call and a collection is the
 /// same from the second call on: (i) a deep valid text with a reviver, (ii) a deep text that
 /// ends in the middle, (iii) a deep text under a memory budget that ends the parse at depth,
-/// (iv) the same with a reviver (adversary pass 2 on unit growth).
+/// (iv) the same with a reviver (adversary pass 2 on unit growth). The first two nest
+/// [`way_out_depth`] levels.
 #[test]
 fn parse_gives_back_its_charges_on_every_way_out() {
-    let deep = 2_000;
+    let deep = way_out_depth();
     let unclosed = vec![u16::from(b'['); deep];
     let reviver = "(function (key, value) { return value; })";
     let mut small = limits();

@@ -133,6 +133,10 @@ pub(crate) enum BuiltinId {
     AsyncBuiltinAwait(crate::object::promise::ReactionType),
     /// The functions of `%Reflect%` (`story:reflect-namespace`), none a constructor.
     Reflect(crate::builtins::reflect::ReflectBuiltin),
+    /// `%WeakMap%` and the functions of `%WeakMap.prototype%` (`story:weak-map-and-weak-set`).
+    WeakMap(crate::builtins::weak_map::WeakMapBuiltin),
+    /// `%WeakSet%` and the functions of `%WeakSet.prototype%` (`story:weak-map-and-weak-set`).
+    WeakSet(crate::builtins::weak_set::WeakSetBuiltin),
 }
 
 /// What a built-in function does when called.
@@ -852,6 +856,8 @@ impl<H: Host> Agent<H> {
                 self.async_builtin_await_function(kind, function, args)
             }
             BuiltinId::Reflect(id) => self.run_reflect_builtin(id, args),
+            BuiltinId::WeakMap(id) => self.run_weak_map_builtin(id, this, args, new_target),
+            BuiltinId::WeakSet(id) => self.run_weak_set_builtin(id, this, args, new_target),
         }
     }
 
