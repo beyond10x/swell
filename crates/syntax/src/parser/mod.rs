@@ -67,6 +67,11 @@ pub(crate) struct Parsed {
 pub const HOLDS: &[(&str, u32)] = &[
     ("class", 8),
     ("class heritage", 8),
+    ("class field", 8),
+    ("private method", 8),
+    ("private field", 8),
+    ("private name in", 8),
+    ("class static block", 8),
 ];
 
 pub(crate) struct Parser<'a, 'm> {
@@ -126,6 +131,16 @@ pub(crate) struct Parser<'a, 'm> {
     /// The `super_property` of the code around each function whose parameters or body the
     /// parser is in, beside `outer_awaits`, saved and put back with it; the growth charged first.
     outer_super_properties: Vec<SuperProperty>,
+    /// Whether the current position is code of a field initializer and of no function in it
+    /// (`parser/class.rs`): a class nested in the initializer, its heritage, its computed keys
+    /// and its own initializers included. A YieldExpression and an AwaitExpression, which the
+    /// [Yield] and [Await] around the class admit there by the grammar, are refused at their
+    /// first token. Kept beside [Await] in the same way, cleared by every function.
+    field_code: bool,
+    /// Whether the code around each function, field initializer and static block the parser is
+    /// in was code of a field initializer, beside `outer_awaits`, saved and put back with it;
+    /// the growth charged first.
+    outer_field_code: Vec<bool>,
     /// The refusal of a construct whose parse goes on, held back to the end of the parse, at the
     /// first token of the first such construct of the source ([`Parser::hold`]). The constructs
     /// held are the lines of [`HOLDS`]. The parse answers it only when it ends without a
@@ -415,6 +430,8 @@ impl<'a, 'm> Parser<'a, 'm> {
             outer_new_target: Vec::new(),
             super_property: SuperProperty::Outside,
             outer_super_properties: Vec::new(),
+            field_code: false,
+            outer_field_code: Vec::new(),
             held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
@@ -437,6 +454,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         m.release(core::mem::take(&mut self.outer_awaits));
         m.release(core::mem::take(&mut self.outer_new_target));
         m.release(core::mem::take(&mut self.outer_super_properties));
+        m.release(core::mem::take(&mut self.outer_field_code));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {
@@ -521,6 +539,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             TokenKind::Eof => "unexpected end of input".to_string(),
             TokenKind::Name(n) => format!("unexpected token {n}"),
             TokenKind::Keyword(k) => format!("unexpected token {}", k.as_str()),
+            TokenKind::PrivateName(n) => format!("unexpected private name {n}"),
             TokenKind::Punct(p) => format!("unexpected token {}", p.as_str()),
             TokenKind::Number(n) => format!("unexpected number {}", n.text),
             TokenKind::String(_) => "unexpected string literal".to_string(),

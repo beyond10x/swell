@@ -15,8 +15,10 @@
 //! asks for the `InputElementRegExp` goal, regular expression literals
 //! (`#sec-literals-regular-expression-literals`).
 //!
-//! Refused here, each with the slice that brings it: private names (8), BigInt literals (12) and
-//! the HTML-like comments of Annex B (`#sec-html-like-comments`, 18).
+//! Private names (`#sec-names-and-keywords`) are read as one token, `#` and an identifier name.
+//!
+//! Refused here, each with the slice that brings it: BigInt literals (12) and the HTML-like
+//! comments of Annex B (`#sec-html-like-comments`, 18).
 //!
 //! The lexer runs once over the source and every loop advances by at least one code unit, so its
 //! work is linear in the length of the source; a part lexed again at the parser's request (a
@@ -365,12 +367,15 @@ impl<'a, 'm> Lexer<'a, 'm> {
             return self.template();
         }
         if c == ascii(b'#') {
-            return Err(if self.ahead(1) == Some(ascii(b'!')) {
-                self.error(HASHBANG_NOT_AT_START)
-            } else if self.ahead(1).is_some_and(is_ascii_id_start)
+            if self
+                .ahead(1)
+                .is_some_and(|n| is_ascii_id_start(n) || n == ascii(b'\\'))
                 || self.id_start_outside_ascii_at(self.pos.saturating_add(1))
             {
-                self.refused("private name", 8)
+                return self.private_name();
+            }
+            return Err(if self.ahead(1) == Some(ascii(b'!')) {
+                self.error(HASHBANG_NOT_AT_START)
             } else {
                 self.error("unexpected character #")
             });
@@ -398,7 +403,28 @@ impl<'a, 'm> Lexer<'a, 'm> {
     /// name. Answers the token and whether an escape was among it: a name with an escape is a
     /// [`TokenKind::Name`] whatever its StringValue, never a keyword.
     fn identifier_name(&mut self) -> Result<(TokenKind, bool), SyntaxError> {
-        let mut name = String::new();
+        self.name_after(String::new())
+    }
+
+    /// A `PrivateIdentifier` (`#sec-names-and-keywords`): `#` and an `IdentifierName`, whose
+    /// first code point the caller found to start one. Its StringValue keeps the `#`; a reserved
+    /// word after the `#` is part of the name.
+    fn private_name(&mut self) -> Result<TokenKind, SyntaxError> {
+        let hash = Lexer::charged(self.m.string("#"))?;
+        self.pos += 1;
+        match self.name_after(hash)? {
+            (TokenKind::Name(name), _) => Ok(TokenKind::PrivateName(name)),
+            (other, _) => {
+                self.m.release(other);
+                Err(self.error("unexpected character #"))
+            }
+        }
+    }
+
+    /// The code points of an `IdentifierName` appended to `name`, which holds what comes before
+    /// it (nothing, or the `#` of a private name).
+    fn name_after(&mut self, mut name: String) -> Result<(TokenKind, bool), SyntaxError> {
+        let before = name.len();
         let mut escaped = false;
         loop {
             self.tick()?;
@@ -415,7 +441,7 @@ impl<'a, 'm> Lexer<'a, 'm> {
                     }
                     self.pos += 2;
                     let cp = self.unicode_escape()?;
-                    let allowed = if name.is_empty() {
+                    let allowed = if name.len() == before {
                         is_id_start(cp)
                     } else {
                         is_id_part(cp)
@@ -434,7 +460,7 @@ impl<'a, 'm> Lexer<'a, 'm> {
                     let Some((cp, len)) = self.code_point_at(self.pos) else {
                         break;
                     };
-                    let allowed = if name.is_empty() {
+                    let allowed = if name.len() == before {
                         is_id_start(cp)
                     } else {
                         is_id_part(cp)

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T23:31:48Z",
+  "actor": "human:operator",
+  "artifact": "story:class-element-syntax-and-early-errors",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/elements at 5364e45e, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax main 78 passed (and with full counts); swell-compiler main 17 passed; swell::main 1311 passed and 1 skipped in both modes; lib 251 passed; clippy 0; fmt 0"
+  }
+}

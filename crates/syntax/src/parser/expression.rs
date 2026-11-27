@@ -35,6 +35,11 @@
 //! `super[expression]`, where the nearest function that is not an arrow function is a
 //! MethodDefinition, and a SuperCall, an early error before derived classes.
 //!
+//! Slice 8 adds the private names of classes: the member access `a.#x` and the link `?.#x` of an
+//! optional chain ([`Expr::PrivateMember`]), and `#x in a` ([`Expr::PrivateIn`],
+//! `#sec-relational-operators`), whose private name stands only directly before `in`, where a
+//! relational expression may start, and holds `private name in`.
+//!
 //! A ClassExpression is parsed whole and held (`parser/class.rs`). Refused, each with its slice:
 //! `super` in an arrow function in a method and in eval code (8), `import.meta` and dynamic
 //! `import` (11).
@@ -43,6 +48,7 @@
 //! depth counter) are kept small: they look at tokens through helpers that return a small value,
 //! and build nodes through helpers, so their own frames hold little more than ids and one span.
 
+use super::class::{AWAIT_IN_FIELD, YIELD_IN_FIELD};
 use super::{
     Halt, Parser, R, SuperProperty, copy_name, copy_number, copy_regexp, copy_string, copy_template,
 };
@@ -109,7 +115,13 @@ pub(crate) struct Pending {
 enum Binary {
     Arithmetic(BinaryOp),
     Logical(LogicalOp),
+    /// The `in` of `#x in`: its left is the [`Expr::PrivateIn`] node, its right operand to
+    /// come.
+    PrivateIn,
 }
+
+/// The precedence of the relational operators, `in` among them.
+const RELATIONAL: u8 = 7;
 
 /// What follows the operand of an `AssignmentExpression`.
 #[derive(Clone, Copy)]
@@ -331,9 +343,13 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// so that the test stays out of its frame, which every nesting of an expression holds; this
     /// function enters the counter twice, once for the `AssignmentExpression` it stands as and
     /// once for itself, and so a nesting of `yield` takes two levels, as the frames of the two
-    /// functions on its path do.
+    /// functions on its path do. In the code of a field initializer it is refused at the `yield`
+    /// ([`YIELD_IN_FIELD`]).
     #[inline(never)]
     fn yield_expression(&mut self, no_in: bool) -> R<ExprId> {
+        if self.field_code {
+            return self.fail_here(YIELD_IN_FIELD);
+        }
         self.enter()?;
         self.enter()?;
         let start = self.start();
@@ -369,6 +385,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         }
         match &self.tok.kind {
             TokenKind::Name(_)
+            | TokenKind::PrivateName(_)
             | TokenKind::Number(_)
             | TokenKind::String(_)
             | TokenKind::RegExp(_)
@@ -512,7 +529,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             BitXor => 4,
             BitAnd => 5,
             Eq | NotEq | StrictEq | StrictNotEq => 6,
-            Lt | Gt | LtEq | GtEq | Instanceof | In => 7,
+            Lt | Gt | LtEq | GtEq | Instanceof | In => RELATIONAL,
             Shl | Shr | UShr => 8,
             Add | Sub => 9,
             Mul | Div | Rem => 10,
@@ -534,13 +551,86 @@ impl<'a, 'm> Parser<'a, 'm> {
     fn binary(&mut self, no_in: bool) -> R<ExprId> {
         self.enter()?;
         let base = self.operators.len();
+        self.private_in(base, no_in)?;
         let mut left = self.unary()?;
         while self.binary_step(base, left, no_in)? {
+            self.private_in(base, no_in)?;
             left = self.unary()?;
         }
         let e = self.reduce(base, 0, left)?;
         self.leave();
         Ok(e)
+    }
+
+    /// `#x in` at an operand of the binary expression whose operators start at `base`
+    /// (RelationalExpression : PrivateIdentifier in ShiftExpression, `#sec-relational-operators`,
+    /// with [+In]): when the current token is a private name, the operator before it binds more
+    /// loosely than `in`, and `in` follows, the name and `in` are consumed and pushed as a
+    /// pending operator whose right operand is read next; the construct holds `private name
+    /// in`. A private name anywhere else in an operand is a grammar error at it. Whether the
+    /// operator was pushed.
+    #[inline(never)]
+    fn private_in(&mut self, base: usize, no_in: bool) -> R<bool> {
+        if !matches!(self.tok.kind, TokenKind::PrivateName(_)) {
+            return Ok(false);
+        }
+        let looser = self
+            .operators
+            .get(base..)
+            .and_then(|pending| pending.last())
+            .is_none_or(|p| p.precedence < RELATIONAL);
+        let before_in = !no_in && self.peek()?.kind == TokenKind::Keyword(Keyword::In);
+        if !looser || !before_in {
+            return self.unexpected();
+        }
+        let m = self.m;
+        let span = self.start();
+        let name = match &self.tok.kind {
+            TokenKind::PrivateName(n) => copy_name(m, n),
+            _ => return self.unexpected(),
+        };
+        let name = self.charged(name)?;
+        self.hold("private name in", 8, span);
+        self.advance()?;
+        self.advance()?;
+        let left = self.push_expr(
+            Expr::PrivateIn {
+                name: Name { name, span },
+                right: ExprId(u32::MAX),
+            },
+            span,
+        )?;
+        let pushed = m.push(
+            &mut self.operators,
+            Pending {
+                op: Binary::PrivateIn,
+                precedence: RELATIONAL,
+                left,
+            },
+        );
+        self.charged(pushed)?;
+        Ok(true)
+    }
+
+    /// The `#x in` node `id` completed with its right operand `right`: its span runs to the end
+    /// of `right`, and its depth is one more than `right`'s.
+    #[inline(never)]
+    fn complete_private_in(&mut self, id: ExprId, right: ExprId) -> R<ExprId> {
+        let mut span = self.expr_span(id);
+        span.end = self.expr_span(right).end;
+        let depth = self
+            .ast
+            .depth(crate::ast::Child::Expr(right))
+            .saturating_add(1);
+        self.check_depth(depth, span)?;
+        if let Some(n) = self.ast.exprs.get_mut(id.0 as usize) {
+            if let Expr::PrivateIn { right: r, .. } = &mut n.expr {
+                *r = right;
+            }
+            n.span = span;
+            n.depth = depth;
+        }
+        Ok(id)
     }
 
     /// Reads the operator after `left`, if any: reduces the pending operators that bind at
@@ -604,6 +694,10 @@ impl<'a, 'm> Parser<'a, 'm> {
                 .is_some_and(|p| p.precedence >= precedence)
         {
             let Some(p) = self.operators.pop() else { break };
+            if let Binary::PrivateIn = p.op {
+                right = self.complete_private_in(p.left, right)?;
+                continue;
+            }
             let mut span = self.expr_span(p.left);
             span.end = self.expr_span(right).end;
             let left = p.left;
@@ -616,6 +710,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                     }
                     Expr::Logical { op, left, right }
                 }
+                Binary::PrivateIn => continue,
             };
             right = self.push_expr(expr, span)?;
         }
@@ -667,10 +762,15 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(e)
     }
 
-    /// Pushes the prefix operators at the current token, each with where it starts.
+    /// Pushes the prefix operators at the current token, each with where it starts; the `await`
+    /// of an AwaitExpression in the code of a field initializer is refused at it
+    /// ([`AWAIT_IN_FIELD`]).
     #[inline(never)]
     fn prefix_operators(&mut self) -> R<()> {
         while let Some(prefix) = self.prefix() {
+            if self.field_code && matches!(prefix, Prefix::Await) {
+                return self.fail_here(AWAIT_IN_FIELD);
+            }
             let start = self.start();
             let m = self.m;
             let pushed = m.push(&mut self.prefixes, (prefix, start));
@@ -887,7 +987,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(match &self.tok.kind {
             TokenKind::Punct(Punct::LParen) => Suffix::Call,
             TokenKind::Punct(Punct::LBracket) => Suffix::Index,
-            TokenKind::Name(_) | TokenKind::Keyword(_) => Suffix::Dot,
+            TokenKind::Name(_) | TokenKind::Keyword(_) | TokenKind::PrivateName(_) => Suffix::Dot,
             TokenKind::NoSubstitutionTemplate(_) | TokenKind::TemplateHead(_) => {
                 return self.template_after();
             }
@@ -993,13 +1093,27 @@ impl<'a, 'm> Parser<'a, 'm> {
         self.member_name(object, start, false)
     }
 
-    /// The `IdentifierName` of a property access on `object`, at the current token.
+    /// The `IdentifierName` of a property access on `object`, at the current token, or its
+    /// PrivateIdentifier.
     #[inline(never)]
     fn member_name(&mut self, object: ExprId, start: Span, optional: bool) -> R<ExprId> {
         let m = self.m;
         let property = match &self.tok.kind {
             TokenKind::Name(n) => copy_name(m, n),
             TokenKind::Keyword(k) => copy_name(m, k.as_str()),
+            TokenKind::PrivateName(n) => {
+                let name = Name {
+                    name: self.charged(copy_name(m, n))?,
+                    span: self.start(),
+                };
+                self.advance()?;
+                let expr = Expr::PrivateMember {
+                    object,
+                    name,
+                    optional,
+                };
+                return self.make(expr, start);
+            }
             _ => return self.unexpected(),
         };
         let property = self.charged(property)?;
@@ -1627,7 +1741,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// without an escape, followed with no line terminator before it by a property name or a
     /// computed one; the `async` is consumed. `async *` is an async generator method
     /// (AsyncGeneratorMethod, `#sec-async-generator-function-definitions`), whose `*`
-    /// [`Parser::async_method`] reads.
+    /// [`Parser::async_method`] reads. A private name counts as a property name here: in a class
+    /// it names a private method, and in an object literal it is the grammar error at its token.
     #[inline(never)]
     pub(super) fn accessor_kind(&mut self) -> R<Option<FunctionKind>> {
         let plain = !self.tok.escaped;
@@ -1638,6 +1753,7 @@ impl<'a, 'm> Parser<'a, 'm> {
                 let next = self.peek()?;
                 if !next.newline_before
                     && (Parser::is_property_name(&next.kind)
+                        || matches!(next.kind, TokenKind::PrivateName(_))
                         || matches!(
                             next.kind,
                             TokenKind::Punct(Punct::Star) | TokenKind::Punct(Punct::LBracket)
@@ -1653,7 +1769,7 @@ impl<'a, 'm> Parser<'a, 'm> {
         let next = &self.peek()?.kind;
         let (computed, named) = (
             *next == TokenKind::Punct(Punct::LBracket),
-            Parser::is_property_name(next),
+            Parser::is_property_name(next) || matches!(next, TokenKind::PrivateName(_)),
         );
         if computed || named {
             self.advance()?;
@@ -2262,6 +2378,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             | Expr::Member { .. }
             | Expr::Index { .. }
             | Expr::SuperMember(_)
+            | Expr::PrivateMember { .. }
                 if assignment =>
             {
                 Ok(PatternTarget::Expr(t))

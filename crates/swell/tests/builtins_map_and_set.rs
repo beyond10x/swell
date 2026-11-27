@@ -468,8 +468,10 @@ fn a_set_of_10000_keys_is_charged_and_credited() {
         10_000
     };
     let (mut agent, realm) = agent_and_realm(|limits| limits.steps_per_entry = 1 << 40);
+    // A Set made and dropped before the first reading: at some sizes of the realm the first
+    // object made after it grows the arena of objects, whose room stays charged.
     assert_eq!(
-        eval_text(&mut agent, &realm, "var s, i;"),
+        eval_text(&mut agent, &realm, "var s = new Set(), i; s = undefined;"),
         Outcome::Normal("undefined".to_string())
     );
     let before = collected(&mut agent);
@@ -1029,8 +1031,11 @@ r.join(" | ");"#,
         "clear clear/0:wc; constructor Map/0:wc; delete delete/1:wc; entries entries/0:wc; forEach forEach/1:wc; \
          get get/1:wc; has has/1:wc; keys keys/0:wc; set set/2:wc; size get get size/0 set none:c; values values/0:wc; \
          Symbol(Symbol.iterator) entries/0:wc; Symbol(Symbol.toStringTag) Map:c | \
-         add add/1:wc; clear clear/0:wc; constructor Set/0:wc; delete delete/1:wc; entries entries/0:wc; \
-         forEach forEach/1:wc; has has/1:wc; keys values/0:wc; size get get size/0 set none:c; values values/0:wc; \
+         add add/1:wc; clear clear/0:wc; constructor Set/0:wc; delete delete/1:wc; difference difference/1:wc; \
+         entries entries/0:wc; forEach forEach/1:wc; has has/1:wc; intersection intersection/1:wc; \
+         isDisjointFrom isDisjointFrom/1:wc; isSubsetOf isSubsetOf/1:wc; isSupersetOf isSupersetOf/1:wc; \
+         keys values/0:wc; size get get size/0 set none:c; symmetricDifference symmetricDifference/1:wc; \
+         union union/1:wc; values values/0:wc; \
          Symbol(Symbol.iterator) values/0:wc; Symbol(Symbol.toStringTag) Set:c | \
          next next/0:wc; Symbol(Symbol.toStringTag) Map Iterator:c | \
          next next/0:wc; Symbol(Symbol.toStringTag) Set Iterator:c | \

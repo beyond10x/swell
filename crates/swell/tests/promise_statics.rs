@@ -286,32 +286,59 @@ const PENDING: u32 = if cfg!(feature = "collect-every-safe-point") {
 
 /// "A built-in function with slots" and the list of values (`#sec-performpromiseall`, step 4.d,
 /// "Append undefined to values"): `Promise.all` over [`PENDING`] promises that stay pending
-/// makes `heap_bytes()`, after a collection that keeps them, exceed the reading before by at
-/// least [`PENDING`] times [`ELEMENT_BOX_BYTES`]; once every promise is resolved and the
-/// checkpoint has run, one `collect()` brings it back within the bytes of the combined promise
-/// and its Array of values (a Value per element, the Array's room at most twice its length).
-/// A first round grows the arenas first. The test prints the three readings.
+/// makes `heap_bytes()`, after a collection that keeps them, rise above the reading before by
+/// at least [`PENDING`] times [`ELEMENT_BOX_BYTES`] more than `Promise.race` over as many does
+/// (race makes the same reactions and derived promises, and no element function); once every
+/// promise is resolved and the checkpoint has run, one `collect()` leaves it above the reading
+/// before by no more than race leaves it, with an Array of as many values pushed after its
+/// settle, plus the room of the Array of values (a Value per element, at most twice its
+/// length).
+///
+/// It holds at any size of the realm (`story:tests-hold-at-any-size-of-the-realm`): a first
+/// round of `Promise.all` over twice as many promises grows the arenas, and each round's `make`
+/// drops every object of the round before it (`ps`, `resolvers`, `combined` and `values` are
+/// assigned again), so no arena grows between the readings of a round. Before, the first round
+/// was the measured one's size and its `combined` with its Array of values lived on into the
+/// measured round; with the seven set methods of `story:set-methods` in the realm and no
+/// padding, in the collect mode, the arena of objects grew from 512 to 1,024 slots between the
+/// reading before and the pending one (98,576 bytes above before after the settle, against 640).
+/// And the reading after was compared with before alone: the settle frees more than the boxes
+/// (with the larger first round alone, after was 5,136 bytes below before in the collect mode
+/// and 267,776 in the default one), so boxes that stayed charged after the settle passed. The
+/// control round of race takes that out. The test prints the six readings.
 #[test]
 fn the_values_of_a_pending_promise_all_are_charged_until_it_settles() {
     let (mut agent, realm) = fresh(limits());
-    let make = format!(
-        "var resolvers = [], ps = [], combined;\n\
-         for (var i = 0; i < {PENDING}; i++) ps.push(new Promise(function (r) {{ resolvers.push(r); }}));"
-    );
+    let make = |count: u32| {
+        format!(
+            "var resolvers = [], ps = [], combined = undefined, values = undefined;\n\
+             for (var i = 0; i < {count}; i++) ps.push(new Promise(function (r) {{ resolvers.push(r); }}));"
+        )
+    };
     let settle = "for (var i = 0; i < resolvers.length; i++) resolvers[i](i); resolvers = [];";
-    answer(&mut agent, &realm, &make);
-    answer(&mut agent, &realm, "combined = Promise.all(ps); 0");
-    answer(&mut agent, &realm, settle);
-    checkpoint(&mut agent);
-    answer(&mut agent, &realm, &make);
-    let before = collected(&mut agent);
-    answer(&mut agent, &realm, "combined = Promise.all(ps); 0");
-    let pending = collected(&mut agent);
-    answer(&mut agent, &realm, settle);
-    checkpoint(&mut agent);
-    let after = collected(&mut agent);
+    let pushed = format!("values = []; for (var i = 0; i < {PENDING}; i++) values.push(i); 0");
+    let round = |agent: &mut Agent<TestHost>, count: u32, combinator: &str, then: &str| {
+        answer(agent, &realm, &make(count));
+        let before = collected(agent);
+        answer(
+            agent,
+            &realm,
+            &format!("combined = Promise.{combinator}(ps); 0"),
+        );
+        let pending = collected(agent);
+        answer(agent, &realm, settle);
+        checkpoint(agent);
+        answer(agent, &realm, then);
+        let after = collected(agent);
+        (before, pending, after)
+    };
+    round(&mut agent, 2 * PENDING, "all", "0");
+    let race = round(&mut agent, PENDING, "race", &pushed);
+    let (before, pending, after) = round(&mut agent, PENDING, "all", "0");
     println!(
-        "heap_bytes: before {before}, Promise.all of {PENDING} pending {pending}, after {after}"
+        "heap_bytes: race before {}, pending {}, after {}; \
+         Promise.all of {PENDING} before {before}, pending {pending}, after {after}",
+        race.0, race.1, race.2
     );
     assert_eq!(
         answer(
@@ -323,12 +350,21 @@ fn the_values_of_a_pending_promise_all_are_charged_until_it_settles() {
     );
     checkpoint(&mut agent);
     assert_eq!(answer(&mut agent, &realm, "ps"), PENDING.to_string());
+    // pending - before >= race pending - race before + the boxes, without a subtraction.
     assert!(
-        pending >= before + u64::from(PENDING) * ELEMENT_BOX_BYTES,
-        "{pending} against {before}"
+        pending + race.0 >= before + race.1 + u64::from(PENDING) * ELEMENT_BOX_BYTES,
+        "{pending} - {before} against race {} - {}",
+        race.1,
+        race.0
     );
+    // after - before <= race after - race before + the room, without a subtraction.
     let array = 2 * u64::from(PENDING) * size_of::<Value>() as u64;
-    assert!(after <= before + array, "{after} against {before}");
+    assert!(
+        after + race.0 <= before + race.2 + array,
+        "{after} - {before} against race {} - {}",
+        race.2,
+        race.0
+    );
 }
 
 thread_local! {

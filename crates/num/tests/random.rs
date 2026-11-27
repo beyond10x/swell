@@ -237,3 +237,81 @@ fn the_numbers_at_the_ends_of_the_word_range() {
     );
     assert!(word_to_number(u64::MAX - 2_047) < 1.0);
 }
+
+/// SipHash-2-4 of the Rust standard library (`std::hash::SipHasher`, 2 compression rounds and 4
+/// finalization rounds, keyed by two words), an implementation independent of
+/// `swell_num::siphash`: the key's 16 bytes as two little-endian words, as the reference
+/// implementation reads them.
+#[expect(
+    deprecated,
+    reason = "the standard library's SipHash-2-4 is the independent implementation the test compares with"
+)]
+fn std_siphash24(key: &[u8; 16], message: &[u8]) -> u64 {
+    use std::hash::{Hasher, SipHasher};
+    let mut k0 = [0_u8; 8];
+    let mut k1 = [0_u8; 8];
+    k0.copy_from_slice(&key[0..8]);
+    k1.copy_from_slice(&key[8..16]);
+    let mut hasher = SipHasher::new_with_keys(u64::from_le_bytes(k0), u64::from_le_bytes(k1));
+    hasher.write(message);
+    hasher.finish()
+}
+
+/// The four words of the design's sentence (decision 6, "`Math.random`"; HOST-213's section 3
+/// of `host-interface.md`), computed with [`std_siphash24`] and nothing of this
+/// crate: key `random_seed[0..16]`, message `random_seed[16..32]`, `index` as 8 bytes
+/// little-endian, the byte i.
+fn state_by_std_siphash(seed: &[u8; 32], index: u64) -> [u64; 4] {
+    let mut key = [0_u8; 16];
+    key.copy_from_slice(&seed[0..16]);
+    [0_u8, 1, 2, 3].map(|i| {
+        let mut message = [0_u8; 25];
+        message[..16].copy_from_slice(&seed[16..32]);
+        message[16..24].copy_from_slice(&index.to_le_bytes());
+        message[24] = i;
+        std_siphash24(&key, &message)
+    })
+}
+
+/// The derivation against an independent SipHash-2-4. The oracle first
+/// reproduces the published algorithm (the paper's example, key `00..0f` and message `00..0e`,
+/// is `a129ca6149be45e5`; the empty message is `726fdb47dd0e0e31`, the first of the reference
+/// vectors). Then `from_seed` equals the oracle for the all-zero seed, the all-0xff seed and the
+/// seed `00..1f` (whose key is the reference key) at indices 0, 1, 0x0807060504030201 and
+/// 2^64 - 1, and the sixteen committed words of `DERIVED` equal the oracle too.
+#[test]
+fn the_derived_states_agree_with_the_standard_librarys_siphash_2_4() {
+    let reference_key: [u8; 16] = core::array::from_fn(|i| u8::try_from(i).unwrap());
+    let fifteen: Vec<u8> = (0_u8..15).collect();
+    assert_eq!(
+        std_siphash24(&reference_key, &fifteen),
+        0xa129_ca61_49be_45e5
+    );
+    assert_eq!(std_siphash24(&reference_key, &[]), 0x726f_db47_dd0e_0e31);
+    let counting: [u8; 32] = core::array::from_fn(|i| u8::try_from(i).unwrap());
+    for seed in [[0_u8; 32], [0xff; 32], counting] {
+        for index in [0, 1, 0x0807_0605_0403_0201, u64::MAX] {
+            assert_eq!(
+                Xoshiro256::from_seed(&seed, index).state(),
+                state_by_std_siphash(&seed, index),
+                "seed {:02x}{:02x} index {index:#x}",
+                seed[0],
+                seed[1]
+            );
+        }
+    }
+    let table = [
+        ([0_u8; 32], 0, DERIVED[0]),
+        ([0; 32], 1, DERIVED[1]),
+        ([0xff; 32], 0, DERIVED[2]),
+        ([0xff; 32], 1, DERIVED[3]),
+    ];
+    for (seed, index, words) in table {
+        assert_eq!(
+            words,
+            state_by_std_siphash(&seed, index),
+            "DERIVED seed {:02x} n {index}",
+            seed[0]
+        );
+    }
+}
