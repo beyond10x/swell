@@ -19,7 +19,7 @@ tasks:
       the watcher of slow-collect-start left the build running.
 
       It reads Taskfile.yml and every file under taskfiles/, tests/gate/ and .github/workflows/
-      of KILL_ROOT (default ., the tree; the planted script points it at a tree of its own): the
+      of GATE_ROOT (default ., the tree; the planted script points it at a tree of its own): the
       shell the gate runs (the task files and their scripts, the planted scripts and their
       fixtures) and the forge's workflow steps. A hit is the word kill (not part of a longer
       word, not a path like /bin/kill), blanks, one word that starts with a single "-", blanks,
@@ -32,22 +32,22 @@ tasks:
       fails too. tests/gate/kill-check-refuses-two-dashes-after-the-signal.sh holds it.
     silent: true
     vars:
-      KILL_ROOT: '{{.KILL_ROOT | default "."}}'
+      GATE_ROOT: '{{.GATE_ROOT | default "."}}'
     env:
-      KILL_ROOT: '{{.KILL_ROOT}}'
+      GATE_ROOT: '{{.GATE_ROOT}}'
     cmds:
       - |
         files=$(
           {
-            [ -f "$KILL_ROOT/Taskfile.yml" ] && echo "$KILL_ROOT/Taskfile.yml"
+            [ -f "$GATE_ROOT/Taskfile.yml" ] && echo "$GATE_ROOT/Taskfile.yml"
             for d in taskfiles tests/gate .github/workflows; do
-              [ -d "$KILL_ROOT/$d" ] && find "$KILL_ROOT/$d" -type f
+              [ -d "$GATE_ROOT/$d" ] && find "$GATE_ROOT/$d" -type f
             done
           } | LC_ALL=C sort
         )
         n=$(printf '%s\n' "$files" | awk 'NF { n++ } END { print n + 0 }')
         if [ "$n" -eq 0 ]; then
-          echo "kill-check: no Taskfile.yml and no file under taskfiles/, tests/gate/ or .github/workflows/ of $KILL_ROOT"
+          echo "kill-check: no Taskfile.yml and no file under taskfiles/, tests/gate/ or .github/workflows/ of $GATE_ROOT"
           exit 1
         fi
         hits=$(printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 awk '

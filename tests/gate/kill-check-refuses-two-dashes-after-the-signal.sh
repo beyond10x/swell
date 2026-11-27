@@ -54,7 +54,7 @@ printf '  while %s -0 -- "-$pid" 2>/dev/null; do sleep 0.1; done\n' "$k" >> "$pl
 printf '  [ -n "$pg" ] && %s -KILL -- "-$pg"\n' "$k" >> "$planted/tests/gate/fixtures/stop.sh"
 printf '        run: %s -9 -- "-$pid"\n' "$k" >> "$planted/.github/workflows/check.yml"
 
-if task -d . kill-check KILL_ROOT="$planted" > "$dir/planted.out" 2>&1; then
+if task -d . kill-check GATE_ROOT="$planted" > "$dir/planted.out" 2>&1; then
   fail "kill-check accepted $planted, which holds four kills with two dashes after the signal ($dir/planted.out)"
 fi
 for want in \
@@ -72,7 +72,7 @@ grep -q '^kill-check: 4 kill(s) with two dashes after the signal operand; the fo
 # 2. Only the allowed forms.
 clean=$dir/clean
 tree "$clean"
-task -d . kill-check KILL_ROOT="$clean" > "$dir/clean.out" 2>&1 ||
+task -d . kill-check GATE_ROOT="$clean" > "$dir/clean.out" 2>&1 ||
   fail "kill-check refused $clean, which holds only the forms dash reads ($dir/clean.out)"
 grep -qxF 'kill-check: no kill with two dashes after its signal operand in 4 file(s)' "$dir/clean.out" ||
   fail "kill-check did not count the 4 files of $clean ($dir/clean.out)"
