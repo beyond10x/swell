@@ -101,10 +101,21 @@ go() {
   STUB_DIR="$root/$dir/run-$case_/stub" STUB_BUILD=$build PATH="$root/$dir/bin:$PATH" task -d "$dir/run-$case_" "$@" > "$dir/$case_.out" 2>&1
 }
 
+# group_alive <pgid>: 0 when a process of the group <pgid> runs, 1 when kill -0 answers "No such
+# process". Any other answer fails the test: a group that is not a number (an empty pid file),
+# or a kill that refused its operand (dash's kill read "--" after the signal as a process
+# number, "Illegal number", and the group looked gone at once), is not a group that is gone.
+group_alive() {
+  case "$1" in ''|*[!0-9]*|0|1) fail "process group [$1] is not the number of a group; kill -0 cannot have asked for it" ;; esac
+  err=$(LC_ALL=C; kill -0 "-$1" 2>&1) && return 0
+  case "$err" in *"No such process"*) return 1 ;; esac
+  fail "kill -0 -$1 failed for another reason than a group that is gone: $err"
+}
+
 # group_gone_within <pgid> <tenths>: no process of the group <pgid> is left within <tenths> tenths of a second.
 group_gone_within() {
   n=0
-  while kill -0 -- "-$1" 2>/dev/null; do
+  while group_alive "$1"; do
     [ "$n" -ge "$2" ] && return 1
     sleep 0.1
     n=$((n + 1))
@@ -135,7 +146,7 @@ if go hang hang slow; then
   fail "task slow exited 0 with a test262 pin that cannot be fetched ($dir/hang.out)"
 fi
 pg=$(cat "$dir/run-hang/.out/slow-collect/pid" 2>/dev/null) || fail "the lane started no background build ($dir/hang.out)"
-group_gone_within "$pg" 0 || { kill -KILL -- "-$pg" 2>/dev/null; fail "the build (process group $pg) still ran when task slow ended ($dir/hang.out)"; }
+group_gone_within "$pg" 0 || { kill -KILL "-$pg" 2>/dev/null; fail "the build (process group $pg) still ran when task slow ended ($dir/hang.out)"; }
 grep -qF 'slow-collect-stop: ended the build of the profile collect' "$dir/hang.out" ||
   fail "task slow ended without slow-collect-stop ending the build ($dir/hang.out)"
 
@@ -143,7 +154,7 @@ grep -qF 'slow-collect-stop: ended the build of the profile collect' "$dir/hang.
 plant alone
 go alone hang slow-collect-start || fail "task slow-collect-start exited non-zero ($dir/alone.out)"
 pg=$(cat "$dir/run-alone/.out/slow-collect/pid" 2>/dev/null) || fail "slow-collect-start started no build ($dir/alone.out)"
-group_gone_within "$pg" 50 || { kill -KILL -- "-$pg" 2>/dev/null; fail "the build (process group $pg) still ran 5 s after the task process that started it ended ($dir/alone.out)"; }
+group_gone_within "$pg" 50 || { kill -KILL "-$pg" 2>/dev/null; fail "the build (process group $pg) still ran 5 s after the task process that started it ended ($dir/alone.out)"; }
 
 # 4. slow-tests alone builds the profile collect itself.
 plant part
@@ -157,14 +168,14 @@ plant foreign
 mkdir -p "$dir/run-foreign/.out/slow-collect"
 other=$(sh -c 'setsid sleep 60 < /dev/null > /dev/null 2>&1 & echo $!')
 n=0
-while ! kill -0 -- "-$other" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.1; n=$((n + 1)); done
-kill -0 -- "-$other" 2>/dev/null || fail "setsid sleep 60 made no process group of its own"
+while ! group_alive "$other" && [ "$n" -lt 20 ]; do sleep 0.1; n=$((n + 1)); done
+group_alive "$other" || fail "setsid sleep 60 made no process group of its own"
 echo "$other" > "$dir/run-foreign/.out/slow-collect/pid"
-go foreign ok slow-collect-stop || { kill -KILL -- "-$other" 2>/dev/null; fail "task slow-collect-stop exited non-zero on a pid file of another process ($dir/foreign.out)"; }
-if ! kill -0 -- "-$other" 2>/dev/null; then
+go foreign ok slow-collect-stop || { kill -KILL "-$other" 2>/dev/null; fail "task slow-collect-stop exited non-zero on a pid file of another process ($dir/foreign.out)"; }
+if ! group_alive "$other"; then
   fail "slow-collect-stop ended process group $other, which this tree's lane did not start ($dir/foreign.out)"
 fi
-kill -KILL -- "-$other" 2>/dev/null
+kill -KILL "-$other" 2>/dev/null
 grep -qF "slow-collect-stop: process $other of .out/slow-collect/pid is not the build this tree's lane started" "$dir/foreign.out" ||
   fail "slow-collect-stop did not say that it left process $other alone ($dir/foreign.out)"
 

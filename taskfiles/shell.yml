@@ -1,0 +1,68 @@
+version: '3'
+
+tasks:
+  kill-check:
+    desc: Fail, naming each line, when a kill in the gate's shell writes two dashes after its signal operand, which the forge's sh (dash) reads as a process number.
+    summary: |
+      Fail, naming each line, when a kill in the gate's shell writes two dashes ("--") right
+      after its signal operand.
+
+      The forge's sh is dash; here and on the build node it is bash. dash's builtin kill takes
+      the word after a signal operand (-TERM, -0, -KILL, -9) as the first process, so two dashes
+      there are read as the process number "-" ("Illegal number") and kill fails without
+      signalling anything, every time; bash skips them. A kill of a process group that has to
+      work under both shells is written with the group as the operand right after the signal
+      (kill -TERM "-$pid": dash and bash both read a later operand that starts with "-" as a
+      process group), or with the signal by -s (kill -s TERM, then the two dashes, then the
+      group), which dash reads as an option and the two dashes as the end of the options. The
+      forge's run of task check went red so: the lane's slow-collect-stop ended nothing, and
+      the watcher of slow-collect-start left the build running.
+
+      It reads Taskfile.yml and every file under taskfiles/, tests/gate/ and .github/workflows/
+      of KILL_ROOT (default ., the tree; the planted script points it at a tree of its own): the
+      shell the gate runs (the task files and their scripts, the planted scripts and their
+      fixtures) and the forge's workflow steps. A hit is the word kill (not part of a longer
+      word, not a path like /bin/kill), blanks, one word that starts with a single "-", blanks,
+      and two dashes that end a word. A kill whose signal comes by -s, a kill without a signal
+      before the two dashes, and pkill are not hits.
+
+      It prints one line per hit, "<path>:<line>: <text>", then "kill-check: <n> kill(s) with
+      two dashes after the signal operand ..." and exits 1; with no hit "kill-check: no kill
+      with two dashes after its signal operand in <n> file(s)" and exits 0. No file at all
+      fails too. tests/gate/kill-check-refuses-two-dashes-after-the-signal.sh holds it.
+    silent: true
+    vars:
+      KILL_ROOT: '{{.KILL_ROOT | default "."}}'
+    env:
+      KILL_ROOT: '{{.KILL_ROOT}}'
+    cmds:
+      - |
+        files=$(
+          {
+            [ -f "$KILL_ROOT/Taskfile.yml" ] && echo "$KILL_ROOT/Taskfile.yml"
+            for d in taskfiles tests/gate .github/workflows; do
+              [ -d "$KILL_ROOT/$d" ] && find "$KILL_ROOT/$d" -type f
+            done
+          } | LC_ALL=C sort
+        )
+        n=$(printf '%s\n' "$files" | awk 'NF { n++ } END { print n + 0 }')
+        if [ "$n" -eq 0 ]; then
+          echo "kill-check: no Taskfile.yml and no file under taskfiles/, tests/gate/ or .github/workflows/ of $KILL_ROOT"
+          exit 1
+        fi
+        hits=$(printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 awk '
+          BEGIN { re = "(^|[^A-Za-z0-9_./-])kill[ \t]+-[^- \t;&|][^ \t;&|]*[ \t]+--([ \t;&|)]|$)" }
+          $0 ~ re {
+            path = FILENAME
+            sub(/^\.\//, "", path)
+            text = $0
+            sub(/^[ \t]+/, "", text)
+            print path ":" FNR ": " text
+          }
+        ') || { echo "kill-check: awk failed"; exit 1; }
+        if [ -n "$hits" ]; then
+          printf '%s\n' "$hits"
+          echo "kill-check: $(printf '%s\n' "$hits" | awk 'END { print NR }') kill(s) with two dashes after the signal operand; the forge's sh is dash, whose kill reads them as a process number (Illegal number) and signals nothing: put the group right after the signal, kill -TERM \"-\$pid\", or give the signal by -s"
+          exit 1
+        fi
+        echo "kill-check: no kill with two dashes after its signal operand in $n file(s)"

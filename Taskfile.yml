@@ -89,6 +89,10 @@ includes:
     taskfile: taskfiles/realm-places.yml
     flatten: true
     optional: true
+  shell:
+    taskfile: taskfiles/shell.yml
+    flatten: true
+    optional: true
 
 tasks:
   check:
@@ -116,6 +120,7 @@ tasks:
     cmds:
       - task: gate-vars
       - task: python-check
+      - task: kill-check
       - task: forbid-unsafe-check
       - task: libm-check
       - task: nostd-build
@@ -264,7 +269,7 @@ tasks:
             while kill -0 "$build" 2>/dev/null; do
               if ! kill -0 "$lane" 2>/dev/null; then
                 echo "slow-collect: the lane (process $lane) is gone; the build ends with it" >> "$dir/log"
-                kill -TERM -- "-$$" 2>/dev/null
+                kill -TERM "-$$" 2>/dev/null
                 exit 1
               fi
               sleep 1
@@ -303,15 +308,15 @@ tasks:
           [ -f "$dir/status" ] && exit 0
           pid=$(cat "$dir/pid")
           case "$pid" in ""|*[!0-9]*) echo "slow-collect-stop: $dir/pid holds no process number"; exit 1 ;; esac
-          kill -0 -- "-$pid" 2>/dev/null || exit 0
+          kill -0 "-$pid" 2>/dev/null || exit 0
           if ! tr "\0" "\n" < "/proc/$pid/cmdline" 2>/dev/null | grep -qxF "$(pwd)/$dir"; then
             echo "slow-collect-stop: process $pid of $dir/pid is not the build this tree'\''s lane started (its command line does not name $(pwd)/$dir); nothing ended"
             exit 0
           fi
-          kill -TERM -- "-$pid" 2>/dev/null
+          kill -TERM "-$pid" 2>/dev/null
           n=0
-          while kill -0 -- "-$pid" 2>/dev/null && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
-          kill -KILL -- "-$pid" 2>/dev/null
+          while kill -0 "-$pid" 2>/dev/null && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+          kill -KILL "-$pid" 2>/dev/null
           echo "slow-collect-stop: ended the build of the profile collect (process group $pid), which still ran when the lane ended"
         '
 
