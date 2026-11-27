@@ -8,13 +8,13 @@ bench-v8 RegExp regexp.js 20 -
 bench-v8 Splay splay.js 20 -
 bench-v8 NavierStokes navier-stokes.js 20 -
 are-we-fast-yet Bounce bounce 5 15
-are-we-fast-yet CD cd 5 3
+are-we-fast-yet CD cd 5 10
 are-we-fast-yet DeltaBlue deltablue 5 120
-are-we-fast-yet Havlak havlak 5 15
+are-we-fast-yet Havlak havlak 2 15
 are-we-fast-yet Json json 5 1
 are-we-fast-yet List list 5 15
-are-we-fast-yet Mandelbrot mandelbrot 5 5
-are-we-fast-yet NBody nbody 5 2500
+are-we-fast-yet Mandelbrot mandelbrot 2 500
+are-we-fast-yet NBody nbody 2 250000
 are-we-fast-yet Permute permute 5 10
 are-we-fast-yet Queens queens 5 10
 are-we-fast-yet Richards richards 5 1
