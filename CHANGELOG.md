@@ -312,6 +312,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   interface" below names the surface and the one breaking change, `HostObjectSpec`
   (`story:host-object-overrides`).
 
+- Class static blocks (`#sec-class-definitions`, ClassStaticBlock;
+  `#sec-runtime-semantics-classstaticblockdefinitionevaluation`): each block is a function of its
+  own, made as a method with home object F and called with `this` F at its place among the static
+  elements, in source order with the runs of static fields, after every method and computed key.
+  The block has a `var` scope of its own (its `var`, `let`, `const` and function declarations are
+  not visible outside it or in the next block), `new.target` is `undefined`, `super.x` reads
+  through F, `await` is reserved in it and is a binding name in a function inside it; a throw
+  from a block ends the class's definition with the class's own outer binding uninitialized. A
+  direct `eval` in a block runs with inFunction and inMethod set and inClassFieldInitializer and
+  inDerivedConstructor clear: `eval("arguments")` is the block's own arguments object (made only
+  when the block's code has a direct `eval`), `super()` in the eval code is a `SyntaxError`. The
+  block runs as a frame of the run loop (`Call(0)`), so the step budget, the interrupt and the
+  frame depth reach it. No instruction is added. The refusal `class static block is not supported
+  before slice 8` is gone (`story:class-static-blocks`).
+
 ### Changed
 
 - The walk that calls every function of the realm with a Symbol in each place runs in 2

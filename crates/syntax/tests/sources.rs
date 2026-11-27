@@ -1274,7 +1274,6 @@ fn fits_the_stack_bound(entry: Entry, kind: &str, limit: u32) {
         parses > 0 || limit < 20,
         "{entry:?} {kind}: nothing parses at {limit}"
     );
-    println!("{entry:?} {kind}: {parses} deep admitted at limit {limit}");
     assert_eq!(
         admitted(entry, kind, 100_000, limit),
         Some(false),
