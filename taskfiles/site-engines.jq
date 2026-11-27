@@ -101,15 +101,27 @@ $catalog_lines as $catalog
         | {loaded: true} + (if ($why | length) == 0 then {} elif ($why | length) == 1 then {loaded_reason: $why[0]} else {loaded_reason: $why} end)
       elif $row.loaded == false then {loaded: false}
       else {} end;
+  # A derived row (a geomean) is no median of runs: its values are the medians of its benchmarks,
+  # so its cell has no runs, min and max, and says what it is from the row's aggregate and of.
+  def aggregate_text($row):
+    "\($row.aggregate), \($row.of | length) benchmarks, each the median of \($row.runs) runs: \($row.of | join(", "))";
+  # A figure ranks (may get the page's mark "best of the picked") only when it was measured
+  # alone: loaded false. The page gives no figure of a comparison the mark when one of them does
+  # not rank (bestOf in website/src/data/engines.ts).
   def result_cell($file; $row):
     if $row.status == "measured" then
-      {status: "measured", value: $row.median, unit: $row.unit, runs: $row.runs,
-       min: ($row.values | min), max: ($row.values | max), basis: "swell-bench-\($file.host.runner // "run")"}
-      + loaded_of($file; $row)
+      loaded_of($file; $row) as $loaded
+      | ($row.aggregate != null and ($row.of | type) == "array") as $derived
+      | {status: "measured", value: $row.median, unit: $row.unit}
+      + (if $derived then {aggregate: aggregate_text($row)}
+         else {runs: $row.runs, min: ($row.values | min), max: ($row.values | max)} end)
+      + {basis: "swell-bench-\($file.host.runner // "run")"}
+      + $loaded + {ranks: ($loaded.loaded == false)}
       + {source: {label: "our run, \($file.host.runner // "build node"), \($file.host.cpus // "?") CPUs",
                 url: gh($file.file; null), date: $file.date,
                 revision: "swell \($file.commit | tostring | short), \($row.engine) \($row.version)",
-                method: "\($row.measurement): median of \($row.runs) runs, min and max beside it"
+                method: "\($row.measurement): "
+                        + (if $derived then aggregate_text($row) else "median of \($row.runs) runs, min and max beside it" end)
                         + (if ($row.flags | length) > 0 then "; flags \($row.flags | join(" "))" else "" end)}}
     else notm($row.reason // $row.status) end;
 

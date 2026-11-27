@@ -79,6 +79,7 @@ function Value({row, cell}: {row: Row; cell: Cell}): ReactNode {
       <>
         <span className="sw-cmp-number">{count(cell.value)}</span> {cell.unit ?? row.unit ?? ''}
         <LoadedMark cell={cell} />
+        {cell.aggregate ? <div className="sw-cmp-secondary">{cell.aggregate}</div> : null}
         {typeof cell.runs === 'number' ? (
           <div className="sw-cmp-secondary">
             median of {count(cell.runs)} runs
@@ -232,7 +233,8 @@ export default function Compare(): ReactNode {
           </span>{' '}
           beside a figure of our runs: {LOADED_MEANS}. A figure made of others, such as a geomean, is loaded when any of them was. The
           reason follows the mark: <code>neighbour</code>, another pool job ran on the node; <code>load</code>, the node’s load per CPU
-          was over the bound; <code>unwatched</code>, the run has no record of the node. See the{' '}
+          was over the bound; <code>unwatched</code>, the run has no record of the node. A loaded figure does not rank: when one of the
+          figures compared in a row is loaded, none of them is marked “best of the picked”. See the{' '}
           <Link to="/docs/kpis">KPI page</Link>.
         </p>
         <p className="sw-cmp-foot">

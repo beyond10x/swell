@@ -42,6 +42,13 @@ export interface Cell {
   loaded?: boolean;
   /** Why it is loaded, when it is: neighbour, load or unwatched (bench/RUNBOOK.md); a list when more than one holds. */
   loaded_reason?: string | string[];
+  /**
+   * A figure of our runs: false when it may not rank (it was not measured alone); a comparison
+   * that holds such a figure gets no mark "best of the picked". Absent on other sources.
+   */
+  ranks?: boolean;
+  /** A derived figure (a geomean): what it is, in place of a median of runs with min and max. */
+  aggregate?: string;
   source?: Source;
 }
 
@@ -128,23 +135,27 @@ export function kpiAnchor(kpi: string): string {
  * The best of the picked cells of a row, by the row's direction, among cells of the same basis
  * (the same runner and revision): a test262 count of swell's runner is never ranked against a
  * count of the zoo runner at another revision. A basis needs two picked cells to have a best.
- * A count with a total is ranked by its share of that total. Returns the ids of the best cells.
+ * A count with a total is ranked by its share of that total. A basis that holds a figure with
+ * `ranks: false` (written by site-data for a figure not measured alone) has no best: a figure
+ * measured beside another job does not rank, and nothing ranks against it. Returns the ids of
+ * the best cells.
  */
 export function bestOf(row: Row, picked: Engine[]): Set<string> {
   const best = new Set<string>();
   if (!row.direction) return best;
-  const byBasis = new Map<string, Array<{id: string; score: number}>>();
+  const byBasis = new Map<string, Array<{id: string; score: number; ranks: boolean}>>();
   for (const e of picked) {
     const c = e.values[row.id];
     if (!c || typeof c.value !== 'number' || !c.basis) continue;
     if (c.status !== 'measured' && c.status !== 'published') continue;
     const score = typeof c.of === 'number' && c.of > 0 ? c.value / c.of : c.value;
     const list = byBasis.get(c.basis) ?? [];
-    list.push({id: e.id, score});
+    list.push({id: e.id, score, ranks: c.ranks !== false});
     byBasis.set(c.basis, list);
   }
   for (const list of byBasis.values()) {
     if (list.length < 2) continue;
+    if (list.some((x) => !x.ranks)) continue;
     const top = row.direction === 'higher' ? Math.max(...list.map((x) => x.score)) : Math.min(...list.map((x) => x.score));
     for (const x of list) if (x.score === top) best.add(x.id);
   }
