@@ -6,7 +6,7 @@ status: draft
 title: Wave big-2 takes the story of the gate's test steps on the slower runner as lane unit 6
 relations:
 - decides: story:gate-test-steps-hold-the-budget-on-the-slower-runner
-revision: 1
+revision: 2
 ---
 The forge ran `check` on the first pull request of wave big-2 at `fd71252b` on 2026-11-27 (run
 45979562872, attempt 1) and failed it with `gate-time: the test steps ran 147.6 s, over the
@@ -17,7 +17,7 @@ CPU seconds for the same work.
 The coordinator put the question to the operator with two options: merge the pull request
 when a second attempt of the run is green, and build a unit that makes the test steps hold
 120 s on the slower runner before the wave's second pull request; or hold the pull request
-until that unit is built. The operator's decision of 2026-11-27, about 11:40 CET: the first
+until that unit is built. The operator's decision of 2026-11-27, 11:31 CET: the first
 option, and the unit, with a line in the log of `check` that names the runner's CPU, is built
 before any further feature unit.
 
