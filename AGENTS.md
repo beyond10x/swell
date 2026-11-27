@@ -637,6 +637,12 @@ test steps took 46.9 s of their 120 (360.5 CPU seconds, of them `test` 164.8 and
 line prints no bound). The step `test` runs in two runs since
 `story:gate-test-steps-hold-the-budget-on-the-slower-runner`, and the build of the run at
 opt-level 1 is outside the clock of the test steps (the line `build-tests opt-level 1`). On
+the forge's runner of 4 cores (`gate-runner: 4 cores, AMD EPYC 7763 64-Core Processor`) the
+first attempt of `check` on `5ab9f8e5` took 117.6 s of the 120 (407.6 CPU seconds, yardstick
+3.9 s; run 46069632845); a runner of the same yardstick took 147.6 s on the head of the
+wave's first pull request. With 2.4 s left, a change that adds tests to the gate can take
+the forge over its budget while the build node reads 40 to 50 s: the lane's seventh unit
+comes before any further feature unit (`docs/plan/wave-big-2.md`, "The forge"). On
 `impl/lanefix` at `e3c97c4`, the head of the wave's first pull request but for the planning
 store, the node took 35.3 s at load 12 (429.5 CPU seconds, of them `test` 272.0). On
 `wave/big-2` at `b9adbe35`, the head of the second part of wave big-2, the node took 65.5 s

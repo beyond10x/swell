@@ -8,7 +8,7 @@ summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in
 relations:
 - informed_by: story:realm-size-lane-within-its-share
 - informed_by: story:slow-lane-holds-its-bound-on-the-slower-runner
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T10:38:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T10:38:24Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
@@ -346,3 +346,18 @@ above, and what was measured:
 - The acceptance on the forge (the test steps of the first attempt of `check` against its
   yardstick and the budget, the duration of the job, the lane's `slow-time slow-tests`) is
   read on the wave's second pull request.
+
+- Read on the wave's second pull request, on its head `5ab9f8e5` (2026-11-27). The first
+  attempt of `check` on the forge (run 46069632845) is green and prints `gate-runner: 4
+  cores, AMD EPYC 7763 64-Core Processor, 16366632 kB, sh is dash`, `gate-time test-steps
+  117.6 of 120, cpu 407.6, load 4.65 on 4 cores` and `gate-time yardstick 3.9 s:
+  conform-engine 1.9 and test262-moves-check 2.0`. The budget of 120 s holds with 2.4 s. The
+  bound of 29.5 yardsticks does not: it is 115.1 s on that runner, and the run read 117.6 s
+  (30.2 yardsticks). So the first line of the acceptance is not met, and the story stays
+  active. A runner of the same yardstick (3.8 s) read 147.6 s before the unit (`fd71252b`,
+  run 45979562872: `test` 80.6 s, `test-collect` 33.1 s, `gate-selftest` 24.6 s); with the
+  unit `test` reads 46.6 s with 87 more tests, `test-collect` 33.8 s and `gate-selftest`
+  28.0 s. The job `check` took 16 min 29 s of its 30 minutes (6 min 49 s in run
+  45972624878). The guard holds: the lane's `slow-time slow-tests` read 145.3 s (run
+  46069633020). What is left of the story is a further cut, built as a seventh unit of the
+  lane before any further feature unit.

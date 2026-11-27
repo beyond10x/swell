@@ -644,7 +644,52 @@ section and the commit that merged its unit: `story:private-fields-and-private-i
 `story:slice-08-conformance-close`. The acceptance of the two stories of the lane,
 `story:property-escape-cases-spend-less-in-the-interpreter-loop` and
 `story:gate-test-steps-hold-the-budget-on-the-slower-runner`, is read on the forge's runs of
-the pull request's head; each gets its `test_result` from those runs.
+the pull request's head; the subsection "The forge" below gives what they read.
 
 Slice 8 and slice 9 are delivered: ten of nineteen slices. Not in this pull request:
 `story:bench-image-and-first-measurements`, which has a draft pull request of its own.
+
+### The forge
+
+The forge's runs of the head of the pull request (`5ab9f8e5`), 2026-11-27, all green.
+
+The first attempt of `check` (run 46069632845) prints:
+
+```
+gate-runner: 4 cores, AMD EPYC 7763 64-Core Processor, 16366632 kB, sh is dash
+test: swell::main 1647 at opt-level 1, 123 at opt-level 0
+gate-time test 46.6
+gate-time test-collect 33.8
+gate-time gate-selftest 28.0
+gate-time test-steps 117.6 of 120, cpu 407.6, load 4.65 on 4 cores
+gate-time yardstick 3.9 s: conform-engine 1.9 and test262-moves-check 2.0
+```
+
+The test steps hold their budget of 120 s with 2.4 s. They do not hold the bound of
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, 29.5 times the yardstick: that
+is 115.1 s on this runner, and the run read 117.6 s (30.2 yardsticks). The story stays
+active. A runner of the same yardstick (3.8 s) took 147.6 s on the head of the first pull
+request (`fd71252b`, run 45979562872), with the step `test` at 80.6 s, `test-collect` at
+33.1 s and `gate-selftest` at 24.6 s; the unit's cut took the step `test` to 46.6 s while
+the part added 87 tests to it, and it moves no other step. The job `check` took 16 min 29 s
+of its 30 minutes (6 min 49 s in run 45972624878); the build of the run at opt-level 1 took
+5 min 15 s of it. The next cut is a seventh unit of the lane, planned and built before any
+further feature unit.
+
+The lane `slow` (run 46069633020) prints:
+
+```
+slow-runner: 4 cores, AMD EPYC 9V45 96-Core Processor, 16366632 kB, sh is dash
+slow-time slow-test262 359.8
+slow-time slow-tests 145.3
+slow-time test-realm-sizes 149.6
+slow-time stack-profiles 18.3
+slow-time lane 673.0 of 900, longest part slow-test262 359.8 of 600
+```
+
+On the head of the first pull request the lane read 882.6 s with `slow-test262` at 504.8 s
+(run 45963552396). `story:property-escape-cases-spend-less-in-the-interpreter-loop` gets
+this run as its `test_result` and is implemented; the commit that records it is not in the
+head of the second pull request and comes with the next one, so that the head is not built
+on the forge a second time on a margin of 2.4 s. The guard of the sixth unit's story holds:
+`slow-time slow-tests` reads 145.3 s, under its 175.
