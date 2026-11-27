@@ -875,6 +875,29 @@ from slice 10) keeps the charges it holds, which move with it, until its generat
 a termination drops it while it runs, or the sweep that frees the object holding it credits them
 ("Suspended frames" below, item 3).
 
+Before each key's turn, `ForInNext` reads whether the key is still a property ("A property
+that is deleted before it is processed is ignored", `#sec-enumerate-object-properties`) with
+the methods the enumeration itself called, [[GetOwnProperty]] and [[GetPrototypeOf]]; it never
+calls HasProperty, so no `has` trap runs. A chain in which the walk met no Proxy is read
+along [[GetPrototypeOf]] from the object, with a step per prototype as OrdinaryHasProperty
+charges: it costs the steps and bytes HasProperty cost, no code runs and nothing is kept.
+When the walk of EnumerateObjectProperties meets a Proxy, it keeps on the kept stack, in room
+charged before anything is kept and given back on every way out, the keys visited so far,
+each object of the chain and each object's own keys, and it records the chain of objects it
+goes through: the object, then each prototype in the order [[GetPrototypeOf]] answered them,
+the ordinary objects before the first Proxy included. That list is charged by its capacity
+before it grows and is held by the loop's enumerator, which the collector traces; it is
+credited when the enumerator leaves the operand stack, with its frame, or with a collected
+generator that held that frame. The loop follows the chain its walk recorded, once: before
+each key's turn it asks [[GetOwnProperty]] of the objects of that chain, in order, until one
+has the key, with a step before each object after the first, and it calls no
+[[GetPrototypeOf]] again, so each object of the chain is asked for its prototype once, by the
+walk. A key is ignored only when no object of the chain has it at its turn; a key that an
+earlier object of the chain gained after the walk is still visited. A change of a prototype in
+the chain during the loop (`Object.setPrototypeOf`, a `setPrototypeOf` trap) changes neither
+the objects the loop reads nor their order. A cycle of `getPrototypeOf` answers ends in the
+walk, at the step budget or at the memory budget, whichever comes first.
+
 **Depth bounds,** each a limit the host sets, each ending in an outcome:
 
 - The parser (nested expressions, statements, functions): a nesting counter in the recursive

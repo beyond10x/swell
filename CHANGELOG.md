@@ -195,7 +195,35 @@ Every number below comes from the gate, `task check`, on the released commit.
   name is not supported before slice 8` of the lexer is gone
   (`story:class-element-syntax-and-early-errors`).
 
+- The seven traps of shape of Proxy exotic objects: `getPrototypeOf`, `setPrototypeOf`,
+  `isExtensible`, `preventExtensions`, `getOwnPropertyDescriptor`, `defineProperty` and
+  `ownKeys` (`#sec-proxy-object-internal-methods-and-internal-slots`, 10.5.1 to 10.5.6 and
+  10.5.11). Each is called with the clause's arguments and its answer is checked against the
+  target by the 21 invariants of those clauses; the target is read only at the steps of the
+  clause and only under their conditions. A broken invariant throws a `TypeError` that names
+  the trap, the key and the invariant's number (`I1` to `I21`). The answer of `ownKeys` is
+  made a list by CreateListFromArrayLike with a step per element, each check of the clause
+  spends a step per key, and the map of the answer's keys and the list of the target's
+  non-configurable keys are charged to the memory budget before they are made: a trap that
+  answers an array-like of length 2^32 - 1 ends at the step budget or the memory budget. A
+  trap runs code and the collector may run inside it, so every value used after a trap is kept
+  until its last use (`JSON.stringify` and the reviver walk of `JSON.parse`, `Object.keys`,
+  `values` and `entries`, `for`-`in`, OrdinaryHasInstance and
+  `Object.prototype.isPrototypeOf`); a trap's arguments are released when it returns, and no
+  internal method of a Proxy keeps more than 10 values outside a charged room.
+  `for`-`in` over an object whose prototype chain has a Proxy reads whether a key is still a
+  property with [[GetOwnProperty]] along the chain its enumeration walked: it calls no `has`
+  trap, a `getPrototypeOf` trap is called once per object, and the keys of the prototype such
+  a trap answered are visited. A chain of ordinary objects costs the steps it cost before
+  (`story:proxy-descriptor-prototype-and-extensibility-traps`).
+
 ### Changed
+
+- A Proxy method called directly by a builtin no longer counts one re-entry more than code
+  that the builtin calls: the builtin's activation is that re-entry, as in
+  `Agent::enter_code`. `Object.keys` of a Proxy whose `ownKeys` trap recurses reaches
+  `reentry_depth`, where it stopped one level short
+  (`story:proxy-descriptor-prototype-and-extensibility-traps`).
 
 - The lane `slow` states its bound: `task slow` fails when it ran over 900 s or one of its
   parts over 600 s, naming the part and its seconds (`slow-time-sum`); it also fails a lane
