@@ -19,7 +19,7 @@ relations:
 - decides: story:private-names-in-eval-code
 - decides: story:host-ensure-can-add-private-element
 - decides: story:slice-08-conformance-close
-revision: 1
+revision: 2
 ---
 ## What the operator said
 
@@ -43,7 +43,7 @@ starts beside slice 9's second; B: a wave big-3 of its own with its own pull req
 them until the operator has read the plan). The answer, relayed on 2026-11-26 at about
 09:20 CET by the session that decides for the operator, on the operator's delegation:
 
-> D38 A — slice 8 joins wave big-2 (one PR, 24 stories), approval record as for big-2.
+> A — slice 8 joins wave big-2 (one PR, 24 stories), approval record as for big-2.
 
 ## What this record moves
 

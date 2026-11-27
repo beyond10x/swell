@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-27T09:54:45Z",
+  "actor": "human:operator",
+  "artifact": "review-result:adversary-evalfields-pass-1",
+  "kind": "review-result",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "d6766ff60624324eed97d234ccff410efc03dccabe0e322ebe28a210c779dc22",
+    "literal_chars": 31,
+    "replacement": "a file under the scratch directory of the session",
+    "count": 1,
+    "reason": "a path under a home directory; the repository holds no private path"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-27T09:54:46Z",
+  "actor": "human:operator",
+  "artifact": "approval-record:wave-big-2-slice-8",
+  "kind": "approval-record",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "26dead219b43c24a48e1f485857a5cf0b64dac8be2c1d950bdaccff4c3b035b6",
+    "literal_chars": 8,
+    "replacement": "> A ",
+    "count": 1,
+    "reason": "a decision number of the coordinating session; the repository holds none"
+  }
+}
