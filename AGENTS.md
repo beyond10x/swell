@@ -340,6 +340,46 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   shown red in collect mode with the defect the test exists for planted. The full count of the parser's stack-bound check is 7,500
   levels on three quarters of the stack of `parser_nesting` 10,000, and the gate count 2,500
   on a quarter; the derivation is in `crates/syntax/tests/sources.rs`.
+- The walk that gives every function of the realm a Symbol (the tests of
+  `builtins_symbol_values` named
+  `every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error` and its
+  `_part_<q>`) reads its functions from `crates/swell/tests/fixtures/realm_places.txt`, one
+  place per line, and runs in parts: a place is in the part its line hashes to (FNV-1a,
+  64 bit, modulo the length of `WALK_PARTS`). Each part takes from the file what it owes (its
+  places, their calls, the `Always` rows of `WALK_EXPECTED` among them) before it walks and
+  compares after. `the_realm_places_file_equals_the_walk` makes the list again in the default
+  mode at every run and fails when the file differs, its two comment lines included.
+  - A unit that adds or removes a function of the realm runs `slot --timeout 30m --fetch
+    crates/swell/tests/fixtures task realm-places-expected` and commits the file, and
+    `the_partition_of_the_file_agrees_with_an_fnv_computed_apart` gets the new part sizes the
+    run prints.
+  - No test of the collect build makes the walk, so a function that only the collect build
+    has is unseen there. The guard: no code that defines a property of the realm depends on
+    the feature `collect-every-safe-point`, checked with `git grep -cE 'feature *=
+    *"collect-every-safe-point"' -- crates/swell/src`, which prints these eight lines:
+    `crates/swell/src/heap/collect.rs:2`, `crates/swell/src/host/agent.rs:1`,
+    `crates/swell/src/host/jobs.rs:1`, `crates/swell/src/interp/dispatch.rs:1`,
+    `crates/swell/src/object/builtin_function.rs:3`,
+    `crates/swell/src/object/ecmascript_function.rs:1`, `crates/swell/src/ops/objects.rs:4`,
+    `crates/swell/src/script.rs:1`. A unit whose grep prints otherwise reports the new line
+    and whether it defines a property of the realm, and the coordinator updates this list at
+    the merge.
+  - A unit that adds functions to the realm measures each part, in the default mode and in
+    the collect mode, at the gate count and at the full count, and
+    `the_realm_places_file_equals_the_walk` in the default mode. A part over four fifths of
+    its bound (1.2 CPU seconds in the default mode, 1.6 in the collect mode at the gate count,
+    2.0 at the full count) makes it add parts to `WALK_PARTS`, measuring every part again,
+    until no part is over, up to 8 parts (the cover test refuses a ninth). Past 8 parts, or
+    with `the_realm_places_file_equals_the_walk` over 1.2 CPU seconds, the walk is a defect
+    that gets a story: the unit reports the readings and adds no part.
+  - The gate's steps `build`, `build-tests`, `test` and `test-doc` and the writer take
+    `TEST_RUSTFLAGS` and `TEST_NEXTEST_ARGS` from `taskfiles/realm-places.yml` only; a value
+    given on the command line, or exported with that file missing, fails the step
+    (`test-vars-check`). The lane's steps (`slow-tests`, `build-realm-sizes`),
+    `taskfiles/collect-mode.yml`, `taskfiles/test-binaries.yml` and the steps with a manifest
+    or a target of their own (`conform-engine`, `fault-injection`, `host-requirements`,
+    `nostd`) keep a literal `-D warnings` of their own: a change of `TEST_RUSTFLAGS` does not
+    reach them.
 - A new language script stays under 0.5 CPU seconds per run, and a new test under 2 s alone,
   with a collection at every safe point. Measured with
   `SWELL_SCRIPT_TIMES=1 cargo nextest run --locked -p swell --features
@@ -430,11 +470,17 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   refused; `gate-selftest` runs all of them. A script works only under `.out/gate-tests/`.
 - Task facts, measured in wave 1 (Task 3.54):
   - Task takes a variable from the environment when none is passed on the command line. A
-    gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `UNICODE_DATA_`, `SPEC_`,
-    `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`, `NOSTD_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
+    gate variable therefore carries a prefix (`GATE_`, `TEST262_`, `TEST_`, `UNICODE_DATA_`,
+    `SPEC_`, `HOST_REQ_`, `HOST_SURFACE_`, `ESS_`, `SITE_DATA_`, `LIBM_`, `MATH_DATA_`,
+    `NOSTD_`) and is listed in `GATE_VARIABLES` of the task `gate-vars`, which prints the
     ones that have a value as the gate's first line.
   - A variable is written as `'{{.X | default "..."}}'`: in an included file a plain value
     ignores the command line.
+    Measured with Task 3.54.0 in wave big-2: a plain value under the top-level `vars:` of a
+    flattened optional include (`taskfiles/realm-places.yml`) is overridden by the command
+    line and is not overridden by an exported value while the file exists. The task
+    `test-vars-check` refuses a command-line value and an exported value with the file
+    missing.
   - A command script stops at the first failing command, and a `grep` that matches nothing
     fails: write `|| true` where no match is a valid answer.
   - A check that finds nothing to read fails. A check that passes on an empty input is a bug.
