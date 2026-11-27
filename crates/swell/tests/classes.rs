@@ -675,17 +675,32 @@ fn sloppy_statements(n: u32) -> String {
         .replace('@', &n.to_string())
 }
 
-/// `#sec-strict-mode-code`, the computed key of every kind of class element in non-strict
-/// code, at the top of a script and in a non-strict function: an assignment to an undeclared
-/// name throws a `ReferenceError` (PutValue, step 3.a), a write to a frozen object and
-/// `delete` of a non-configurable property a `TypeError` (step 5.d,
-/// `#sec-delete-operator-runtime-semantics-evaluation`, step 5.d), an assignment to the name of
-/// a named function expression a `TypeError` (SetMutableBinding of an immutable binding,
-/// `#sec-declarative-environment-records-setmutablebinding-n-v-s`, step 4), a direct `eval`
-/// is strict eval code (PerformEval, step 10): its `var` stays in its own environment and its
-/// assignment to an undeclared name throws a `ReferenceError`.
-#[test]
-fn every_strict_operation_in_a_computed_key_is_strict() {
+/// An operation in a computed key that only strict mode code refuses, and what it throws there.
+#[derive(Clone, Copy)]
+enum StrictOperation {
+    /// An assignment to an undeclared name: a `ReferenceError` (PutValue, step 3.a).
+    UndeclaredAssignment,
+    /// A write to a frozen object: a `TypeError` (PutValue, step 5.d).
+    FrozenWrite,
+    /// `delete` of a non-configurable property: a `TypeError`
+    /// (`#sec-delete-operator-runtime-semantics-evaluation`, step 5.d).
+    Delete,
+    /// An assignment to the name of a named function expression: a `TypeError`
+    /// (SetMutableBinding of an immutable binding,
+    /// `#sec-declarative-environment-records-setmutablebinding-n-v-s`, step 4).
+    FunctionNameAssignment,
+    /// A direct `eval` that assigns an undeclared name: strict eval code (PerformEval, step
+    /// 10), a `ReferenceError`.
+    EvalAssignment,
+    /// A direct `eval` that declares a `var`: strict eval code, so the `var` stays in the
+    /// eval's own environment.
+    EvalVar,
+}
+
+/// The script of the strictness tests of computed keys: each of `operations` in the computed
+/// key of every kind of class element (method, getter, setter, each static too), at the top
+/// of a script and in a non-strict function; it answers `true` when each result is `true`.
+fn strict_operations_script(operations: &[StrictOperation]) -> String {
     let positions = [
         ("", "() {}"),
         ("get ", "() {}"),
@@ -705,37 +720,37 @@ fn every_strict_operation_in_a_computed_key_is_strict() {
                     "try {{ {code} r.push(\"none {n}\"); }} catch (e) {{ r.push(e instanceof {error} || \"wrong {n} \" + e); }}\n"
                 )
             };
-            n += 1;
-            body.push_str(&threw(
-                n,
-                class(&format!("(u{n} = 1, \"k\")")),
-                "ReferenceError",
-            ));
-            n += 1;
-            body.push_str(&threw(n, class("(frozen.x = 2, \"k\")"), "TypeError"));
-            n += 1;
-            body.push_str(&threw(
-                n,
-                class("(delete Object.prototype, \"k\")"),
-                "TypeError",
-            ));
-            n += 1;
-            let nfe = format!(
-                "(function nfe{n}() {{ {} }})();",
-                class(&format!("(nfe{n} = 1, \"k\")"))
-            );
-            body.push_str(&threw(n, nfe, "TypeError"));
-            n += 1;
-            body.push_str(&threw(
-                n,
-                class(&format!("eval(\"ue{n} = 1; 'k'\")")),
-                "ReferenceError",
-            ));
-            n += 1;
-            let leak = class(&format!("eval(\"var leaked{n} = 1; 'k'\")"));
-            body.push_str(&format!(
-                "{{ {leak} }}\nr.push(typeof leaked{n} === \"undefined\" || \"leaked {n}\");\n"
-            ));
+            for operation in operations {
+                n += 1;
+                body.push_str(&match operation {
+                    StrictOperation::UndeclaredAssignment => {
+                        threw(n, class(&format!("(u{n} = 1, \"k\")")), "ReferenceError")
+                    }
+                    StrictOperation::FrozenWrite => {
+                        threw(n, class("(frozen.x = 2, \"k\")"), "TypeError")
+                    }
+                    StrictOperation::Delete => {
+                        threw(n, class("(delete Object.prototype, \"k\")"), "TypeError")
+                    }
+                    StrictOperation::FunctionNameAssignment => threw(
+                        n,
+                        format!(
+                            "(function nfe{n}() {{ {} }})();",
+                            class(&format!("(nfe{n} = 1, \"k\")"))
+                        ),
+                        "TypeError",
+                    ),
+                    StrictOperation::EvalAssignment => threw(
+                        n,
+                        class(&format!("eval(\"ue{n} = 1; 'k'\")")),
+                        "ReferenceError",
+                    ),
+                    StrictOperation::EvalVar => format!(
+                        "{{ {} }}\nr.push(typeof leaked{n} === \"undefined\" || \"leaked {n}\");\n",
+                        class(&format!("eval(\"var leaked{n} = 1; 'k'\")"))
+                    ),
+                });
+            }
         }
         if context == "script" {
             source.push_str(&body);
@@ -744,7 +759,36 @@ fn every_strict_operation_in_a_computed_key_is_strict() {
         }
     }
     source.push_str(&format!("r.length === {n} && {STRICT_ANSWER}"));
-    both_pass(&source);
+    source
+}
+
+/// `#sec-strict-mode-code`, the computed key of every kind of class element in non-strict
+/// code, at the top of a script and in a non-strict function (48 results): an assignment to an
+/// undeclared name throws a `ReferenceError`, a write to a frozen object, `delete` of a
+/// non-configurable property and an assignment to the name of a named function expression a
+/// `TypeError` ([`StrictOperation`]). The direct `eval` of the same keys is
+/// [`a_direct_eval_in_a_computed_key_is_strict_eval_code`]; the two were one test, split so
+/// that each takes under 1.2 CPU s alone in the lane's collect build (1.743 together).
+#[test]
+fn every_strict_write_in_a_computed_key_throws() {
+    both_pass(&strict_operations_script(&[
+        StrictOperation::UndeclaredAssignment,
+        StrictOperation::FrozenWrite,
+        StrictOperation::Delete,
+        StrictOperation::FunctionNameAssignment,
+    ]));
+}
+
+/// `#sec-strict-mode-code`: a direct `eval` in the computed key of every kind of class element
+/// in non-strict code, at the top of a script and in a non-strict function (24 results), is
+/// strict eval code (PerformEval, step 10): its assignment to an undeclared name throws a
+/// `ReferenceError` and its `var` stays in its own environment.
+#[test]
+fn a_direct_eval_in_a_computed_key_is_strict_eval_code() {
+    both_pass(&strict_operations_script(&[
+        StrictOperation::EvalAssignment,
+        StrictOperation::EvalVar,
+    ]));
 }
 
 /// The code around a class in non-strict code stays non-strict (`#sec-strict-mode-code`: only
@@ -930,4 +974,241 @@ fn to_string_of_a_static_method_skips_static_and_its_trivia() {
          A.m.toString() === \"m() {}\" && A.n.toString() === \"n() {}\"\n\
            && A.prototype.staticab.toString() === \"static\\\\u0061b() {}\";",
     );
+}
+
+/// The answer of a script that pushes its results to `r`: `true` when `r` has `n` entries and
+/// each is `true`, the list otherwise.
+fn every_entry_is_true(n: usize) -> String {
+    format!("\nr.length === {n} && {STRICT_ANSWER}")
+}
+
+/// Every way into and out of the code of a class in non-strict code that the second
+/// adversary pass found (`#sec-strict-mode-code`): the mapped `arguments`, `this` and
+/// `arguments.callee` of the non-strict function around a key, arrow functions and methods in a
+/// key (strict), an indirect `eval` and `Function` in a key (non-strict), a class in a parameter
+/// default, a `with` body, a `switch` case and its test, a tagged template, a labelled block,
+/// `break` and `continue` in a `finally` after a generator's `return` or `throw` resumed in a
+/// key, a key that re-enters its own function, eval code and `Function` code with a class, a
+/// class in strict code and in a method, a strict generator's `return` in a key through a
+/// `finally`, three nested classes, loops and `??`: before, inside and after each class.
+/// Found by the adversary's second pass; result 32 holds the mutant of `exit_return` that puts
+/// non-strict code back after a `return` out of class code in strict code.
+#[test]
+fn every_way_into_and_out_of_class_code_keeps_its_strictness() {
+    let source = String::from(
+        r#"
+var r = [], G = this;
+function thrower() { throw new Error("key"); }
+function fa(a) { class C { [(arguments[0] = 9, "k")]() {} } return a === 9; }
+r.push(fa(1) || "1 mapped arguments in key");
+function fb() { class C { [arguments.callee === fb ? "y" : "n"]() {} } return C; }
+try { r.push(typeof fb().prototype.y === "function" || "2 callee in key"); } catch (e) { r.push("2 threw " + e); }
+function ft() { class C { [this === G ? "y" : "n"]() {} } return C; }
+r.push(typeof ft().prototype.y === "function" || "3 this in key");
+function fe() { class C { [eval("this") === G ? "y" : "n"]() {} } return C; }
+r.push(typeof fe().prototype.y === "function" || "4 eval this in key");
+function fr() { class C { [(() => this)() === G ? "y" : "n"]() {} } return C; }
+r.push(typeof fr().prototype.y === "function" || "5 arrow this in key");
+try { class C { [(() => { ua6 = 1; return "k"; })()]() {} } r.push("6 none"); } catch (e) { r.push(e instanceof ReferenceError || "6 " + e); }
+try { class C { [({ m() { ua7 = 1; return "k"; } }).m()]() {} } r.push("7 none"); } catch (e) { r.push(e instanceof ReferenceError || "7 " + e); }
+class C8 { [(0, eval)("ui8 = 1; 'k'")]() {} }
+r.push(typeof ui8 === "number" || "8 indirect eval");
+class C9 { [Function("uf9 = 1; return 'k'")()]() {} }
+r.push(typeof uf9 === "number" || "9 Function");
+function pd(a = class { [(up10 = 1, "k")]() {} }) {}
+try { pd(); r.push("10 none"); } catch (e) { r.push(e instanceof ReferenceError || "10 " + e); }
+function pd2(a = class { ["k"]() {} }) { up11 = 1; return typeof up11 === "number" && typeof a === "function"; }
+r.push(pd2() || "11 body after param class");
+function pd3(a = class { ["k"]() {} }, b = (up12 = 1)) { return typeof up12 === "number"; }
+try { r.push(pd3() || "12 param after param class"); } catch (e) { r.push("12 " + e); }
+function pd4(a = class { [eval("var pv13 = 1; 'k'")]() {} }, b = typeof pv13) { return b; }
+r.push(pd4() === "undefined" || "13 eval in param class " + pd4());
+var wo = { wx: 0 };
+with (wo) { class W { [(wx = 1, "k")]() {} } try { class D { [(wy14 = 1, "k")]() {} } r.push("14 none"); } catch (e) { r.push(e instanceof ReferenceError || "14 " + e); } wz15 = 1; }
+r.push(wo.wx === 1 && typeof wz15 === "number" || "15 with");
+switch (1) { case 1: class S1 { ["k"]() {} } case 2: us16 = 1; }
+r.push(typeof us16 === "number" || "16 switch");
+try { switch (2) { case (class { ["k"]() {} }, 1): r.push("17 wrong case"); break; case (us17 = 2): r.push(true); } } catch (e) { r.push("17 " + e); }
+function tag(s, v, w) { return v; }
+try { tag`${class { [(ut18 = 1, "k")]() {} }}`; r.push("18 none"); } catch (e) { r.push(e instanceof ReferenceError || "18 " + e); }
+try { tag`${class { ["k"]() {} }}${(ut19 = 1)}`; r.push(typeof ut19 === "number" || "19"); } catch (e) { r.push("19 " + e); }
+lab: { class L { ["k"]() {} } ul20 = 1; break lab; }
+r.push(typeof ul20 === "number" || "20 label");
+function* gb() { for (;;) { try { class C { [(yield 1, "k")]() {} } } finally { break; } } ug21 = 1; yield typeof ug21; }
+var it = gb(); it.next();
+try { var x = it.return(5); r.push(x.value === "number" && x.done === false || "21 " + JSON.stringify(x)); } catch (e) { r.push("21 " + e); }
+function* gc() { var n = 0; for (;;) { try { class C { [(yield n, "k")]() {} } } catch (e) { if (n++) break; continue; } } ug22 = 1; yield typeof ug22; }
+it = gc(); it.next(); it.throw(1);
+try { x = it.throw(2); r.push(x.value === "number" || "22 " + JSON.stringify(x)); } catch (e) { r.push("22 " + e); }
+function* gd() { outer: for (var i = 0; i < 2; i++) { for (;;) { try { class C { [(yield i, "k")]() {} } } finally { continue outer; } } } ug23 = 1; yield typeof ug23; }
+it = gd(); it.next(); it.return(0);
+try { x = it.return(0); r.push(x.value === "number" || "23 " + JSON.stringify(x)); } catch (e) { r.push("23 " + e); }
+function re(n) { var res = "none"; if (n) { try { class C { [(re(n - 1), ure = 1, "k")]() {} } } catch (e) { res = e instanceof ReferenceError; } } urz = n; return res; }
+r.push(re(2) === true && urz === 2 || "24 re-entry");
+eval("class E { ['k']() {} } ue25 = 1;");
+r.push(typeof ue25 === "number" || "25 eval after class");
+try { eval("class E { [(ue26 = 1, 'k')]() {} }"); r.push("26 none"); } catch (e) { r.push(e instanceof ReferenceError || "26 " + e); }
+(0, eval)("class E { ['k']() {} } ue27 = 1;");
+r.push(typeof ue27 === "number" || "27 indirect eval after class");
+Function("class E { ['k']() {} } uf28 = 1;")();
+r.push(typeof uf28 === "number" || "28 Function after class");
+function st() { "use strict"; class C { ["k"]() {} } try { ust29 = 1; return "none"; } catch (e) { return e instanceof ReferenceError; } }
+r.push(st() === true || "29 strict function after class");
+class M { m() { class I { ["k"]() {} } try { usm30 = 1; return "none"; } catch (e) { return e instanceof ReferenceError; } } }
+r.push(new M().m() === true || "30 method after class");
+function sty() { "use strict"; try { class C { [thrower()]() {} } } catch (e) {} try { ust31 = 1; return "none"; } catch (e) { return e instanceof ReferenceError; } }
+r.push(sty() === true || "31 strict catch after class");
+function* sg() { "use strict"; try { class C { [(yield 1, "k")]() {} } } finally { try { ust32 = 1; r.push("32 none"); } catch (e) { r.push(e instanceof ReferenceError || "32 " + e); } } }
+it = sg(); it.next(); it.return(1);
+function deep() { try { class A { [(class B { [(class C { [thrower()]() {} }, "b")]() {} }, "a")]() {} } } catch (e) { ud33 = 1; } return typeof ud33; }
+r.push(deep() === "number" || "33 deep");
+function deep2() { try { class A { [(class B { [(class C { ["c"]() {} }, ud34 = 1, "b")]() {} }, "a")]() {} } return "none"; } catch (e) { return e instanceof ReferenceError; } }
+r.push(deep2() === true || "34 deep2");
+var cnt = 0, iter = { [Symbol.iterator]() { return { next() { cnt++; return { value: undefined, done: cnt > 3 }; }, return() { return {}; } }; } };
+for (var v of iter) { class F { ["k"]() {} } uo35 = 1; }
+r.push(typeof uo35 === "number" || "35 for-of");
+var q = 0; do { class F2 { [(q++, "k")]() {} } if (q < 3) continue; uo36 = 1; } while (q < 3);
+r.push(typeof uo36 === "number" || "36 do-while continue");
+try { var w = null ?? class { [(uq37 = 1, "k")]() {} }; r.push("37 none"); } catch (e) { r.push(e instanceof ReferenceError || "37 " + e); }
+uq38 = 1; r.push(typeof uq38 === "number" || "38 after");
+"#,
+    ) + &every_entry_is_true(38);
+    sloppy_passes(&source);
+}
+
+/// NamedEvaluation of an anonymous class (`#sec-runtime-semantics-propertydefinitionevaluation`,
+/// IsAnonymousFunctionDefinition): under a computed key the key's ToPropertyKey runs once and
+/// before the class's own keys, a Symbol from `toString` gives `[description]`, numbers their
+/// String; `__proto__: class {}` (identifier or string) is the [[Prototype]] and names nothing,
+/// `["__proto__"]` names; parentheses keep the name and a comma expression does not; a named
+/// class keeps its name; assignment, `??=`, `||=`, pattern defaults, `let` and `const` name; a
+/// static `name` wins everywhere. Found by the adversary's second pass; results 2 and 3 hold
+/// the mutant of the resolver that names a class under a `__proto__` key.
+#[test]
+fn every_named_evaluation_names_an_anonymous_class_as_the_standard_does() {
+    let source = String::from(
+        r#"
+var r = [];
+var log = [];
+var key = { toString() { log.push("key"); return "nm"; } };
+var o = { [key]: class { static [(log.push("ckey"), "x")]() {} } };
+r.push(log.join() === "key,ckey" && o.nm.name === "nm" || "1 " + log.join() + " " + o.nm.name);
+var p1 = Object.getPrototypeOf({ __proto__: class {} });
+r.push(p1.name === "" || "2 proto " + p1.name);
+var p2 = Object.getPrototypeOf({ "__proto__": class {} });
+r.push(p2.name === "" || "3 proto string " + p2.name);
+var o3 = { ["__proto__"]: class {} };
+r.push(Object.getOwnPropertyDescriptor(o3, "__proto__").value.name === "__proto__" || "4 computed proto");
+r.push(({ ["pk"]: (class {}) }).pk.name === "pk" || "5 paren");
+r.push(({ ["ck"]: (0, class {}) }).ck.name === "" || "6 comma");
+r.push(({ ["nk"]: class X {} }).nk.name === "X" || "7 named");
+r.push(({ ["gk"]: class { static get name() { return "G"; } } }).gk.name === "G" || "8 getter");
+var sk = Symbol("d"), kk = { toString() { return sk; } };
+r.push(({ [kk]: class {} })[sk].name === "[d]" || "9 symbol via toString");
+var x; x = class { static name() {} }; r.push(typeof x.name === "function" || "10 assign");
+var y; y ??= class { static get name() { return "S"; } }; r.push(y.name === "S" || "11 ??=");
+var z = 0; z ||= class {}; r.push(z.name === "z" || "12 ||= " + z.name);
+var { dz = class { static get name() { return "D"; } } } = {}; r.push(dz.name === "D" || "13 pattern default");
+var { de = class {} } = {}; r.push(de.name === "de" || "14 pattern default name");
+let lc = class {}; const cc = class { static name() {} };
+r.push(lc.name === "lc" && typeof cc.name === "function" || "15 let const");
+var o16 = { [1e21]: class {}, [-0]: class {}, [0.5]: class {} };
+r.push(o16["1e+21"].name === "1e+21" && o16[0].name === "0" && o16["0.5"].name === "0.5" || "16 numbers");
+var once = 0, k17 = { toString() { once++; return "k17"; } };
+var o17 = { [k17]: class { static m() {} } };
+r.push(once === 1 || "17 toString count " + once);
+var o18 = { [(log.length = 0, "a")]: class { static [(log.push("inner"), "m")]() {} }, [(log.push("second"), "b")]: 1 };
+r.push(log.join() === "inner,second" || "18 order " + log.join());
+var o19 = { ["n19"]: class { static ["name"]() {} } };
+r.push(typeof o19.n19.name === "function" || "19 computed static name");
+var o20 = { async ["n20"]() {}, ["n21"]: async () => {}, ["n22"]: function* () {} };
+r.push(o20.n20.name === "n20" && o20.n21.name === "n21" && o20.n22.name === "n22" || "20 functions");
+var o23 = { ["a"]: class { static [Symbol.iterator]() {} } };
+r.push(Reflect.ownKeys(o23.a).map(String).join() === "length,name,prototype,Symbol(Symbol.iterator)" || "23 keys " + Reflect.ownKeys(o23.a).map(String).join());
+"#,
+    ) + &every_entry_is_true(21);
+    both_pass(&source);
+}
+
+/// A run ended by the step budget inside a computed key, in the frame of a non-strict
+/// function: the next run of the same function object starts with its code's strictness, and
+/// so does the next script. Found by the adversary's second pass.
+#[test]
+fn a_step_budget_in_a_key_leaves_no_strictness_behind() {
+    let zeros = "0,".repeat(400);
+    let mut l = limits();
+    l.steps_per_entry = 300;
+    let mut agent = agent_with(l).unwrap();
+    let realm = realm(&mut agent);
+    let define = format!(
+        "function f(n) {{ class C {{ [n ? ({zeros} \"k\") : \"k\"]() {{}} }} u = n; return typeof u; }} 0;"
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, &define),
+        Outcome::Normal("0".to_string())
+    );
+    assert_eq!(
+        eval_text(&mut agent, &realm, "f(1);"),
+        Outcome::Terminated(Termination::StepBudget)
+    );
+    let number = Outcome::Normal("\"number\"".to_string());
+    assert_eq!(eval_text(&mut agent, &realm, "f(0);"), number);
+    assert_eq!(eval_text(&mut agent, &realm, "v = 1; typeof v;"), number);
+}
+
+/// The strictness of a class's parts that the parser decides, in non-strict code: every
+/// early error of strict code in a key; a function in a key has an unmapped `arguments`
+/// whose `callee` throws; a non-strict function called from a key runs non-strict; `super`
+/// assignments, `with` references whose property went away, and an `async` function or arrow
+/// suspended in a key, before, inside and after the class. Found by the adversary's second
+/// pass.
+#[test]
+fn strict_semantics_hold_in_keys_of_every_kind() {
+    let source = String::from(
+        r#"
+var r = [], G = this;
+function syn(text, n) { try { eval(text); r.push(n + " parsed"); } catch (e) { r.push(e instanceof SyntaxError || n + " " + e); } }
+syn("class C { [delete x]() {} }", 1);
+syn("class C { [(function () { with (a) {} })]() {} }", 2);
+syn("class C { [010]() {} }", 3);
+syn("class C { [(eval = 1)]() {} }", 4);
+syn("class C { [(arguments = 1)]() {} }", 5);
+syn("class C { [yield]() {} }", 6);
+syn("class C { [let]() {} }", 7);
+syn("class C { [(function eval() {})]() {} }", 8);
+syn("class C { [(function (a, a) {})]() {} }", 9);
+syn("class C { ['\\01']() {} }", 10);
+syn("class C { [(a, a) => 1]() {} }", 11);
+syn("class C { [implements]() {} }", 12);
+class K13 { [(function (a) { arguments[0] = 2; return a; })(1)]() {} }
+r.push(typeof K13.prototype[1] === "function" || "13 unmapped in key fn");
+try { class K14 { [(function () { return arguments.callee; })()]() {} } r.push("14 none"); } catch (e) { r.push(e instanceof TypeError || "14 " + e); }
+function sl() { usl15 = 1; return this === G ? "k" : "n"; }
+class K15 { [sl()]() {} }
+r.push(typeof usl15 === "number" && typeof K15.prototype.k === "function" || "15 sloppy callee");
+class K16 { [(() => eval("var ev16 = 1; 'k'"))()]() {} }
+r.push(typeof ev16 === "undefined" || "16 eval in arrow in key");
+var proto = Object.freeze({ x: 1 });
+var obj = { __proto__: proto, m() { var res; try { class C { [(super.x = 2, "k")]() {} } res = "none"; } catch (e) { res = e instanceof TypeError; } super.x = 3; return res; } };
+try { r.push(obj.m() === true || "17 super put"); } catch (e) { r.push("17 " + e); }
+var wo2 = { wx: 0 };
+with (wo2) { try { class C { [(wx = (delete wo2.wx, 1), "k")]() {} } r.push("18 none"); } catch (e) { r.push(e instanceof ReferenceError || "18 " + e); } }
+var wo4 = { wx: 0 };
+with (wo4) { wx = (delete wo4.wx, 1); }
+r.push(wo4.wx === 1 || "19 sloppy with put");
+var wo3 = { wv: 5 }; Object.defineProperty(wo3, Symbol.unscopables, { get() { delete wo3.wv; return undefined; } });
+var got;
+with (wo3) { got = wv; }
+r.push(got === undefined || "20 sloppy with get " + got);
+var wo5 = { wv: 5 }; Object.defineProperty(wo5, Symbol.unscopables, { get() { delete wo5.wv; return undefined; } });
+with (wo5) { try { class C { [String(wv)]() {} } r.push("21 none"); } catch (e) { r.push(e instanceof ReferenceError || "21 " + e); } }
+async function aw() { try { class C { [await Promise.reject(1)]() {} } } catch (e) {} ua22 = 1; return typeof ua22; }
+aw().then(function (v) { r.push(v === "number" || "22 " + v); }, function (e) { r.push("22 rejected " + e); });
+var aa = async () => { class C { [(await 0, uaa23 = 1, "k")]() {} } };
+aa().then(function () { r.push("23 none"); }, function (e) { r.push(e instanceof ReferenceError || "23 " + e); });
+for (var i = 0; i < 2; i = (class { ["k"]() {} }, i + 1)) { continue; }
+uf24 = 1; r.push(typeof uf24 === "number" || "24 for update");
+"#,
+    );
+    sloppy_settles(&source, &every_entry_is_true(24));
 }
