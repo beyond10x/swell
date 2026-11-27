@@ -441,6 +441,70 @@ fn the_tables_are_sorted_and_disjoint() {
 }
 
 #[test]
+fn contains_around_answers_as_contains_over_its_whole_range() {
+    // Every property of the three tables, walked from U+0000 range by range: the range
+    // `contains_around` gives holds the code point asked, every code point of it answers as the
+    // code point does (it lies inside one range of the property, or in a gap between two), and
+    // the walk takes a bounded number of ranges, so that a subject read in order is answered with
+    // one search per range (`swell-regexp`, the matcher's class).
+    let aliases = data("PropertyValueAliases.txt");
+    let mut properties: Vec<(String, Property)> = Vec::new();
+    for fields in lines_of(&aliases, "gc") {
+        properties.push((fields[1].clone(), lone(&fields[1]).expect("gc")));
+    }
+    for fields in lines_of(&aliases, "sc") {
+        for name in ["sc", "scx"] {
+            let property = valued(name, &fields[1]).expect("sc");
+            properties.push((format!("{name}={}", fields[1]), property));
+        }
+    }
+    for names in BINARY {
+        properties.push((names[0].to_owned(), lone(names[0]).expect("binary")));
+    }
+    assert_eq!(properties.len(), 38 + 2 * 176 + BINARY.len());
+    for (name, property) in &properties {
+        let union = ranges(*property);
+        let mut c = 0u32;
+        let mut walked = 0usize;
+        loop {
+            let (held, first, last) = property.contains_around(c);
+            assert!(
+                first <= c && c <= last,
+                "{name}: U+{c:04X} outside {first:04X}..{last:04X}"
+            );
+            assert_eq!(held, property.contains(c), "{name}: U+{c:04X}");
+            let at = union.partition_point(|&(_, end)| end < first);
+            match union.get(at) {
+                Some(&(start, end)) if start <= first => assert!(
+                    held && last <= end,
+                    "{name}: {first:04X}..{last:04X} against {start:04X}..{end:04X}"
+                ),
+                next => assert!(
+                    !held && next.is_none_or(|&(start, _)| last < start),
+                    "{name}: {first:04X}..{last:04X} {held} before {next:04X?}"
+                ),
+            }
+            walked += 1;
+            if last >= 0x10FFFF {
+                break;
+            }
+            c = last + 1;
+        }
+        // At most each range of a table the property reads and each gap between them, and the
+        // rows of ScriptExtensions.txt for a value of Script_Extensions.
+        assert!(
+            walked <= 8 * union.len() + 2 * 206 + 2,
+            "{name}: {walked} ranges for {}",
+            union.len()
+        );
+        for c in [0x110000, u32::MAX] {
+            let (held, first, last) = property.contains_around(c);
+            assert!(!held && first <= c && c <= last, "{name}: {c:X}");
+        }
+    }
+}
+
+#[test]
 fn id_start_and_id_continue_answer_as_the_data_file() {
     // Each code point with the answers of `DerivedCoreProperties.txt` for `ID_Start` and
     // `ID_Continue`, printed by an awk lookup of its lines; the last twelve are the first and

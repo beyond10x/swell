@@ -382,6 +382,79 @@ fn a_class_charges_one_step_per_property_escape() {
     }
 }
 
+/// The runs of the code points `points` that `holds` answers the same for, in order: each its
+/// start and end in code units of their UTF-16 form, and the answer.
+#[cfg(test)]
+fn runs_of(points: &[u32], holds: impl Fn(u32) -> bool) -> Vec<(usize, usize, bool)> {
+    let mut runs: Vec<(usize, usize, bool)> = Vec::new();
+    let mut at = 0usize;
+    for &c in points {
+        let end = at + encode(c).len();
+        let held = holds(c);
+        match runs.last_mut() {
+            Some(run) if run.2 == held => run.1 = end,
+            _ => runs.push((at, end, held)),
+        }
+        at = end;
+    }
+    runs
+}
+
+/// The runs `program`, `(X+)|(Y+)`, finds in `subject` from 0 to its end, one search each, each
+/// with `true` when group 1 took it.
+#[cfg(test)]
+fn runs_found(program: &Program, subject: &[u16]) -> Vec<(usize, usize, bool)> {
+    let mut runs = Vec::new();
+    let mut from = 0usize;
+    while from < subject.len() {
+        let found = search(program, Subject::Utf16(subject), from, &mut Unlimited)
+            .expect("no stop")
+            .expect("a run");
+        let whole = found.captures.get(0).expect("group 0");
+        assert_eq!(whole.start, from, "a run starts where the last one ended");
+        runs.push((whole.start, whole.end, found.captures.get(1).is_some()));
+        from = whole.end;
+    }
+    runs
+}
+
+#[test]
+fn a_class_answers_each_character_of_a_long_subject_as_its_property_does() {
+    // A subject read up, then down, then in jumps: each run `(\p{X}+)|(\P{X}+)` finds ends where
+    // the property's answer changes, each of the pattern's two classes answering for itself,
+    // whatever the class answered for the character before.
+    let mut points: Vec<u32> = (0..0x3000).collect();
+    points.extend(0x1F000..0x1F700);
+    points.extend((0x2F00..0x3100).rev());
+    points.extend([
+        0xD800, 0x41, 0xDC00, 0x10FFFF, 0, 0x1F600, 0x0378, 0x10FFFE, 0x61, 0xE0001,
+    ]);
+    let subject: Vec<u16> = points.iter().flat_map(|&c| encode(c)).collect();
+    for (escape, property) in escapes() {
+        let program = program(&format!("(\\p{{{escape}}}+)|(\\P{{{escape}}}+)"), "u");
+        assert_eq!(
+            runs_found(&program, &subject),
+            runs_of(&points, |c| property.contains(c)),
+            "\\p{{{escape}}}"
+        );
+    }
+    let digit = lone_property(&units("Nd")).expect("Nd");
+    let mark = lone_property(&units("M")).expect("M");
+    let class = |c: u32| {
+        (0x61..=0x6B).contains(&c)
+            || digit.contains(c)
+            || (0x1F600..=0x1F64F).contains(&c)
+            || !mark.contains(c)
+    };
+    let items = "a-k\\p{Nd}\\u{1F600}-\\u{1F64F}\\P{M}";
+    let program = program(&format!("([{items}]+)|([^{items}]+)"), "u");
+    assert_eq!(
+        runs_found(&program, &subject),
+        runs_of(&points, class),
+        "a class of ranges and escapes"
+    );
+}
+
 #[test]
 fn a_long_subject_of_one_property_matches_within_the_budget() {
     // Every code point of `L`, 141,000 or so, against `^\p{L}+$`: one match, a bounded number of
