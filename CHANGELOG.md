@@ -293,10 +293,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   per private identifier (a heap record of its own, its description the identifier with its
   `#`), held by the class's private record, a lexical scope pushed after the heritage. An
   object holds its private elements in a list of its own, charged to the memory budget before
-  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  it grows: a box of 24 bytes and 48 bytes per element, reserved once per class level for
   exactly the elements that level adds (a getter and a setter of one name are one element), so
-  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
-  methods 200, with 17 methods 772
+  an instance of a class with one private method costs 72 bytes over a plain instance, with 4
+  methods 216, with 17 methods 840
   (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
   methods and accessors are added by the class's instance initializer before any other
   element, the static ones to the constructor before the first static element runs
@@ -361,6 +361,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   the method (`Map.groupBy called on undefined or null`, `Map.groupBy: the callback is not a
   function`); those of `Object.groupBy` read as before. 15 tests in
   `tests/builtins_map_upsert.rs` (14 with `collect-every-safe-point`).
+
+- Private fields and `#x in` run (`#sec-privatefieldadd`,
+  `#sec-relational-operators-runtime-semantics-evaluation`). A private field is added by the
+  class's instance initializer after the private methods and accessors, in source order with
+  the public fields, and a static one to the constructor in its run of static elements; an
+  object a base constructor returns gets the fields too, a second add of the same name is a
+  `TypeError`, and the add does not read [[Extensible]], so a frozen or non-extensible object
+  gets them. `o.#x`, `o?.#x` and every assignment form on a private field (plain, compound,
+  logical with its short circuit, update, destructuring and the `for`-`in`/`of` head) run
+  PrivateGet and PrivateSet. `#x in o` throws a `TypeError` when `o` is not an object and
+  answers whether `o` has the element, for fields, methods and accessors alike, with no trap of
+  a Proxy called. A class level reserves room for its private methods and private fields
+  together, once. The holds `private field is not supported before slice 8` and
+  `private name in is not supported before slice 8` are gone: no construct is held any more
+  (`story:private-fields-and-private-in`).
 
 ### Changed
 
