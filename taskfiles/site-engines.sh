@@ -2,9 +2,9 @@
 # Write website/data/engines.json (format swell-engines/1), the compare page's only data, from
 # the engine catalog (SITE_DATA_CATALOG), the published counts (SITE_DATA_PUBLISHED/*.tsv, each
 # held by SITE_DATA_PUBLISHED/SHA256SUMS), our result files (SITE_DATA_RESULTS/*.json, format
-# swell-bench/1, none yet) and swell's own committed files: SITE_DATA_EXPECTED, SITE_DATA_PIN,
-# SITE_DATA_MANIFEST, SITE_DATA_REQUIREMENTS, SITE_DATA_LIMITS, SITE_DATA_INTERRUPT and the
-# status file site-data has just written. Called by the task site-data-write of
+# swell-bench/1; a figure carries its row's loaded and loaded_reason) and swell's own committed
+# files: SITE_DATA_EXPECTED, SITE_DATA_PIN, SITE_DATA_MANIFEST, SITE_DATA_REQUIREMENTS,
+# SITE_DATA_LIMITS, SITE_DATA_INTERRUPT and the status file site-data has just written. Called by the task site-data-write of
 # taskfiles/site.yml: sh taskfiles/site-engines.sh <engines.json to write> <status.json written>.
 # POSIX sh, awk and jq; no network, no Node, no date of its own.
 set -eu

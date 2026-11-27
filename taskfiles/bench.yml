@@ -1,0 +1,71 @@
+version: '3'
+
+set: [pipefail]
+
+vars:
+  BENCH_RESULTS: '{{.BENCH_RESULTS | default "bench/results"}}'
+  BENCH_SCHEMA: '{{.BENCH_SCHEMA | default "bench/schema/swell-bench-1.json"}}'
+
+tasks:
+  bench-schema-check:
+    desc: Fail, naming each error, when a result file of bench/results/ does not hold to the schema swell-bench/1.
+    summary: |
+      Validate every BENCH_RESULTS/*.json (default bench/results) against BENCH_SCHEMA (default
+      bench/schema/swell-bench-1.json) with jq and bench/schema/validate.jq, which reads the JSON
+      Schema keywords that schema uses and refuses a keyword it does not read. It also checks
+      what a JSON Schema cannot state: a measured row's median lies between its smallest and
+      largest value, a measured row that is not an aggregate has one value per run, and min and
+      max are those of the values. Each error is printed as
+      "bench-schema-check: <file>: <path>: <error>" (a row without version or runs reads
+      "$.rows[<i>]: missing version"). Fails on an error, on a file that is not JSON, on a
+      schema that is not JSON, and on a directory without a result file. No network, no engine
+      run. Passing, it prints "bench-schema-check: <n> result file(s) hold to <schema>".
+    dir: '{{.TASKFILE_DIR}}/..'
+    silent: true
+    cmds:
+      - |
+        results='{{.BENCH_RESULTS}}'
+        schema='{{.BENCH_SCHEMA}}'
+        jq -e . "$schema" > /dev/null 2>&1 || { echo "bench-schema-check: $schema is missing or not JSON"; exit 1; }
+        files=$(find "$results" -maxdepth 1 -type f -name '*.json' 2>/dev/null | LC_ALL=C sort)
+        [ -n "$files" ] || { echo "bench-schema-check: no result file in $results"; exit 1; }
+        failed=0
+        count=0
+        for file in $files; do
+          count=$((count + 1))
+          if ! out=$(jq -r --slurpfile schema "$schema" -f bench/schema/validate.jq "$file" 2>&1); then
+            echo "bench-schema-check: $file: not JSON or not readable: $out"
+            failed=$((failed + 1))
+            continue
+          fi
+          if [ -n "$out" ]; then
+            echo "$out" | sed "s|^|bench-schema-check: $file: |"
+            failed=$((failed + 1))
+          fi
+        done
+        if [ "$failed" -gt 0 ]; then
+          echo "bench-schema-check: $failed of $count result file(s) do not hold to $schema"
+          exit 1
+        fi
+        echo "bench-schema-check: $count result file(s) hold to $schema"
+
+  bench-run:
+    desc: Measure K2 to K5 of the engines of bench/image/configs.tsv on the build node, one pool job per (config, suite), and write bench/results/<date>-<commit>.json. Manual; not in the gate.
+    summary: |
+      Runs sh bench/run.sh all BENCH_WORKERS (default 1, the one benchmark job at a time this
+      host admits): one pool job that builds the image
+      (bench/image/build.sh: the pinned engines and suite files, each checked by sha256) and the
+      tool (bench/tool), then one job per (config, suite) with slot --timeout 30m, BENCH_WORKERS
+      at a time, each on two CPUs of its own, and then assembles the rows the jobs print into
+      bench/results/<UTC date>-<short commit>.json. Downloads happen only while the image is
+      built; every measurement runs without a network. Each job refuses to measure on the
+      machine that started it, so a benchmark never runs beside the pool's build node. Run it
+      from the workstation, not inside a pool job; logs go to .out/bench/run-<date>/logs/.
+      It needs BENCH_NODE_STATE in the environment, a command that prints the JSON of slot
+      state on the build node: before each job it waits for the node to run no pool job, and
+      after it marks the rows of a job measured beside another loaded: true (bench/RUNBOOK.md).
+    dir: '{{.TASKFILE_DIR}}/..'
+    vars:
+      BENCH_WORKERS: '{{.BENCH_WORKERS | default "1"}}'
+    cmds:
+      - sh bench/run.sh all {{shellQuote .BENCH_WORKERS}}

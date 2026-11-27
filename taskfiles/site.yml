@@ -58,7 +58,9 @@ tasks:
       (bench/published, each listed with its sha256 in SITE_DATA_PUBLISHED/SHA256SUMS; a file
       that differs from its digest fails, so a published line edited by hand fails), the result
       files SITE_DATA_RESULTS/*.json (bench/results, format swell-bench/1; with none, the rows
-      K2 to K5 read "not measured", "no run yet"), and swell's own files: the expected counts,
+      K2 to K5 read "not measured", "no run yet"; a figure of a result file carries its row's
+      loaded and, when loaded, loaded_reason, and a geomean is loaded when a row it is made of
+      is), and swell's own files: the expected counts,
       SITE_DATA_PIN (the test262 commit), the manifest, the requirement line HOST-133,
       SITE_DATA_LIMITS and SITE_DATA_INTERRUPT (the lines its resource-control cells cite) and
       the status file just written. Every value carries its source, date, revision and method;

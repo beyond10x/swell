@@ -1,0 +1,9 @@
+engine version archive sha256 binary loads url
+v8 16.0.124 zip ce9553b9904787ccec6e438f9f0cf18d10b894b8b47733bbb979f76bc5acd456 d8 d8,snapshot_blob.bin,icudtl.dat https://storage.googleapis.com/chromium-v8/official/canary/v8-linux64-rel-16.0.124.zip
+spidermonkey 161.0 zip 255a3daf9070c86340ace6be2121aabc7cdfecab4e5faff6fb0861951e7e2078 js js,libnspr4.so,libplds4.so,libplc4.so https://archive.mozilla.org/pub/firefox/releases/161.0/jsshell/jsshell-linux-x86_64.zip
+javascriptcore 327663@main zip 16a3b085e3b616c3e6d7ade5e46ece0369571f529e7e9ceec9435e88ce688b59 jsc jsc,lib/* https://webkitgtk.org/jsc-built-products/x86_64/release/327663@main.zip
+hermes 0.13.0 tar.gz aead6eb0b8f563bb022354352eae32dad96c933330b6c1941b6db17674ca68ae hermes hermes https://github.com/facebook/hermes/releases/download/v0.13.0/hermes-cli-linux.tar.gz
+quickjs 2026-06-04 zip d98289c8ec9580eb206575c52c76693bc0fd6ce04ffac2dbd4f518b62a774938 qjs qjs https://bellard.org/quickjs/binary_releases/quickjs-linux-x86_64-2026-06-04.zip
+quickjs-ng 0.18.0 bin 85ded23b9fabe8c1644fc40a8d2bbdd71157affcbd807359c618cc717ee24d7d qjs qjs https://github.com/quickjs-ng/quickjs/releases/download/v0.18.0/qjs-linux-x86_64
+xs 10.1.0 zip 990a943827d91fb2e4ff292fe2e64e0d411cad97a7b8d6f5c99d20c1b4a7b187 xst xst https://github.com/Moddable-OpenSource/moddable/releases/download/10.1.0/xst-lin64.zip
+boa 0.20 bin 9dff0bf942ab01cef2bc1bca1383c9c5a16498646485146c3f607b1a6494c5c2 boa boa https://github.com/boa-dev/boa/releases/download/v0.20/boa-linux-amd64
