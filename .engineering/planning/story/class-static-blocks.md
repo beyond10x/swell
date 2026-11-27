@@ -31,7 +31,7 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/scope.rs
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 13, executor: "agent:coordinator"}
@@ -85,3 +85,54 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Static blocks that read private names and every case that needs a private field (`story:private-fields-and-private-in`); static fields (`story:public-class-fields`); eval code's flags in a block (`story:eval-in-class-field-initializers`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `staticblocks` of wave big-2 delivered the story on `impl/staticblocks` (one
+correction after the adversary's pass), merged into `wave/big-2`. Where the delivery differs
+from the text above:
+
+- `static_block_scope` (`crates/compiler/src/resolve.rs`) is not written and `resolve.rs` is
+  not changed. The resolver's `function` walks a `StaticBlock` like any function: its `var`
+  names in the function scope, the top level of its body a lexical scope, and the binding
+  `arguments` only when a direct `eval` in the block's code can observe one (the scope
+  analysis sets it). The tests, the compiler fixture, the part run and the adversary's probes
+  of the scope pass without it.
+- No file under `crates/swell/src` changed and no instruction is added:
+  `Compiler::compile_static_block` answers the block's own function, and `static_calls`,
+  which existed, emits `Dup; MakeMethod(f); Call(0); Pop` where the block stands.
+- The meeting cases (fields of a derived class, a field initializer that calls a private
+  method, private methods in a derived class) needed no fix: on the unit's base every case
+  of the list without a static block passed. The list read 448 of 484 passed on the base
+  (the 36 cases with a static block failed on the hold) and 484 of 484 on the unit's head.
+- 20 tests under `class_static_blocks::`, not 19:
+  `a_method_between_static_fields_ends_their_run` was added after the adversary's pass. It
+  holds that a method or an accessor between static fields ends their run in `static_calls`;
+  with the reset planted out it answers `"a,block 1 undefined,c|1,,3,g"` for
+  `"a,b,block 1 2,c|1,2,4,g"`. The acceptance's filter runs 20 tests.
+- `a_class_with_100_private_methods_and_100_fields_constructed_1000_times` runs fewer
+  constructions than the story names: 500 in the gate's default build and 1,000 under
+  `SWELL_FULL_COUNTS=1`; 1 in a collect build and 2 at the full count (the story's 100 took
+  53.0 CPU s there). Every count holds the step charge of the private find: with the charge
+  planted out the test is red at each (`570331 steps for 500 constructions`, `1471 steps for
+  1 constructions`). Its memory part runs in the default build only, in a room of 1 MiB.
+- A direct `eval` in a block: `arguments` in the eval code is no SyntaxError. PerformEval's
+  inClassFieldInitializer is false for a block's function, and EvaluateClassStaticBlockBody
+  runs FunctionDeclarationInstantiation, so `eval("arguments")` is the block's own arguments
+  object, of length 0. `super()` in the eval code is a SyntaxError, `new.target` is
+  `undefined`, `super.x` reads through F, a `var` stays in the eval's own record. A private
+  name the class declares meets the refusal of `story:private-names-and-private-methods`
+  until `story:private-names-in-eval-code`, whose change turns that line of
+  `a_direct_eval_of_arguments_in_a_block_sees_its_own_arguments_object` into a run.
+- The stack-bound check of the syntax crate admits 155 levels of a class nested in a static
+  block at limit 2,500 and 467 at 7,500, through Script, Eval and FunctionBody;
+  `crates/syntax/src/scope.rs` needed no change.
+- No fixture moved: `crates/syntax/tests/sources/held/` holds 25 files; its two sources with
+  a static block parse in both modes and compile, which the two tests that walk the
+  directory require of a source none of whose constructs is held.
+- Outside the story's writes: `crates/syntax/tests/sources.rs`, where
+  `class_elements_scale_linearly` expects its shape "static blocks" to parse.
+- The reviews: `review-result:adversary-staticblocks-pass-1` (green: three notes; four
+  planted defects red in both builds; 71 cases of test262 beyond the list, 132 of 138 runs
+  passed, 60 on the base, none lost) and the coordinator's read of the correction
+  (`review-result:staticblocks-correction-1-coordinator-read`).
