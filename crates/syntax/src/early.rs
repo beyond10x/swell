@@ -87,7 +87,9 @@
 //! - `#sec-static-semantics-allprivateidentifiersvalid`: each `a.#x`, `a?.#x` and `#x in a`
 //!   names a private name a class body around it declares; the names in scope enter after the
 //!   heritage of a class and leave after its `}`, with no enclosing names in a script, a
-//!   function body, `Function` code or eval code;
+//!   function body, `Function` code or the code of an indirect `eval`, and the private names of
+//!   the classes around the call in the code of a direct `eval` (`#sec-performeval`,
+//!   privateIdentifiers, [`check`]'s `private_names`);
 //! - `#sec-delete-operator-static-semantics-early-errors`: `delete` of a private reference;
 //! - `#sec-primary-expression-regular-expression-literals-static-semantics-early-errors`:
 //!   IsValidRegularExpressionLiteral, the flags and then ParsePattern of `swell-regexp` with
@@ -271,18 +273,22 @@ const STRICT_RESERVED: [&str; 9] = [
 /// The early errors of the script `body` of `ast`, strict when `strict`, in source order; the
 /// pattern of a regular expression literal is parsed with the nesting limit `max_nesting`.
 /// When a pattern is refused, the first refusal in source order is the only error.
+/// `private_names` are the private names declared around the code, in scope from its start
+/// (AllPrivateIdentifiersValid with eval code's privateIdentifiers, `#sec-performeval`); none
+/// for a script and `Function` code.
 ///
 /// Every structure of the walk is charged to `m` before it grows and credited when it is
 /// dropped: the frames of lexical names (an entry each, [`crate::ledger::map_entry_bytes`], and
 /// the bytes of each name), the labels, the stack of pending work, the tree of each pattern
-/// (until its check ends) and the errors (a message is charged by its capacity once it is
-/// formatted). The walk calls [`Meter::visit`] for every node and ends at the first stop; the
-/// entry then answers the stop.
+/// (until its check ends), the private names in scope (an entry each) and the errors (a
+/// message is charged by its capacity once it is formatted). The walk calls [`Meter::visit`]
+/// for every node and ends at the first stop; the entry then answers the stop.
 pub(crate) fn check(
     ast: &Ast,
     body: &[StmtId],
     strict: bool,
     max_nesting: u32,
+    private_names: &[&str],
     m: &Meter<'_>,
 ) -> Vec<SyntaxError> {
     let mut checker = Checker {
@@ -304,6 +310,11 @@ pub(crate) fn check(
         arguments: None,
         static_block_await: false,
     };
+    for &name in private_names {
+        if !checker.private.contains_key(name) && m.charge(PRIVATE_ENTRY).is_ok() {
+            checker.private.insert(name, 1);
+        }
+    }
     let frame = checker.frame(Names::List(body), &[], "");
     checker.push_frame(frame);
     checker.walk(body);
@@ -1412,8 +1423,9 @@ impl<'a, 'm> Checker<'a, 'm> {
 
     /// A reference to the private name `name`, `a.#x` or `#x in a`: AllPrivateIdentifiersValid
     /// (`#sec-static-semantics-allprivateidentifiersvalid`), a class body around it declares the
-    /// name. Applied in a script, a function body, `Function` code and eval code, which has no
-    /// enclosing names before `story:private-names-in-eval-code`.
+    /// name. Applied in a script, a function body, `Function` code and eval code, whose names
+    /// around it are those of the classes around a direct `eval` call
+    /// (`story:private-names-in-eval-code`).
     fn private_reference(&mut self, name: &Name) {
         if !self.private.contains_key(name.name.as_str()) {
             self.error(
@@ -1816,7 +1828,7 @@ mod tests {
         let before = ledger.charged;
         let errors = {
             let meter = Meter::new(&mut ledger);
-            super::check(&parsed.ast, &parsed.body, parsed.strict, 100, &meter)
+            super::check(&parsed.ast, &parsed.body, parsed.strict, 100, &[], &meter)
         };
         assert!(errors.is_empty(), "{errors:?}");
         let charged = ledger.charged - before;

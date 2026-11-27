@@ -3472,6 +3472,7 @@ fn contains_arguments_of_eval_code_holds_only_the_tree() {
         in_method: true,
         in_derived_constructor: false,
         in_class_field_initializer: true,
+        private_names: &[],
     };
     let options = ParseOptions { max_nesting: LIMIT };
     let without = units(&format!("{}0", "0, ".repeat(120)));

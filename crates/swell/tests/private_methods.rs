@@ -893,55 +893,48 @@ new C().f() === 4 && syntax(function () { Function("o", "return o.#x;"); })
     );
 }
 
-/// What a direct `eval` with a private name gives until `story:private-names-in-eval-code`
-/// passes the class's names to the parse (`#sec-performeval`, step 12). A name that a class
-/// enclosing the call declares, which the standard would run, is the stated refusal `private
-/// name #p in direct eval code is not supported before slice 8` (a `Refusal` by
-/// `swell_syntax::message_kind`, counted once per eval): in a method, a private method, a
-/// static method, an arrow in a method and a method of an inner class reading the outer class's
-/// name. A name no enclosing class declares is the early `SyntaxError` the standard gives,
-/// counted as no refusal: in a method, beside a declared name (whose error is dropped), outside
-/// every class, in a direct `eval` in the heritage (which runs before the class's private record
-/// is entered), by indirect `eval` and by `Function`. Code with an early error of the grammar
-/// throws that error, and no refusal is counted for its declared name.
+/// A direct `eval` with a private name (`#sec-performeval`, step 12, privateIdentifiers;
+/// `story:private-names-in-eval-code`, which replaced the refusal `private name #p in direct
+/// eval code is not supported before slice 8` here). A name that a class enclosing the call
+/// declares runs: in a method, a private method, a static method, an arrow in a method and a
+/// method of an inner class reading the outer class's name. A name no enclosing class declares
+/// is the early `SyntaxError` the standard gives: in a method, beside a declared name, outside
+/// every class, in a direct `eval` in the heritage (which runs before the class's private
+/// record is entered), by indirect `eval` and by `Function`. Code with an early error of the
+/// grammar throws that error, with no error for its declared name. No run counts a refusal.
 #[test]
-fn a_direct_eval_is_refused_only_for_a_name_an_enclosing_class_declares() {
+fn a_direct_eval_runs_a_name_an_enclosing_class_declares() {
     let script = r#"function said(e) { return (e instanceof SyntaxError ? "SyntaxError: " : "other: ") + e.message; }
-function tried(f) { try { f(); } catch (e) { return said(e); } return "none"; }
+function tried(f) { try { return String(f()); } catch (e) { return said(e); } }
 class C {
   #p() { return 1; }
   static #s() { return 3; }
   #q() { return tried(() => eval("this.#p()")); }
-  method() { try { eval("this.#p()"); } catch (e) { return said(e); } return "none"; }
-  static st() { try { eval("C.#s()"); } catch (e) { return said(e); } return "none"; }
-  arrow() { return (() => { try { eval("this.#p"); } catch (e) { return said(e); } return "none"; })(); }
+  method() { return tried(() => eval("this.#p()")); }
+  static st() { return tried(() => eval("C.#s()")); }
+  arrow() { return (() => tried(() => eval("typeof this.#p")))(); }
   undeclared() { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; }
   mixed() { try { eval("this.#p; this.#x"); } catch (e) { return said(e); } return "none"; }
   grammar() { try { eval("let a; let a; this.#p;"); } catch (e) { return said(e); } return "none"; }
   priv() { return this.#q(); }
 }
-class O { #o() {} static make() { return class { m() { try { eval("this.#o"); } catch (e) { return said(e); } return "none"; } }; } }
+class O { #o() {} static make() { return class { m(o) { return tried(() => eval("typeof o.#o")); } }; } }
 var heritage;
 class D extends (function () { try { eval("this.#d"); } catch (e) { heritage = said(e); } return Object; })() { #d() {} }
 var c = new C(), Inner = O.make();
-[c.method(), c.priv(), C.st(), c.arrow(), new Inner().m(),
+[c.method(), c.priv(), C.st(), c.arrow(), new Inner().m(new O()),
  c.undeclared(), c.mixed(), (function () { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; })(),
  heritage, tried(() => (0, eval)("this.#x")), tried(() => Function("return this.#x;")),
  c.grammar()].join("|");"#;
-    let refused = |name: &str, at: &str| {
-        format!(
-            "SyntaxError: private name {name} in direct eval code is not supported before slice 8 ({at})"
-        )
-    };
     let early = |name: &str, at: &str| {
         format!("SyntaxError: private name {name} is not declared in an enclosing class ({at})")
     };
     let wanted = [
-        refused("#p", "1:6"),
-        refused("#p", "1:6"),
-        refused("#s", "1:3"),
-        refused("#p", "1:6"),
-        refused("#o", "1:6"),
+        "1".to_string(),
+        "1".to_string(),
+        "3".to_string(),
+        "function".to_string(),
+        "function".to_string(),
         early("#x", "1:6"),
         early("#x", "1:15"),
         early("#x", "1:6"),
@@ -966,13 +959,8 @@ var c = new C(), Inner = O.make();
             grammar.starts_with("SyntaxError: ") && !grammar.contains("#p"),
             "{grammar}"
         );
-        assert_eq!(counted, 5, "{answer}");
+        assert_eq!(counted, 0, "{answer}");
     }
-    let message = "private name #p in direct eval code is not supported before slice 8";
-    assert_eq!(
-        swell_syntax::message_kind(message),
-        swell_syntax::MessageKind::Refusal { slice: 8 }
-    );
     for (text, at) in [("this.#x;", "1:6"), ("\"use strict\";\nthis.#x;", "2:6")] {
         assert_eq!(
             run(limits(), text),
@@ -1005,14 +993,13 @@ fn pad_units(
 
 /// A direct `eval` names a private name an enclosing class declares by its StringValue
 /// (`#sec-static-semantics-stringvalue`), not by its source text: a name outside ASCII, in the
-/// BMP (`#ä`) and outside it (`#\u{2118F}`, an ID_Start code point of plane 2), is the refusal
-/// with that name in its message, and `#ö`, which no class declares, is the early `SyntaxError`;
-/// a name the class or the eval code writes with a Unicode escape (`#\u{61}`, `#\u{e4}`,
-/// `#\u{2118F}`) is the refusal of the same name. The lookup of a name outside ASCII
-/// (`dynamic_code.rs`, `enclosing_class_declares`) copies its UTF-16 units into a charged buffer:
-/// across the memory budget lowered by 8 bytes per run over that lookup, each run ends in the
-/// budget or answers the refusal, and `heap_bytes()` after the run and a collection equals its
-/// reading before (the default build).
+/// BMP (`#ä`) and outside it (`#\u{2118F}`, an ID_Start code point of plane 2), runs, and `#ö`,
+/// which no class declares, is the early `SyntaxError`; a name the class or the eval code
+/// writes with a Unicode escape (`#\u{61}`, `#\u{e4}`, `#\u{2118F}`) runs as the same name.
+/// The walk of the caller's private names (`env/mod.rs`, `eval_private_names`) copies them as
+/// UTF-8 into charged lists: across the memory budget lowered by 8 bytes per run over that
+/// walk, each run ends in the budget or answers `none`, and `heap_bytes()` after the run and a
+/// collection equals its reading before (the default build).
 #[test]
 fn a_direct_eval_finds_a_name_outside_ascii_and_through_escapes() {
     use std::sync::atomic::Ordering;
@@ -1027,20 +1014,15 @@ var ca = new A(), cb = new B(), ce = new E(), cf = new F();\n\
  cb.m(\"this.#{astral}\"), cb.m(\"this.#\\\\u{{2118F}}\"),\n\
  ce.m(\"this.#\\\\u{{61}}\"), ce.m(\"this.#a\"), cf.m(\"this.#a\")].join(\"|\");"
     );
-    let refused = |name: &str| {
-        format!(
-            "SyntaxError: private name {name} in direct eval code is not supported before slice 8 (1:6)"
-        )
-    };
     let wanted = [
-        refused("#ä"),
-        "SyntaxError: private name #ö is not declared in an enclosing class (1:6)".to_string(),
-        refused("#ä"),
-        refused(&format!("#{astral}")),
-        refused(&format!("#{astral}")),
-        refused("#a"),
-        refused("#a"),
-        refused("#a"),
+        "none",
+        "SyntaxError: private name #ö is not declared in an enclosing class (1:6)",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
+        "none",
     ];
     let expected = Outcome::Normal(format!("\"{}\"", wanted.join("|")));
     for text in [script.clone(), format!("\"use strict\";\n{script}")] {
@@ -1048,7 +1030,7 @@ var ca = new A(), cb = new B(), ce = new E(), cf = new F();\n\
         let r = realm(&mut agent);
         let before = agent.refusals();
         assert_eq!(eval_text(&mut agent, &r, &text), expected, "{text}");
-        assert_eq!(agent.refusals() - before, 7, "{text}");
+        assert_eq!(agent.refusals() - before, 0, "{text}");
     }
 
     // The budget across the lookup of `#ä`: Strings in `pads` leave a target room (from 2 KiB,
@@ -1103,11 +1085,11 @@ var ca = new A(), cb = new B(), ce = new E(), cf = new F();\n\
     let collect = |agent: &mut Agent<TestHost>| {
         assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
     };
-    let refusal = Outcome::Normal(format!("\"{}\"", refused("#ä")));
+    let none = Outcome::Normal("\"none\"".to_string());
     for _ in 0..3 {
         set(&mut agent, 0);
         assert_eq!(go(&mut agent, run), zero);
-        assert_eq!(go(&mut agent, answer), refusal);
+        assert_eq!(go(&mut agent, answer), none);
         assert_eq!(go(&mut agent, clear), zero);
         collect(&mut agent);
     }
@@ -1156,7 +1138,7 @@ var ca = new A(), cb = new B(), ce = new E(), cf = new F();\n\
             let outcome = go(&mut agent, run);
             let began = go(&mut agent, started) == Outcome::Normal("1".to_string());
             if outcome == zero {
-                assert_eq!(go(&mut agent, answer), refusal, "{target} {u}");
+                assert_eq!(go(&mut agent, answer), none, "{target} {u}");
                 answered += 1;
             } else {
                 assert_eq!(
@@ -2408,36 +2390,32 @@ fn this_after_super_in_the_same_arrow() {
 
 /// A direct `eval` in a field initializer of a class with private methods (`#sec-performeval`
 /// with inClassFieldInitializer; the initializer's environment is the class's private record):
-/// a name the class declares is the refusal of a direct eval, counted once; a name it does not
-/// declare is the early `SyntaxError`; `arguments` is the error of ContainsArguments, also
-/// beside a declared name in either order, so the declared name's refusal is no error of the
-/// standard there and is neither thrown nor counted. In an instance field and a static one.
+/// a name the class declares runs (`story:private-names-in-eval-code`, which replaced the
+/// refusal `private name #m in direct eval code is not supported before slice 8` here); a name
+/// it does not declare is the early `SyntaxError`; `arguments` is the error of
+/// ContainsArguments, also beside a declared name in either order. In an instance field and a
+/// static one. No run counts a refusal.
 #[test]
 fn a_direct_eval_in_a_field_initializer_meets_private_names() {
     let script = r#"function said(e) { return (e instanceof SyntaxError ? "SyntaxError: " : "other: ") + e.message; }
-function tried(f) { try { f(); } catch (e) { return said(e); } return "none"; }
-[tried(() => new (class { #m() { return 1; } x = eval("this.#m()"); })()),
+function tried(f) { try { return String(f()); } catch (e) { return said(e); } }
+[tried(() => new (class { #m() { return 1; } x = eval("this.#m()"); })().x),
  tried(() => new (class { #m() { return 1; } x = eval("this.#q"); })()),
  tried(() => new (class { #m() { return 1; } x = eval("arguments"); })()),
  tried(() => new (class { #m() {} x = eval("arguments; this.#m()"); })()),
  tried(() => new (class { #m() {} x = eval("this.#m(); arguments"); })()),
- tried(() => class { static #s() { return 1; } static x = eval("this.#s()"); }),
+ tried(() => (class { static #s() { return 1; } static x = eval("this.#s()"); }).x),
  tried(() => class { static #s() {} static x = eval("this.#t"); })].join("|");"#;
-    let refused = |name: &str, at: &str| {
-        format!(
-            "SyntaxError: private name {name} in direct eval code is not supported before slice 8 ({at})"
-        )
-    };
     let arguments = |at: &str| {
         format!("SyntaxError: arguments in eval code in a class field initializer ({at})")
     };
     let wanted = [
-        refused("#m", "1:6"),
+        "1".to_string(),
         "SyntaxError: private name #q is not declared in an enclosing class (1:6)".to_string(),
         arguments("1:1"),
         arguments("1:1"),
         arguments("1:12"),
-        refused("#s", "1:6"),
+        "1".to_string(),
         "SyntaxError: private name #t is not declared in an enclosing class (1:6)".to_string(),
     ];
     let expected = Outcome::Normal(format!("\"{}\"", wanted.join("|")));
@@ -2446,6 +2424,6 @@ function tried(f) { try { f(); } catch (e) { return said(e); } return "none"; }
         let r = realm(&mut agent);
         let before = agent.refusals();
         assert_eq!(eval_text(&mut agent, &r, &text), expected, "{text}");
-        assert_eq!(agent.refusals() - before, 2, "{text}");
+        assert_eq!(agent.refusals() - before, 0, "{text}");
     }
 }

@@ -130,7 +130,7 @@ pub fn compile_script(script: &Script) -> Result<Code, CompileError> {
 /// [`swell_syntax::ledger::POLL_INTERVAL`] nodes the step visits. A stop answers
 /// [`CompileError::Stopped`] with everything credited.
 pub fn compile_script_with(script: &Script, ledger: &mut dyn Ledger) -> Result<Code, CompileError> {
-    compile(script, (false, false), ledger)
+    compile(script, (false, false), &[], ledger)
 }
 
 /// [`compile_eval`] charged to `ledger`, as [`compile_script_with`], for eval code whose context
@@ -138,12 +138,28 @@ pub fn compile_script_with(script: &Script, ledger: &mut dyn Ledger) -> Result<C
 /// then `this` in it, its arrow functions included, is the checked lookup of the derived
 /// constructor's binding `this` by name, and a SuperCall binds it (`docs/design/engine.md`,
 /// "Classes", item 6).
+///
+/// `private_names` are the positions of the private names of the caller of a direct `eval`
+/// (`#sec-performeval`, privateIdentifiers; `docs/design/engine.md`, "Private names", item 4),
+/// the names the parse took in its context: each its text (`#x`), the hops from the caller's
+/// LexicalEnvironment to the private record that holds its Private Name, and the slot there. A
+/// private reference of the eval code that no class of the eval code declares resolves to it
+/// with the hops counted as the eval code's own records (the record of its top level, or the
+/// empty one PerformEval makes for strict code without one, step 16) plus the caller's hops,
+/// and compiles to `GetPrivate`, `SetPrivate` and `PrivateIn` as other code does. None for an
+/// indirect `eval`. The list is read during the step and not kept.
 pub fn compile_eval_with(
     script: &Script,
     in_derived_constructor: bool,
+    private_names: &[(&str, u32, u32)],
     ledger: &mut dyn Ledger,
 ) -> Result<Code, CompileError> {
-    compile(script, (true, in_derived_constructor), ledger)
+    compile(
+        script,
+        (true, in_derived_constructor),
+        private_names,
+        ledger,
+    )
 }
 
 /// Compiles eval code, a script that `swell_syntax::parse_eval` parsed, into its [`Code`]
@@ -154,7 +170,7 @@ pub fn compile_eval_with(
 /// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`); the code returns its
 /// completion value, as a script's does.
 pub fn compile_eval(script: &Script) -> Result<Code, CompileError> {
-    compile_eval_with(script, false, &mut Unlimited)
+    compile_eval_with(script, false, &[], &mut Unlimited)
 }
 
 /// The compile step of a script or of eval code, charged to `ledger`.
@@ -170,10 +186,11 @@ pub fn compile_eval(script: &Script) -> Result<Code, CompileError> {
 fn compile(
     script: &Script,
     (eval_code, this_by_name): (bool, bool),
+    private_names: &[(&str, u32, u32)],
     ledger: &mut dyn Ledger,
 ) -> Result<Code, CompileError> {
     let meter = Meter::new(ledger);
-    let compiled = compile_charged(script, (eval_code, this_by_name), &meter);
+    let compiled = compile_charged(script, (eval_code, this_by_name), private_names, &meter);
     let compiled = match (compiled, meter.stopped()) {
         (_, Some(stop)) => Err(CompileError::Stopped(stop)),
         (compiled, None) => compiled,
@@ -206,9 +223,10 @@ fn compile(
 fn compile_charged(
     script: &Script,
     (eval_code, this_by_name): (bool, bool),
+    private_names: &[(&str, u32, u32)],
     m: &Meter<'_>,
 ) -> Result<Code, CompileError> {
-    let resolution = resolve::resolve(script, eval_code, this_by_name, m)?;
+    let resolution = resolve::resolve(script, (eval_code, this_by_name), private_names, m)?;
     let mut constants = Constants::default();
     let body = function::compile_script_body(script, &resolution, &mut constants, m)?;
     let mut functions = m.with_capacity(script.ast.functions().len())?;
@@ -1574,7 +1592,7 @@ mod tests {
             high: &high,
         };
         let meter = Meter::new(&mut ledger);
-        let resolution = resolve::resolve(&script, false, false, &meter).unwrap();
+        let resolution = resolve::resolve(&script, (false, false), &[], &meter).unwrap();
         let mut constants = Constants::default();
         let mut c = Compiler::new(
             &script.ast,
@@ -1602,6 +1620,64 @@ mod tests {
         assert!(
             peak <= 2 * lists + 1024,
             "peak {peak} above twice the lists' {lists} and 1 KiB"
+        );
+    }
+
+    /// The private names of the caller of a direct `eval` (`#sec-performeval`;
+    /// `story:private-names-in-eval-code`): a private reference the eval code does not declare
+    /// resolves to the caller's position, its hops counted as the eval code's own records (a
+    /// block's record; the record of its top-level bindings; for strict code without that one
+    /// the empty record PerformEval makes, step 16) plus the caller's hops; a name a class of the
+    /// eval code declares hides the caller's. Caller: `#x` at 2 hops slot 0, `#y` at 3 hops
+    /// slot 1. The answer is every (hops, slot) of `GetPrivate`, `SetPrivate` and `PrivateIn`
+    /// in the code and its functions.
+    #[test]
+    fn eval_private_names_count_the_callers_hops() {
+        use swell_syntax::ledger::Unlimited;
+        use swell_syntax::{EvalContext, parse_eval};
+        let texts = ["#x", "#y"];
+        let caller = [("#x", 2, 0), ("#y", 3, 1)];
+        let places = |text: &str, strict: bool| {
+            let context = EvalContext {
+                strict_caller: strict,
+                in_function: true,
+                in_method: true,
+                private_names: &texts,
+                ..EvalContext::default()
+            };
+            let source: Vec<u16> = text.encode_utf16().collect();
+            let script = parse_eval(&source, context, ParseOptions { max_nesting: 100 })
+                .unwrap_or_else(|errors| panic!("{text}: {errors:?}"));
+            let code = super::compile_eval_with(&script, false, &caller, &mut Unlimited)
+                .unwrap_or_else(|error| panic!("{text}: {error}"));
+            let mut found: Vec<(u32, u32)> = code
+                .instructions
+                .iter()
+                .chain(code.functions.iter().flat_map(|f| f.instructions.iter()))
+                .filter_map(|i| match i {
+                    Instruction::GetPrivate { hops, slot }
+                    | Instruction::SetPrivate { hops, slot }
+                    | Instruction::PrivateIn { hops, slot } => Some((*hops, *slot)),
+                    _ => None,
+                })
+                .collect();
+            found.sort();
+            found
+        };
+        assert_eq!(places("this.#x;", true), vec![(3, 0)]);
+        assert_eq!(places("this.#x;", false), vec![(2, 0)]);
+        assert_eq!(places("this.#y = 1;", true), vec![(4, 1)]);
+        assert_eq!(
+            places("let a = 1; (() => a)(); #y in this;", true),
+            vec![(4, 1)]
+        );
+        assert_eq!(
+            places("{ let b = 1; (() => b + this.#x)(); }", true),
+            vec![(4, 0)]
+        );
+        assert_eq!(
+            places("new (class { #x; m() { return this.#x; } });", true),
+            vec![(0, 0)]
         );
     }
 

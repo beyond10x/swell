@@ -172,16 +172,17 @@ pub fn parse_script_with(
 ) -> Result<Script, Failure> {
     let meter = Meter::new(ledger);
     let parsed = parser::parse(source, options.max_nesting, &meter);
-    analysed(parsed, options.max_nesting, &meter)
+    analysed(parsed, options.max_nesting, &[], &meter)
 }
 
 /// The context of eval code that PerformEval reads before it parses (`#sec-performeval`,
-/// steps 7 to 11): the strictness of the caller and the four flags of a direct `eval` whose
-/// GetThisEnvironment is a Function Environment Record. An indirect `eval`, and a direct one
-/// outside function code, has every flag false. `EvalContext::from(strict_caller)` is the
-/// context of a caller of that strictness with every flag false.
+/// steps 7 to 11): the strictness of the caller, the four flags of a direct `eval` whose
+/// GetThisEnvironment is a Function Environment Record, and the private names of the classes
+/// around a direct `eval`. An indirect `eval`, and a direct one outside function code, has
+/// every flag false; an indirect one has no private name. `EvalContext::from(strict_caller)` is
+/// the context of a caller of that strictness with every flag false and no private name.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct EvalContext {
+pub struct EvalContext<'a> {
     /// strictCaller: IsStrict of the direct call; false for an indirect `eval`.
     pub strict_caller: bool,
     /// inFunc: the `eval` is direct and its GetThisEnvironment is a function's.
@@ -192,11 +193,17 @@ pub struct EvalContext {
     pub in_derived_constructor: bool,
     /// inClassFieldInitializer: that function has a [[ClassFieldInitializerName]].
     pub in_class_field_initializer: bool,
+    /// privateIdentifiers: the descriptions (`#x`) of the Private Names of the running
+    /// PrivateEnvironment and its outer ones, each once, for a direct `eval`; empty for an
+    /// indirect one. AllPrivateIdentifiersValid of the eval code takes them as the names
+    /// declared around it.
+    pub private_names: &'a [&'a str],
 }
 
-impl From<bool> for EvalContext {
-    /// The context of a caller whose strictness is `strict_caller`, with every flag false.
-    fn from(strict_caller: bool) -> EvalContext {
+impl From<bool> for EvalContext<'_> {
+    /// The context of a caller whose strictness is `strict_caller`, with every flag false and
+    /// no private name.
+    fn from(strict_caller: bool) -> Self {
         EvalContext {
             strict_caller,
             ..EvalContext::default()
@@ -227,9 +234,14 @@ impl From<bool> for EvalContext {
 /// function that is not an arrow function; a class's computed keys, field initializers and
 /// static blocks are looked into, its methods are not) is a SyntaxError at the first such
 /// `arguments`, the one error of the parse (`story:eval-in-class-field-initializers`).
-pub fn parse_eval(
+///
+/// AllPrivateIdentifiersValid (`#sec-static-semantics-allprivateidentifiersvalid`, PerformEval's
+/// step 12 with privateIdentifiers): each `a.#x`, `a?.#x` and `#x in a` of the body names a
+/// private name of [`EvalContext::private_names`] or of a class of the eval code around it, or it
+/// is a SyntaxError; an indirect `eval` passes none (`story:private-names-in-eval-code`).
+pub fn parse_eval<'a>(
     source: &[u16],
-    context: impl Into<EvalContext>,
+    context: impl Into<EvalContext<'a>>,
     options: ParseOptions,
 ) -> Result<Script, Vec<SyntaxError>> {
     parse_eval_with(source, context, options, &mut Unlimited).map_err(Failure::into_errors)
@@ -239,9 +251,9 @@ pub fn parse_eval(
 /// of [`EvalContext::in_class_field_initializer`] is answered before a refusal the parser held in
 /// the eval code, as the parser's rule on holds orders every error before a held refusal
 /// (`Parser::hold`), so such eval code counts no refusal.
-pub fn parse_eval_with(
+pub fn parse_eval_with<'a>(
     source: &[u16],
-    context: impl Into<EvalContext>,
+    context: impl Into<EvalContext<'a>>,
     options: ParseOptions,
     ledger: &mut dyn Ledger,
 ) -> Result<Script, Failure> {
@@ -259,7 +271,7 @@ pub fn parse_eval_with(
         }
         parsed => parsed,
     };
-    analysed(parsed, options.max_nesting, &meter)
+    analysed(parsed, options.max_nesting, context.private_names, &meter)
 }
 
 /// Parses the parts of CreateDynamicFunction (`#sec-createdynamicfunction`) for kind `normal`
@@ -427,18 +439,21 @@ fn dynamic_function(
     let meter = Meter::new(ledger);
     let parsed =
         parser::parse_dynamic_function(kind, parameters, body, options.max_nesting, &meter);
-    analysed(parsed, options.max_nesting, &meter)
+    analysed(parsed, options.max_nesting, &[], &meter)
 }
 
-/// The early errors and the scope analysis of what a parse produced. A stop of the meter wins
-/// over every other answer; on errors or a stop everything the meter holds is credited.
+/// The early errors and the scope analysis of what a parse produced, `private_names` the
+/// private names declared around the code (eval code's privateIdentifiers; none for a script
+/// and `Function` code). A stop of the meter wins over every other answer; on errors or a stop
+/// everything the meter holds is credited.
 fn analysed(
     parsed: Result<parser::Parsed, SyntaxError>,
     max_nesting: u32,
+    private_names: &[&str],
     meter: &Meter<'_>,
 ) -> Result<Script, Failure> {
     let answer = match parsed {
-        Ok(parsed) => analyse_parsed(parsed, max_nesting, meter),
+        Ok(parsed) => analyse_parsed(parsed, max_nesting, private_names, meter),
         Err(error) => Err(Failure::Errors(vec![error])),
     };
     let answer = match (answer, meter.stopped()) {
@@ -460,10 +475,18 @@ fn analysed(
 fn analyse_parsed(
     parsed: parser::Parsed,
     max_nesting: u32,
+    private_names: &[&str],
     meter: &Meter<'_>,
 ) -> Result<Script, Failure> {
     let mut ast = parsed.ast;
-    let errors = early::check(&ast, &parsed.body, parsed.strict, max_nesting, meter);
+    let errors = early::check(
+        &ast,
+        &parsed.body,
+        parsed.strict,
+        max_nesting,
+        private_names,
+        meter,
+    );
     if !errors.is_empty() {
         return Err(Failure::Errors(errors));
     }

@@ -34,6 +34,13 @@
 //! the memory budget from the start of the parse, the tree and the compile step's scratch and
 //! code as they grow, and the record and its atoms when it is made, as `parse_script` charges
 //! them (`script.rs`).
+//!
+//! A direct `eval` passes its parse and its compile the private names of the classes around
+//! the call (`#sec-performeval`, privateIdentifiers; `docs/design/engine.md`, "Private names",
+//! item 4; `story:private-names-in-eval-code`): `Agent::eval_private_names` walks the caller's
+//! environment chain once, the texts go to `parse_eval_with` (AllPrivateIdentifiersValid) and
+//! the positions (text, hops, slot) to `compile_eval_with`; both lists are charged while they
+//! live and dropped right after the compile. An indirect `eval` and `Function` code pass none.
 //! The code is kept in a script record of its own, and the copy with it (`docs/design/engine.md`,
 //! decision 4, "Source text."): for eval code the String PerformEval parsed, for the `Function`
 //! constructor the whole text of its last parse, `function anonymous(` P `\n) {\n` body `\n}`
@@ -57,7 +64,6 @@ use crate::builtins::string::StringBuilder;
 use crate::env::{Bound, NameTable, RecordNames, SlotKind, SlotNames};
 use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
-use crate::heap::string::CodeUnits;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
@@ -65,7 +71,6 @@ use crate::interp::frame::{Constructed, Frame, SlotValue, frame_bytes};
 use crate::object::ObjectKind;
 use crate::object::builtin_function::{Activation, KeptRoom};
 use crate::object::class_constructor::ConstructorKind;
-use crate::object::property::Key;
 use crate::realm::intrinsics::Intrinsic;
 use crate::script::{Compiled, ParsedTree, SourceCopy, vec_bytes};
 use crate::value::{ObjectRef, RealmRef, StringRef, Value};
@@ -305,10 +310,41 @@ impl<H: Host> Agent<H> {
             },
             activation,
         )?;
-        // Steps 7 to 11: the flags; then the parse of steps 12 to 15.
+        // Steps 7 to 11: the flags.
         let context = self.eval_context(strict_caller, function)?;
-        let direct = matches!(kind, CompilationType::DirectEval);
-        let (script, copy) = self.parse_eval_code(realm, string, context, direct)?;
+        // privateIdentifiers (step 12): for a direct `eval`, the private names of the caller's
+        // environment chain (`Agent::eval_private_names`), the texts for the parse and the
+        // positions for the compile; none for an indirect one. The direct `eval` pushed no frame
+        // before its parse: the running frame is the caller's. The lists are charged while they
+        // live and credited once the code is compiled.
+        let mut texts = ChargedVec::new();
+        let mut places = ChargedVec::new();
+        if matches!(kind, CompilationType::DirectEval) {
+            let env = self.top_frame()?.env;
+            self.eval_private_names(env, &mut texts, &mut places)?;
+        }
+        let mut names = ChargedVec::new();
+        let mut positions = ChargedVec::new();
+        self.reserve_vec(&mut names, places.len())?;
+        self.reserve_vec(&mut positions, places.len())?;
+        for &(start, end, hops, slot) in places.iter() {
+            let at = |n: u32| usize::try_from(n).unwrap_or(usize::MAX);
+            let text = texts
+                .get(at(start)..at(end))
+                .and_then(|bytes| core::str::from_utf8(bytes).ok());
+            let Some(text) = text else {
+                return Err(self.fault());
+            };
+            if names.push(text).is_err() || positions.push((text, hops, slot)).is_err() {
+                return Err(self.fault());
+            }
+        }
+        let context = EvalContext {
+            private_names: &names,
+            ..context
+        };
+        // The parse of steps 12 to 15.
+        let (script, copy) = self.parse_eval_code(realm, string, context)?;
         // Step 11: a source with no statement.
         if script.body.is_empty() {
             self.drop_tree(script);
@@ -319,8 +355,13 @@ impl<H: Host> Agent<H> {
         let compiled = swell_compiler::compile_eval_with(
             &script,
             context.in_derived_constructor,
+            &positions,
             &mut self.ledger(),
         );
+        drop(positions);
+        drop(names);
+        drop(places);
+        drop(texts);
         self.drop_tree(script);
         let (code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
             Ok(made) => made,
@@ -343,12 +384,12 @@ impl<H: Host> Agent<H> {
     /// inClassFieldInitializer when its template is of kind `FieldInitializer` (its
     /// [[ClassFieldInitializerName]]; an arrow in an initializer too, whose GetThisEnvironment
     /// is the initializer's), which makes ContainsArguments of the eval code a `SyntaxError`
-    /// (`swell_syntax::parse_eval_with`).
+    /// (`swell_syntax::parse_eval_with`). The private names are set by the caller.
     fn eval_context(
         &mut self,
         strict_caller: bool,
         function: Option<ObjectRef>,
-    ) -> Completion<EvalContext> {
+    ) -> Completion<EvalContext<'static>> {
         let (in_method, in_derived_constructor, in_initializer) = match function {
             Some(function) => match &self.engine_object(function)?.kind {
                 ObjectKind::EcmascriptFunction(f) => (
@@ -375,6 +416,7 @@ impl<H: Host> Agent<H> {
             in_method,
             in_derived_constructor,
             in_class_field_initializer: in_initializer,
+            private_names: &[],
         })
     }
 
@@ -383,15 +425,14 @@ impl<H: Host> Agent<H> {
     /// the script with the charged copy of its source, or the throw of its first `SyntaxError` in
     /// `realm`, the copy credited. A step per code unit of the String is charged before the copy
     /// (`Agent::charge_steps`, which reads the interrupt flag first). Not inlined into the run
-    /// loop, whose frame stays as small as it was. For a `direct` eval an error of an undeclared
-    /// private name is read by [`Agent::private_names_of_direct_eval`].
+    /// loop, whose frame stays as small as it was. The context's private names are the
+    /// privateIdentifiers of AllPrivateIdentifiersValid.
     #[inline(never)]
     fn parse_eval_code(
         &mut self,
         realm: Handle,
         string: StringRef,
-        context: EvalContext,
-        direct: bool,
+        context: EvalContext<'_>,
     ) -> Completion<(swell_syntax::Script, SourceCopy)> {
         let options = ParseOptions {
             max_nesting: self.limits.parser_nesting,
@@ -403,12 +444,7 @@ impl<H: Host> Agent<H> {
             swell_syntax::parse_eval_with(&copy.units, context, options, &mut self.ledger());
         match self.parsed_tree(parsed, copy)? {
             ParsedTree::Tree(script, copy) => Ok((script, copy)),
-            ParsedTree::Errors(mut errors) => {
-                if direct {
-                    self.private_names_of_direct_eval(&mut errors)?;
-                }
-                Err(self.throw_parse_errors(realm, errors))
-            }
+            ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
         }
     }
 
@@ -1028,91 +1064,54 @@ impl<H: Host> Agent<H> {
     }
 }
 
-/// The text of the early error AllPrivateIdentifiersValid gives for `#x` in eval code
-/// (`swell_syntax`, `early.rs`): `private name #x is not declared in an enclosing class`.
-const UNDECLARED_PRIVATE_NAME: (&str, &str) =
-    ("private name ", " is not declared in an enclosing class");
+#[cfg(test)]
+mod tests {
+    use crate::host::hooks::test_host::{agent_with_realm_and, limits};
+    use crate::value::Value;
+    use crate::{Outcome, Parsed, Source};
 
-impl<H: Host> Agent<H> {
-    /// Direct eval code is parsed with the private names of the classes around the call
-    /// (`#sec-performeval`, step 12: privateIdentifiers, the names of the running
-    /// PrivateEnvironment and its outer ones), which `story:private-names-in-eval-code` brings.
-    /// Until then the parse knows none of them and gives AllPrivateIdentifiersValid's error for
-    /// each private name of the code. Read here, after a parse that failed, for each such error:
-    /// - the name is declared by a class whose body encloses the call when a declarative record
-    ///   on the chain of the running frame's LexicalEnvironment names a slot `#x`
-    ///   ([`Agent::chain_names_slot`]): the class's private record, whose slots are named
-    ///   whenever a direct `eval` stands in the class body (`swell-compiler`, `resolve.rs`,
-    ///   `LexicalScope::named`), entered after the heritage;
-    /// - when every error of the parse is of such a name, the standard runs the code and the
-    ///   engine cannot: the first becomes the one error, the refusal `private name #x in direct
-    ///   eval code is not supported before slice 8` (a `Refusal` by `swell_syntax::message_kind`);
-    /// - otherwise the errors of declared names are no errors of the standard and are dropped;
-    ///   the others stay, the first of them thrown. A name no enclosing class declares, inside a
-    ///   class or outside every class, keeps its `SyntaxError`.
-    ///
-    /// A direct `eval` whose code parses never comes here, so one that names no `#` pays
-    /// nothing: no walk, no allocation. The name is looked up as an atom that already exists
-    /// (`Heap::atom_of`, which makes nothing): when there is none, no table names it.
-    fn private_names_of_direct_eval(
-        &mut self,
-        errors: &mut Vec<swell_syntax::SyntaxError>,
-    ) -> Completion<()> {
-        // The direct `eval` pushed no frame before its parse: the running frame is the caller's.
-        let env = self.top_frame()?.env;
-        let (head, tail) = UNDECLARED_PRIVATE_NAME;
-        let mut declared = 0usize;
-        for error in errors.iter_mut() {
-            let Some(name) = error
-                .message
-                .strip_prefix(head)
-                .and_then(|rest| rest.strip_suffix(tail))
-            else {
-                continue;
-            };
-            if !self.enclosing_class_declares(env, name)? {
-                continue;
-            }
-            let refusal = alloc::format!(
-                "private name {name} in direct eval code is not supported before slice 8"
-            );
-            error.message = refusal;
-            declared += 1;
-        }
-        if declared == 0 {
-            return Ok(());
-        }
-        if declared == errors.len() {
-            errors.truncate(1);
-        } else {
-            errors.retain(|e| {
-                !matches!(
-                    swell_syntax::message_kind(&e.message),
-                    swell_syntax::MessageKind::Refusal { .. }
-                )
-            });
-        }
-        Ok(())
-    }
+    /// The code units of the String literal the eval code of
+    /// [`a_collection_falls_between_the_walk_and_the_run_of_eval_code`] holds.
+    const LONG_LITERAL: usize = 600_000;
 
-    /// Whether a class whose body encloses the running code declares the private name `name`
-    /// (its text, with its `#`): a slot of that name in a record on the chain from `env`.
-    fn enclosing_class_declares(&mut self, env: Option<Handle>, name: &str) -> Completion<bool> {
-        let atom = if name.is_ascii() {
-            self.heap.atom_of(CodeUnits::Latin1(name.as_bytes()))
-        } else {
-            let mut units = ChargedVec::new();
-            self.reserve_vec(&mut units, name.encode_utf16().count())?;
-            for unit in name.encode_utf16() {
-                if units.push(unit).is_err() {
-                    return Err(self.fault());
-                }
+    /// `docs/design/engine.md`, "Private names", item 4 (the list of the walk holds no handle)
+    /// and "Collector": right after a collection, an entry counts few bytes before its direct
+    /// `eval`; the eval code's source, copied for its parse and kept as a constant, counts more
+    /// than the collector's trigger after the walk of the caller's private names, so the first
+    /// safe point after the walk, the first instruction of the eval code, collects (in every
+    /// build), and the code then reads a field and calls a method through the positions the
+    /// walk gave. No safe point stands between the walk, the parse and the compile.
+    #[test]
+    fn a_collection_falls_between_the_walk_and_the_run_of_eval_code() {
+        let mut l = limits();
+        l.steps_per_entry = 20 * LONG_LITERAL as u64;
+        let (mut agent, realm) = agent_with_realm_and(l);
+        let setup = alloc::format!(
+            "class C {{ #x = 41; #m() {{ return 1; }} read(s) {{ return eval(s); }} }}\n\
+             var c = new C(), src = '\"' + \"x\".repeat({LONG_LITERAL}) + '\".length + this.#x + this.#m()';\n0;"
+        );
+        let scripts = [setup.as_str(), "c.read(src);"].map(|source| {
+            match agent.parse_script(&realm, Source::Utf8(source), None) {
+                Ok(Parsed::Parsed(script)) => script,
+                _ => panic!("{source} did not parse"),
             }
-            self.heap.atom_of(&units[..])
+        });
+        let [setup, read] = &scripts;
+        assert!(matches!(
+            agent.evaluate_script(setup),
+            Ok(Outcome::Normal(_))
+        ));
+        assert!(agent.collect().is_ok());
+        agent.heap.collections = 0;
+        let answer = match agent.evaluate_script(read) {
+            Ok(Outcome::Normal(answer)) => agent.heap.roots.get(&answer),
+            other => panic!("{other:?}"),
         };
-        match atom {
-            Some(atom) => self.chain_names_slot(env, Key::String(atom)),
-            None => Ok(false),
-        }
+        let want = (LONG_LITERAL + 42) as f64;
+        assert!(
+            matches!(answer, Ok(Value::Number(n)) if n == want),
+            "{answer:?}"
+        );
+        assert!(agent.heap.collections >= 1, "no collection after the walk");
     }
 }
