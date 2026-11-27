@@ -11,10 +11,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use swell_syntax::ast::{Ast, Expr, ExprId, FunctionId, FunctionKind, Stmt};
+use swell_syntax::ledger::{Ledger, Stop};
 use swell_syntax::{
-    EvalContext, MessageKind, ParseOptions, Script, SyntaxError, message_kind,
+    EvalContext, Failure, MessageKind, ParseOptions, Script, SyntaxError, message_kind,
     parse_dynamic_async_function, parse_dynamic_function, parse_dynamic_generator_function,
-    parse_eval, parse_script,
+    parse_eval, parse_eval_with, parse_script,
 };
 
 const LIMIT: u32 = 1_000;
@@ -3416,4 +3417,99 @@ fn await_as_an_identifier_names_the_code_that_reserves_it() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// A ledger that counts the charges it is asked for and refuses the one numbered `refuse_at`
+/// (from 1) with `OverBudget`; it polls without a stop.
+#[derive(Debug, Default)]
+struct CountingLedger {
+    charges: usize,
+    charged: usize,
+    credited: usize,
+    refuse_at: Option<usize>,
+}
+
+impl CountingLedger {
+    fn held(&self) -> usize {
+        self.charged.saturating_sub(self.credited)
+    }
+}
+
+impl Ledger for CountingLedger {
+    fn charge(&mut self, bytes: usize) -> Result<(), Stop> {
+        self.charges += 1;
+        if self.refuse_at == Some(self.charges) {
+            return Err(Stop::OverBudget);
+        }
+        self.charged += bytes;
+        Ok(())
+    }
+
+    fn credit(&mut self, bytes: usize) {
+        self.credited += bytes;
+    }
+
+    fn poll(&mut self) -> Result<(), Stop> {
+        Ok(())
+    }
+}
+
+/// ContainsArguments of eval code with inClassFieldInitializer (`#sec-performeval`, step 12.h)
+/// is a walk of its own, charged to the meter of the parse
+/// (`story:eval-in-class-field-initializers`). Over eval code of 121 numbers joined by commas in
+/// the eval context of a field initializer (263 charges; 261 with `arguments` in place of the
+/// last number): without `arguments` the parse answers the script and the ledger holds
+/// exactly its tree (the walk's stack credited); with `arguments` at the end it answers the one
+/// error and the ledger holds nothing; with each charge of either parse refused in turn it
+/// answers `Stopped(OverBudget)` and the ledger holds nothing.
+#[test]
+fn contains_arguments_of_eval_code_holds_only_the_tree() {
+    let context = EvalContext {
+        strict_caller: true,
+        in_function: true,
+        in_method: true,
+        in_derived_constructor: false,
+        in_class_field_initializer: true,
+    };
+    let options = ParseOptions { max_nesting: LIMIT };
+    let without = units(&format!("{}0", "0, ".repeat(120)));
+    let with = units(&format!("{}arguments", "0, ".repeat(120)));
+    let mut ledger = CountingLedger::default();
+    let script = parse_eval_with(&without, context, options, &mut ledger)
+        .unwrap_or_else(|failure| panic!("{failure:?}"));
+    assert_eq!(ledger.held(), script.charged, "{ledger:?}");
+    assert_eq!(script.charged, script.capacity_bytes(), "{ledger:?}");
+    drop(script);
+    let charges_without = ledger.charges;
+    let mut ledger = CountingLedger::default();
+    let answer = parse_eval_with(&with, context, options, &mut ledger);
+    match &answer {
+        Err(Failure::Errors(errors)) => assert_eq!(
+            messages(errors),
+            vec!["arguments in eval code in a class field initializer".to_string()]
+        ),
+        other => panic!("{other:?}"),
+    }
+    drop(answer);
+    assert_eq!(ledger.held(), 0, "{ledger:?}");
+    let charges_with = ledger.charges;
+    println!("charges: {charges_without} without arguments, {charges_with} with");
+    for (source, charges) in [(&without, charges_without), (&with, charges_with)] {
+        for refuse_at in 1..=charges {
+            let mut ledger = CountingLedger {
+                refuse_at: Some(refuse_at),
+                ..CountingLedger::default()
+            };
+            let answer = parse_eval_with(source, context, options, &mut ledger);
+            assert!(
+                matches!(answer, Err(Failure::Stopped(Stop::OverBudget))),
+                "charge {refuse_at} of {charges}: {answer:?}"
+            );
+            assert_eq!(
+                ledger.held(),
+                0,
+                "charge {refuse_at} of {charges}: {ledger:?}"
+            );
+        }
+    }
 }

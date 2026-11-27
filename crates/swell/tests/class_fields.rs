@@ -545,38 +545,6 @@ fn new_in_an_initializer_stops_at_frame_depth() {
     assert_eq!(run(limits, &strict), passed(), "{strict}");
 }
 
-/// PerformEval (`#sec-performeval`) in a field initializer is refused until
-/// `story:eval-in-class-field-initializers` brings ContainsArguments: a direct eval whose
-/// GetThisEnvironment is a field initializer's, in an instance or a static field and through an
-/// arrow in one, throws the `SyntaxError` `eval in a class field initializer is not supported
-/// before slice 8`, whatever its code (`arguments`, an arrow naming it, `1`); an indirect eval
-/// in an initializer and a direct eval in a method of the same class run.
-#[test]
-fn a_direct_eval_in_an_initializer_is_refused() {
-    both_pass(
-        "function refused(f) {\n\
-           try { f(); return \"none\"; } catch (e) {\n\
-             return e instanceof SyntaxError\n\
-               && e.message === \"eval in a class field initializer is not supported before slice 8\"\n\
-               ? \"refused\" : String(e);\n\
-           }\n\
-         }\n\
-         var r = [\n\
-           refused(function () { new (class { x = eval(\"arguments\"); })(); }),\n\
-           refused(function () { new (class { x = eval(\"() => arguments\"); })(); }),\n\
-           refused(function () { new (class { x = eval(\"1\"); })(); }),\n\
-           refused(function () { new (class { x = (() => eval(\"1\"))(); })(); }),\n\
-           refused(function () { class S { static x = eval(\"arguments\"); } }),\n\
-           refused(function () { class S { static x = eval(\"() => arguments\"); } }),\n\
-           refused(function () { class S { static x = eval(\"1\"); } })\n\
-         ];\n\
-         class G { a = (0, eval)(\"1\"); static b = (0, eval)(\"2\"); m() { return eval(\"3\"); } static n() { return eval(\"4\"); } }\n\
-         var g = new G();\n\
-         r.join() === \"refused,refused,refused,refused,refused,refused,refused\"\n\
-           && g.a === 1 && G.b === 2 && g.m() === 3 && G.n() === 4;",
-    );
-}
-
 /// A computed key made at run time (a String or a Symbol made by the key's expression) lives in
 /// its hidden binding from the class's definition to every construction: three classes made in
 /// a loop, garbage made between, then each constructed; with a collection at every safe point a
