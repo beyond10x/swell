@@ -1029,24 +1029,30 @@ tasks:
         exit "$bad"
 
   test-opt1-profile-check:
-    desc: Internal. Fail build-tests, naming file and line, when Cargo.toml or .cargo/config.toml sets a profile for one package or for build scripts, or defines the profile collect.
+    desc: Internal. Fail build-tests, naming file and line, when Cargo.toml or .cargo/config.toml sets a profile for one package or for build scripts in the profile dev or test, defines the profile collect, or includes another configuration file.
     summary: |
       Internal, a command of build-tests before any cargo runs (story
       gate-test-steps-hold-the-budget-on-the-slower-runner, item 3). The test
       TEST_OPT1_PROFILE_TEST holds that debug assertions and overflow checks are on in the
       profile of the step test's run at opt-level 1, but it reads the profile of its own crate
       only: a setting of another crate the binary links, or of build scripts and proc macros,
-      goes unseen. The profile collect is defined in .cargo/collect-profile.toml only, which
+      goes unseen. That run uses the profile collect, which inherits test, which inherits dev.
+      The profile collect is defined in .cargo/collect-profile.toml only, which
       build-collect holds to its three lines. So this task reads Cargo.toml, .cargo/config.toml
       and .cargo/config (those that exist), with comments, blanks and quotes of keys removed,
       and fails with one line "build-tests: <file>:<line>: <text>: <reason>" for each table
-      [profile.<name>.package.<...>] or [profile.<name>.build-override], each table
-      [profile.collect...], and each dotted key or inline table that reaches the same places
-      (profile.<name>.package..., package.<...> = ... under [profile.<name>], collect = {...}
-      under [profile]); and with "build-tests: <variable> is set in the environment: <reason>"
-      for a variable CARGO_PROFILE_<name>_PACKAGE_... or CARGO_PROFILE_<name>_BUILD_OVERRIDE_...
-      or CARGO_PROFILE_COLLECT_.... A cargo configuration file outside the tree (a parent
-      directory's .cargo/config.toml, CARGO_HOME's) is not read. The planted script
+      [profile.<name>.package.<...>] or [profile.<name>.build-override] with <name> dev or
+      test, each table [profile.collect...], and each dotted key or inline table that reaches
+      the same places (profile.<name>.package..., package.<...> = ... under [profile.<name>],
+      collect = {...} under [profile]); for a key include at the top of .cargo/config.toml or
+      .cargo/config (include = [...] or [[include]]), since this task does not read a file
+      the configuration includes; and with "build-tests: <variable> is set in the
+      environment: <reason>" for a variable CARGO_PROFILE_DEV_ or CARGO_PROFILE_TEST_
+      followed by PACKAGE_... or BUILD_OVERRIDE_..., or CARGO_PROFILE_COLLECT_.... A profile
+      of one package or of build scripts in another profile (release, bench) passes. A
+      cargo configuration file outside the tree (a parent directory's .cargo/config.toml,
+      CARGO_HOME's) is not read, nor a key written with an escape or an inline table over
+      several lines. The planted script
       tests/gate/build-tests-refuses-a-profile-its-profile-test-does-not-see.sh holds it.
     silent: true
     cmds:
@@ -1061,9 +1067,10 @@ tasks:
             FNR == 1 { table = "" }
             function why(path,    p, n) {
               n = split(path, p, ".")
+              if (FILENAME != "Cargo.toml" && (path == "include" || path ~ /^include\./)) return "cargo reads the files it names, and a file it includes is not read by this check, so a profile there would go unseen by the test " test
               if (p[1] != "profile" || n < 2) return ""
               if (p[2] == "collect") return "the profile collect is defined in .cargo/collect-profile.toml only, which build-collect holds to its three lines"
-              if (n >= 3 && (p[3] == "package" || p[3] == "build-override")) return "a profile of one package or of build scripts, which the test " test " does not see: it reads the profile of its own crate"
+              if (n >= 3 && (p[2] == "dev" || p[2] == "test") && (p[3] == "package" || p[3] == "build-override")) return "a profile of one package or of build scripts in the profile " p[2] ", which the profile collect of the run at opt-level 1 inherits, and which the test " test " does not see: it reads the profile of its own crate"
               return ""
             }
             function refuse(r) { printf "build-tests: %s:%d: %s: %s\n", FILENAME, FNR, text, r; bad = 1 }
@@ -1071,7 +1078,11 @@ tasks:
               text = $0; sub(/^[ \t]+/, "", text); sub(/[ \t]+$/, "", text)
               line = $0; sub(/#.*/, "", line); gsub(/[ \t"\047]/, "", line)
               if (line == "") next
-              if (line ~ /^\[\[/) { table = ""; next }
+              if (line ~ /^\[\[/) {
+                table = line; sub(/^\[\[/, "", table); sub(/\]\].*$/, "", table)
+                r = why(table); if (r != "") refuse(r)
+                table = ""; next
+              }
               if (line ~ /^\[/) {
                 table = line; sub(/^\[/, "", table); sub(/\].*$/, "", table)
                 r = why(table); if (r != "") refuse(r)
@@ -1083,7 +1094,7 @@ tasks:
               r = why(path)
               if (r == "" && value ~ /^\{/ && (path == "profile" || path ~ /^profile\.[^.]+$/)) {
                 if (path == "profile" && value ~ /[{,]collect[.=]/) r = why("profile.collect")
-                else if (value ~ /[{,](package|build-override)[.=]/) r = why((path == "profile" ? "profile.any" : path) ".package")
+                else if (value ~ /[{,](package|build-override)[.=]/ || value ~ /[{,][^{},=]*\.(package|build-override)[.=]/) r = why((path != "profile" ? path : value ~ /[{,](dev|test)[.=]/ ? "profile.test" : "profile.other") ".package")
               }
               if (r != "") refuse(r)
             }
@@ -1096,7 +1107,7 @@ tasks:
             n = substr($0, 1, eq - 1)
             if (n !~ /^CARGO_PROFILE_/) next
             if (n ~ /^CARGO_PROFILE_COLLECT_/) r = "the profile collect is defined in .cargo/collect-profile.toml only"
-            else if (n ~ /_PACKAGE_/ || n ~ /_BUILD_OVERRIDE_/) r = "a profile of one package or of build scripts, which the profile test of the run at opt-level 1 does not see"
+            else if (n ~ /^CARGO_PROFILE_(DEV|TEST)_(PACKAGE|BUILD_OVERRIDE)_/) r = "a profile of one package or of build scripts in the profile dev or test, which the profile collect of the run at opt-level 1 inherits, and which its profile test does not see"
             else next
             printf "build-tests: %s is set in the environment: %s\n", n, r
             bad = 1
@@ -1126,8 +1137,9 @@ tasks:
       its binaries fresh and compiles nothing inside the clock (the organization's rule "Tests
       stay fast"). First it refuses a caller's value of TEST_RUSTFLAGS or TEST_NEXTEST_ARGS
       (task test-vars-check) and of TEST_OPT1_ARGS, NO_STACK_TESTS or TEST_OPT1_PROFILE_TEST
-      (task test-opt1-vars-check), and a profile of one package or of build scripts, or a
-      definition of the profile collect, in Cargo.toml or .cargo/config.toml, which the test
+      (task test-opt1-vars-check), and a profile of one package or of build scripts in the
+      profile dev or test, a definition of the profile collect, or an include of another
+      configuration file, in Cargo.toml or .cargo/config.toml, which the test
       TEST_OPT1_PROFILE_TEST of the run at opt-level 1 does not see (task
       test-opt1-profile-check).
         - the step test: "cargo nextest run --no-run --workspace --locked --profile default"
@@ -1288,8 +1300,9 @@ tasks:
       .config/nextest.toml with one default-filter line after [profile.default]:
       .out/test-opt1-nextest.toml, "binary_id(swell::main) & (test(=<name>) | ...)" over the
       names the rule prints "other" (fields 1 and 2 of its lines), and
-      .out/test-opt0-nextest.toml, "not (...)" of the same. It fails when the rule prints no
-      test "other" or a file cannot be written. Then "cargo nextest list --message-format
+      .out/test-opt0-nextest.toml, "not (...)" of the same. It fails, with a line of its own,
+      when crates/swell/tests/support/ holds no .rs file, when the rule prints no test
+      "other" or when a file cannot be written. Then "cargo nextest list --message-format
       oneline" three times, into .out/test-list-all.txt (TEST_NEXTEST_ARGS without a filter),
       .out/test-list-opt1.txt (TEST_OPT1_ARGS with the first configuration) and
       .out/test-list-opt0.txt (TEST_NEXTEST_ARGS with the second), each line "<binary> <test>";
@@ -1306,15 +1319,18 @@ tasks:
       does not reach the tasks it calls, so this task sets its own), and a list whose log has a
       cargo Compiling line fails naming build-tests (task compile-check): a list that built
       would build inside the clock. The planted scripts
-      tests/gate/test-runs-each-test-once-at-one-opt-level.sh and
-      tests/gate/test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh hold the checks.
+      tests/gate/test-runs-each-test-once-at-one-opt-level.sh,
+      tests/gate/test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh and
+      tests/gate/test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh hold the
+      checks.
     env:
       RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
     silent: true
     cmds:
       - |
         set --
-        for f in crates/swell/tests/support/*.rs; do [ -f "$f" ] && set -- "$@" "$f"; done
+        for f in crates/swell/tests/support/*.rs; do if [ -f "$f" ]; then set -- "$@" "$f"; fi; done
+        [ "$#" -gt 0 ] || { echo "test: crates/swell/tests/support/ holds no .rs file, which taskfiles/realm-room-tests.awk -v rule=stack reads to follow a test's calls into the helpers that start a bounded stack (stack_with_room, stack_thread); no test ran"; exit 1; }
         for f in crates/swell/tests/*.rs; do [ "$f" = crates/swell/tests/main.rs ] || set -- "$@" "$f"; done
         list=.out/test-stack.txt
         awk -v rule=stack -f taskfiles/realm-room-tests.awk "$@" > "$list" || { echo "test: taskfiles/realm-room-tests.awk -v rule=stack failed, or $list cannot be written"; exit 1; }
