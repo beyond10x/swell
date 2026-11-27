@@ -5,7 +5,7 @@ kind: story
 status: active
 title: The lane slow ends within 15 minutes on the forge and each of its parts within 10
 summary: 'task slow took 22 min 35 s on pull request 19; two profile builds are 433 s of it and test-realm-sizes 524 s. Bound: 900 s for the lane, 600 s per part.'
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T20:04:08Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T20:04:08Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
@@ -81,3 +81,45 @@ every pull request that changes the engine.
 profile is shared, `.github/workflows/slow.yml` only where a step's command changes,
 `tests/gate/` (the two selftests). The coordinator's: `AGENTS.md` (the lane's bound),
 `CHANGELOG.md`.
+
+## As delivered
+
+Four units of wave big-2 delivered the story: `slowlane` (the parts are timed and bounded),
+`lanebuilds`, `lanetests` and `lanefour`; `docs/plan/wave-big-2.md` has the row of each. The
+first three brought the lane on the forge to 1,137.3 s of 900 (run 45925590365 on
+`158888d`: parts 419.3, 268.4, 431.2 and 18.4). The fourth:
+
+Unit lanefour measured the lane part by part on the build node, with builds and runs
+separate. It took two of the four candidates and one change of how the lane runs.
+
+- **(a) Taken.** The lane's collect mode runs at opt-level 1, apart from the tests that run
+  on a bounded stack (71 on the unit's head, 73 after its merge), the tests a macro writes,
+  and the library's unit tests (381 at opt-level 0, 1,034 at opt-level 1 on the unit's head).
+  - The cost is one cold build of the profile `collect`: 3 min 33 s on the forge.
+  - The seven collect runs of `test-realm-sizes` went from 312 s on the forge to an
+    estimated 32 s.
+  - The collect runs of `slow-tests` went from 128.4 s to 39.4 s, on 4 test threads on the
+    node.
+  - A guard holds the split: a stack test in the run at opt-level 1 fails there. Its first
+    run found 14 stack tests a macro writes that ran in both runs; they now run at
+    opt-level 0 only.
+- **The build beside the lane's first part.** The lane starts the build of the profile
+  `collect` right after `gate-time-start` and `slow-tests` waits for it. On 4 CPUs of the
+  node the build took 250.7 s beside `slow-test262`, which took 56.6 s longer than alone
+  (347.8 against 291.2); `slow-tests` waited 0 s. No cargo lock wait was logged.
+- **(b) Taken.** A character class keeps its last answer for the range around it. The
+  property-escape cases run 6 % faster with the same steps, results and expected file.
+- **(c) Dropped.** A nextest start over the list costs 0.085 s and a process start 1.5 ms.
+  The 16 s of a default-mode run is test work.
+- **(d) Not taken.** It needs a claim that no defect hides at the cut sizes. The record
+  contradicts that claim.
+
+Estimated forge lane on the tree merged with wave big-2: about 848 s of 900, from 1,137.3 s
+(about 806 s before the merge); the unit's own aim of 800 s is not met by the estimate.
+Measured cold on the node: 444.2 s on 32 cores (424.1 s before the merge), 619.8 s on 4 CPUs
+before the merge.
+
+The reviews of the fourth unit: `review-result:adversary-lanefour-pass-1`,
+`review-result:adversary-lanefour-pass-2` and the coordinator's read of its second correction
+(`review-result:lanefour-correction-2-coordinator-read`). The story's bound, 900 s for the lane
+on the forge, is shown only by a forge run; none exists yet for the merged tree.
