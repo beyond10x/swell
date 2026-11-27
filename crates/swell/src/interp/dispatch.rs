@@ -46,7 +46,9 @@ pub(crate) enum Flow {
 
 /// The bytes the enumerators and the Iterator Records among `entries` hold, which leave the
 /// frame's `charged` and are credited when they leave the operand stack
-/// ([`Agent::truncate_stack`]).
+/// ([`Agent::truncate_stack`]). Inline, so that the instance of the loop a host's crate makes
+/// does not call it in the library for every replace.
+#[inline]
 fn held_bytes(entries: &[Entry]) -> u64 {
     entries.iter().fold(0u64, |held, entry| match entry {
         Entry::Enumerator(enumerator) => held.saturating_add(enumerator.bytes),
@@ -332,6 +334,27 @@ impl<H: Host> Agent<H> {
                 self.heap.accounting.credit(held);
                 Ok(())
             }
+            None => Err(self.fault()),
+        }
+    }
+
+    /// The top `N` entries of the operand stack, the lowest first, each a value, left there:
+    /// what `peek_value(N - 1)` to `peek_value(0)` answer, read in one borrow of the frame, with
+    /// the same fault for a missing entry or one that is no value.
+    fn operands<const N: usize>(&mut self) -> Completion<[Value; N]> {
+        let found = self.interp.frames.last().and_then(|frame| {
+            let at = frame.stack.len().checked_sub(N)?;
+            let mut values = [Value::Undefined; N];
+            for (value, entry) in values.iter_mut().zip(frame.stack.get(at..)?) {
+                let Entry::Value(found) = entry else {
+                    return None;
+                };
+                *value = *found;
+            }
+            Some(values)
+        });
+        match found {
+            Some(values) => Ok(values),
             None => Err(self.fault()),
         }
     }
@@ -860,17 +883,14 @@ impl<H: Host> Agent<H> {
 
     /// `GetIndex`.
     fn get_index(&mut self) -> Completion<Flow> {
-        let base = self.peek_value(1)?;
-        let key = self.peek_value(0)?;
+        let [base, key] = self.operands::<2>()?;
         let value = self.get_value_computed(base, key)?;
         self.replace(2, value)
     }
 
     /// `PutIndex`.
     fn put_index(&mut self, strict: bool) -> Completion<Flow> {
-        let base = self.peek_value(2)?;
-        let key = self.peek_value(1)?;
-        let value = self.peek_value(0)?;
+        let [base, key, value] = self.operands::<3>()?;
         let object = self.require_object_coercible_and_wrap(base)?;
         let keep = self.keep(Value::Object(object));
         let key = self.to_property_key(key);
@@ -1126,16 +1146,14 @@ impl<H: Host> Agent<H> {
 
     /// `Eq` (`equal` true) and `NotEq`.
     fn loose_equality(&mut self, equal: bool) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = self.is_loosely_equal(left, right)? == equal;
         self.replace(2, Value::Boolean(result))
     }
 
     /// `StrictEq` (`equal` true) and `StrictNotEq`.
     fn strict_equality(&mut self, equal: bool) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = self.is_strictly_equal(left, right)? == equal;
         self.replace(2, Value::Boolean(result))
     }
@@ -1549,8 +1567,7 @@ impl<H: Host> Agent<H> {
 
     /// `[a, b] -> [r]`: ApplyStringOrNumericBinaryOperator.
     fn binary(&mut self, operator: BinaryOperator) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = self.apply_string_or_numeric_binary_operator(left, operator, right)?;
         self.replace(2, result)
     }
@@ -1558,8 +1575,7 @@ impl<H: Host> Agent<H> {
     /// The relational operators (`#sec-relational-operators-runtime-semantics-evaluation`) with
     /// IsLessThan (`#sec-islessthan`): an undefined result is false.
     fn relational(&mut self, instruction: Instruction) -> Completion<Flow> {
-        let left = self.peek_value(1)?;
-        let right = self.peek_value(0)?;
+        let [left, right] = self.operands::<2>()?;
         let result = match instruction {
             Instruction::Lt => self.is_less_than(left, right, true)? == Some(true),
             Instruction::Gt => self.is_less_than(right, left, false)? == Some(true),
