@@ -23,12 +23,32 @@
 # function it calls. A test this rule does not see at all, one that a macro writes (its fn line
 # has no literal name), is not printed: the task runs every test of the binary that is not
 # printed as "other", so such a test runs at every size.
+#
+# A function declared inside another (its fn line indented deeper than the open function's, before
+# the line "}" that closes that one at its own indent) is a function of its own and also part of
+# the text of the function that holds it, so a test whose body is a nested fn passed by value
+# (on_bounded_stack(..., body)) is read with that body.
+#
+# With -v rule=stack the same walk reads another name, for the task slow-tests (story
+# realm-size-lane-within-its-share): a function runs on a bounded stack when its text names
+# stack_with_room( or .stack_size(, and the lines are "stack <module>::<test>" or
+# "other <module>::<test>". A stack test proves the stack the limits promise with frames whose
+# size depends on the optimization level, so slow-tests runs the tests printed "stack" (and
+# those not printed at all) in the test profile at opt-level 0, and those printed "other" at
+# opt-level 1.
 function flush() {
-  if (cur != "" && !(cur in text)) {
-    text[cur] = body
-    if (istest) { ntest++; tests[ntest] = cur }
+  if (cur != "") {
+    occ++
+    occtext[occ] = body
+    occname[occ] = cur
+    occparent[occ] = curparent
+    occtest[occ] = istest
   }
-  cur = ""; body = ""; istest = 0
+  cur = ""; body = ""; istest = 0; curparent = 0
+}
+function indent(line) {
+  match(line, /^[ \t]*/)
+  return RLENGTH
 }
 FNR == 1 {
   flush()
@@ -36,6 +56,11 @@ FNR == 1 {
   if (scope ~ /(^|\/)support\/[^\/]*$/) scope = "support"
   else { sub(/^.*\//, "", scope); sub(/\.rs$/, "", scope) }
   pending = 0
+  depth = 0
+}
+/^[ \t]*}/ {
+  at = indent($0)
+  while (depth > 0 && openind[depth] >= at) depth--
 }
 /^[ \t]*#\[test\]/ { pending = 1 }
 /^[ \t]*(pub(\([a-z]+\))? )?(const )?(async )?(unsafe )?fn [A-Za-z_]/ {
@@ -46,14 +71,26 @@ FNR == 1 {
   cur = scope ":" name
   istest = pending
   pending = 0
+  at = indent($0)
+  while (depth > 0 && openind[depth] >= at) depth--
+  curparent = (depth > 0) ? openocc[depth] : 0
+  depth++
+  openind[depth] = at
+  openocc[depth] = occ + 1
 }
 /^[ \t]*(pub(\([a-z]+\))? )?fn \$/ { flush(); pending = 0 }
 { if (cur != "") body = body "\n" $0 }
 END {
   flush()
+  for (o = occ; o >= 1; o--) if (occparent[o]) occtext[occparent[o]] = occtext[occparent[o]] occtext[o]
+  for (o = 1; o <= occ; o++) {
+    if (occname[o] in text) continue
+    text[occname[o]] = occtext[o]
+    if (occtest[o]) { ntest++; tests[ntest] = occname[o] }
+  }
   for (f in text) {
     s = substr(f, 1, index(f, ":") - 1)
-    if (text[f] ~ /heap_bytes\(|live_bytes\(/ || (s != "support" && text[f] ~ /memory_bytes|MemoryBudget/)) {
+    if (rule == "stack" ? text[f] ~ /stack_with_room\(|\.stack_size\(/ : text[f] ~ /heap_bytes\(|live_bytes\(/ || (s != "support" && text[f] ~ /memory_bytes|MemoryBudget/)) {
       marked[f] = 1
       queue[++tail] = f
     }
@@ -80,6 +117,6 @@ END {
   }
   for (i = 1; i <= ntest; i++) {
     f = tests[i]
-    print ((f in marked) ? "room " : "other ") substr(f, 1, index(f, ":") - 1) "::" substr(f, index(f, ":") + 1)
+    print ((f in marked) ? (rule == "stack" ? "stack " : "room ") : "other ") substr(f, 1, index(f, ":") - 1) "::" substr(f, index(f, ":") + 1)
   }
 }
