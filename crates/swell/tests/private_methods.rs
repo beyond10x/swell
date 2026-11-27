@@ -1217,3 +1217,92 @@ with (scope) {
 r === "number2,2" && scope.x === 2;"##;
     assert_eq!(run(limits(), source), passed(), "{source}");
 }
+
+/// Private methods of a derived class (SuperCall, step 11: InitializeInstanceElements after
+/// BindThisValue): before `super()` the constructor's `this` is uninitialized, a
+/// `ReferenceError`; after it the methods are on the object. A base constructor that returns
+/// another object makes that object the one the derived class's methods are added to (the
+/// object is "stamped"): a frozen object and a Proxy get them (the add does not read
+/// [[Extensible]] and no trap runs), and a second stamp of the same object is the `TypeError`
+/// of PrivateMethodOrAccessorAdd, step 3, after the parent's constructor ran.
+#[test]
+fn private_methods_of_a_derived_class_meet_super_and_return_override() {
+    both_list_nothing(
+        "var wrong = [];\n\
+         class P { constructor() { this.p = 1; } }\n\
+         class C extends P {\n\
+           #m() { return 'm'; }\n\
+           constructor() {\n\
+             try { this.#m(); wrong.push('before'); } catch (e) { if (!(e instanceof ReferenceError)) wrong.push('before kind'); }\n\
+             super();\n\
+             this.after = this.#m();\n\
+           }\n\
+         }\n\
+         if (new C().after !== 'm') wrong.push('after');\n\
+         class Base { constructor(o) { return o; } }\n\
+         class Stamp extends Base { #m() { return 'stamped'; } static read(o) { return o.#m(); } }\n\
+         var plain = {}, frozen = Object.freeze({}), traps = 0;\n\
+         var proxy = new Proxy({}, { defineProperty() { traps++; return true; }, getOwnPropertyDescriptor() { traps++; } });\n\
+         if (new Stamp(plain) !== plain || Stamp.read(plain) !== 'stamped') wrong.push('plain');\n\
+         new Stamp(frozen); if (Stamp.read(frozen) !== 'stamped') wrong.push('frozen');\n\
+         new Stamp(proxy); if (Stamp.read(proxy) !== 'stamped' || traps !== 0) wrong.push('proxy');\n\
+         try { new Stamp(plain); wrong.push('twice'); } catch (e) { if (!(e instanceof TypeError)) wrong.push('twice kind'); }\n\
+         try { Stamp.read({}); wrong.push('unstamped'); } catch (e) { if (!(e instanceof TypeError)) wrong.push('unstamped kind'); }\n\
+         wrong.join();",
+    );
+}
+
+/// ClassDefinitionEvaluation, step 8: the heritage is evaluated with the PrivateEnvironment of
+/// the code around the class and in the class scope, so the class's private record is entered
+/// after it. A heritage calls an outer class's private method of the same name as one the
+/// inner class declares; a heritage reads a `let` of the enclosing function, and an arrow made
+/// in the heritage reads it later; the class's methods still reach their own private record.
+/// A heritage naming a private name only the inner class declares is the early `SyntaxError`
+/// (`#sec-class-definitions-static-semantics-early-errors`, ClassTail).
+#[test]
+fn the_private_record_is_entered_after_the_heritage() {
+    both_pass(
+        "class Outer {\n\
+           #m() { return 'outer'; }\n\
+           static f(o) {\n\
+             return class extends (o.#m() === 'outer' ? Object : null) {\n\
+               #m() { return 'inner'; }\n\
+               run() { return this.#m(); }\n\
+             };\n\
+           }\n\
+         }\n\
+         var K = Outer.f(new Outer());\n\
+         Object.getPrototypeOf(K) === Object && new K().run() === 'inner';",
+    );
+    both_pass(
+        "function make() {\n\
+           let base = Object, seen = 'first', read;\n\
+           const K = class extends (read = () => seen, base) {\n\
+             #p() { return seen; }\n\
+             get() { return this.#p(); }\n\
+           };\n\
+           seen = 'later';\n\
+           return [K, read];\n\
+         }\n\
+         var made = make(), K = made[0], read = made[1];\n\
+         Object.getPrototypeOf(K) === Object && read() === 'later' && new K().get() === 'later';",
+    );
+    let source = "class C extends (function (o) { return o.#x; }, Object) { #x() {} }";
+    for text in [source.to_string(), format!("\"use strict\";\n{source}")] {
+        match run(limits(), &text) {
+            Outcome::Errors(found) => assert!(
+                found.len() == 1
+                    && found[0].contains("private name #x is not declared in an enclosing class"),
+                "{text}: {found:?}"
+            ),
+            other => panic!("{text}: {other:?}"),
+        }
+    }
+    both_pass(
+        "class O {\n\
+           #x() { return 'o'; }\n\
+           static f(o) { return class extends (o.#x() === 'o' ? Object : null) { #x() {} }; }\n\
+         }\n\
+         Object.getPrototypeOf(O.f(new O())) === Object;",
+    );
+}

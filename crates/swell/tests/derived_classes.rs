@@ -774,3 +774,63 @@ fn values_of_a_super_call_survive_garbage() {
            && new Spread().x === 3 && new Trapped().x === 9 && new Got().m() === 'm' && new Early().ok;"
     ].concat());
 }
+
+/// The fields of a derived class are defined when `super()` returns (SuperCall, step 11:
+/// InitializeInstanceElements of the object BindThisValue bound, `#sec-initializeinstanceelements`):
+/// the parent's constructor sees no field, each initializer runs once, and the code after
+/// `super()` reads them; a default derived constructor and a `super()` called from an arrow
+/// define them too; a second `super()` throws the `ReferenceError` of BindThisValue before
+/// InitializeInstanceElements, so no initializer runs again. In an initializer `super.v` reads
+/// the parent's prototype, `static s = super.name` reads the parent class's own `name`, and an
+/// arrow reads the instance. A private method is callable from a field initializer of its
+/// class; in a derived class the parent's constructor finds no private method on the object
+/// it makes (PrivateElementFind is empty until step 11), a `TypeError`.
+#[test]
+fn the_fields_of_a_derived_class_are_defined_when_super_returns() {
+    both_pass(
+        "var log = [];\n\
+         class A { constructor() { log.push('A:' + (this.f === undefined) + ':' + Object.keys(this).length); } }\n\
+         class B extends A {\n\
+           f = (log.push('init'), 1);\n\
+           g = this.f + 1;\n\
+           constructor() { log.push('before'); super(); log.push('after:' + this.f + ',' + this.g); }\n\
+         }\n\
+         var b = new B();\n\
+         log.join() === 'before,A:true:0,init,after:1,2' && b.f === 1 && b.g === 2\n\
+           && Object.keys(b).join() === 'f,g';",
+    );
+    both_pass(
+        "var count = 0;\n\
+         class P { constructor() { this.p = (this.p || 0) + 1; } }\n\
+         class D extends P { f = ++count; }\n\
+         var d = new D();\n\
+         class Arrow extends P { f = ++count; constructor() { var go = () => super(); go(); this.seen = this.f; } }\n\
+         var a = new Arrow();\n\
+         var twice;\n\
+         class Twice extends P {\n\
+           f = ++count;\n\
+           constructor() { super(); try { super(); } catch (e) { twice = e instanceof ReferenceError; } }\n\
+         }\n\
+         var t = new Twice();\n\
+         d.f === 1 && d.p === 1 && a.f === 2 && a.seen === 2 && a.p === 1\n\
+           && twice === true && t.f === 3 && t.p === 1 && count === 3;",
+    );
+    both_pass(
+        "class T {}\n\
+         T.prototype.v = 5;\n\
+         class U extends T { x = super.v; static s = super.name; a = () => this; }\n\
+         var u = new U();\n\
+         u.x === 5 && U.s === 'T' && u.a() === u && !u.hasOwnProperty('v');",
+    );
+    both_pass(
+        "class Base { #m() { return 1; } v = this.#m() + 1; }\n\
+         class A2 { constructor() { this.seen = B2.peek(this); } }\n\
+         class B2 extends A2 {\n\
+           #m() { return 'm'; }\n\
+           v = this.#m();\n\
+           static peek(o) { try { return o.#m(); } catch (e) { return e instanceof TypeError ? 'TypeError' : 'other'; } }\n\
+         }\n\
+         var b2 = new B2();\n\
+         new Base().v === 2 && b2.seen === 'TypeError' && b2.v === 'm' && B2.peek(b2) === 'm';",
+    );
+}
