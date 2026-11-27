@@ -116,7 +116,7 @@ HOST-115 pending slice 18
 HOST-116 test swell::eval::host_116_eval_asks_the_host_before_parsing
 HOST-117 test swell::dynamic_function::host_117_function_asks_the_host_with_its_parts
 HOST-118 test swell::eval::host_118_eval_of_an_object_asks_host_get_code_for_eval
-HOST-119 pending slice 8
+HOST-119 test swell::private_element_hook::host_119_a_throw_from_the_hook_is_the_field_adds_throw
 HOST-120 test swell::builtins_function_source::host_120_no_source_text_gives_a_native_function_string
 HOST-121 test swell::promise_reads::host_121_a_rejection_with_no_handler_is_tracked_and_a_later_handler_withdraws_it
 HOST-122 pending slice 13
@@ -220,3 +220,4 @@ HOST-219 pending slice 12
 HOST-220 test swell::values::host_220_to_utf16_len_counts_code_units
 HOST-221 test swell::interrupt::host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run
 HOST-222 test swell::host_overrides::host_222_an_override_result_with_a_stale_handle_faults_the_agent
+HOST-223 test swell::private_element_hook::host_223_a_stale_handle_in_the_throw_faults_the_agent
