@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-27T09:57:13Z",
+  "actor": "human:operator",
+  "artifact": "review-result:adversary-setmethods-pass-1",
+  "kind": "review-result",
+  "revision": 3,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "8e0e0bb18d66b36718c0467a50514e33c21e97790c8ae8e5c5647a18c5a6c351",
+    "literal_chars": 17,
+    "replacement": "a second log of the profile dev",
+    "count": 1,
+    "reason": "the name of a scratch log that a scan for ticket ids of a private tracker reads as one; the text names the log in words"
+  }
+}

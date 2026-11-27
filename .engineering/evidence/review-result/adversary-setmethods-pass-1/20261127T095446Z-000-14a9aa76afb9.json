@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-27T09:54:46Z",
+  "actor": "human:operator",
+  "artifact": "review-result:adversary-setmethods-pass-1",
+  "kind": "review-result",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "4d005e984e2163f21ca1adb42160a6b1079eb51812ce035961d98e287cf8dc13",
+    "literal_chars": 24,
+    "replacement": "to the build node",
+    "count": 1,
+    "reason": "the name of a private host; the repository names no private host"
+  }
+}

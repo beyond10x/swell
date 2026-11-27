@@ -6,7 +6,7 @@ status: active
 title: 'Adversary pass 1 on the unit setmethods: red, two failing cases of 8 and ten findings'
 relations:
 - reviews: story:set-methods
-revision: 1
+revision: 3
 ---
 Adversary pass 1 on `impl/setmethods` at `d5791fc9` (wave big-2, slice 9, order 3), run on 2026-11-26.
 The report below is the adversary's last message; paths of the workstation are replaced.
@@ -148,8 +148,8 @@ The timing runs were pool jobs, because the test binaries exist only on the buil
 
 All under `<scratch>/wave2/setmethods/adversary-1/`:
 - Scripts: `clause.sh`, `mine.sh`, `mine2.sh`, `suite.sh`, `timeloop.sh`, `timeloop2.sh`, `time-job.sh`, `time-all.sh`, `stack-probe.sh`, `mutant-run.sh`, `plant-run.sh`.
-- Logs and markers: `mine-{default,collect}.log`, `mine2-{default,collect}.log`, `mutant-default.log`, `plant-default.log`, `suite-{default,collect}.log`, `suite2-{default,collect}.log`, `time-{default,collect,collect-full,gate}.log`, `time2-{default,collect}.log`, `stack-{dev,stack-debug,release}.log`, `stack-dev-2.log`, `time-all.done`.
-- `mutant/`: a `git clone --shared` at `d5791fc9`. It holds the planted defects P1–P3 and the stack-probe tests, uncommitted; M1–M3 were reverted. The pool synced it to build node `build-2d`, so its build directory there also exists.
+- Logs and markers: `mine-{default,collect}.log`, `mine2-{default,collect}.log`, `mutant-default.log`, `plant-default.log`, `suite-{default,collect}.log`, `suite2-{default,collect}.log`, `time-{default,collect,collect-full,gate}.log`, `time2-{default,collect}.log`, `stack-{dev,stack-debug,release}.log`, a second log of the profile dev, `time-all.done`.
+- `mutant/`: a `git clone --shared` at `d5791fc9`. It holds the planted defects P1–P3 and the stack-probe tests, uncommitted; M1–M3 were reverted. The pool synced it to the build node, so its build directory there also exists.
 
 **7. Findings block**
 
