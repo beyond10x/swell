@@ -1,0 +1,63 @@
+version: '3'
+
+set: [pipefail]
+
+vars:
+  TEST_RUSTFLAGS: -D warnings
+  TEST_NEXTEST_ARGS: --workspace --locked --profile default
+
+tasks:
+  realm-places-expected:
+    desc: Write crates/swell/tests/fixtures/realm_places.txt, the places of the functions of the realm that the walk of builtins_symbol_values calls, from the walk itself; the one run that writes the file.
+    summary: |
+      Write crates/swell/tests/fixtures/realm_places.txt: two comment lines, then the places of
+      the functions of the bare realm, one per line, in the order of the walk of
+      builtins_symbol_values (story realm-walk-in-parts-under-the-cpu-bound). It is the one run
+      that writes the file, as test262-expected is for conformance/test262/expected.txt. The
+      parts of the walk read the file and never make the list; the test
+      the_realm_places_file_equals_the_walk makes the list again in the default mode at every
+      gate run and fails when the file differs, naming this task.
+
+      It runs the gate's step test restricted to that test, with the step's flags and arguments,
+      the variables TEST_RUSTFLAGS and TEST_NEXTEST_ARGS of this file, which the steps build,
+      build-tests, test and test-doc of Taskfile.yml read too, so they share one build:
+      RUSTFLAGS=<TEST_RUSTFLAGS> cargo nextest run <TEST_NEXTEST_ARGS> -E
+      'test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)', with
+      SWELL_REALM_PLACES_OUT set to the absolute path of .out/realm-places/walk.txt (nextest runs
+      the test in crates/swell), which it removes first. The test writes the whole file there,
+      its two comment lines (REALM_PLACES_HEADER of the test, their one definition) and the
+      places, after it has read every place back through parse_place and resolve_place; this
+      task copies it. It prints the command first, and last "realm-places-expected: <t> places
+      written to crates/swell/tests/fixtures/realm_places.txt". It fails with one line when
+      either variable is empty or is not this file's value (task test-vars-check, which takes
+      both from here only, written as plain values), when nextest exits non-zero (after its
+      log, .out/realm-places/nextest.log: a place the test cannot read back is named there),
+      and when the walk wrote no place. It compiles: a unit runs it as "slot --timeout 30m
+      --fetch crates/swell/tests/fixtures task realm-places-expected"; the gate does not run it.
+    env:
+      RUSTFLAGS: '{{.TEST_RUSTFLAGS}}'
+    silent: true
+    cmds:
+      - task: test-vars-check
+        vars: {STEP: realm-places-expected}
+      - |
+        filter='test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)'
+        file=crates/swell/tests/fixtures/realm_places.txt
+        echo "realm-places-expected: RUSTFLAGS={{.TEST_RUSTFLAGS}} cargo nextest run {{.TEST_NEXTEST_ARGS}} -E $filter"
+        mkdir -p .out/realm-places
+        out="$(pwd)/.out/realm-places/walk.txt"
+        rm -f "$out"
+        status=0
+        SWELL_REALM_PLACES_OUT="$out" cargo nextest run {{.TEST_NEXTEST_ARGS}} -E "$filter" > .out/realm-places/nextest.log 2>&1 || status=$?
+        if [ "$status" -ne 0 ]; then
+          cat .out/realm-places/nextest.log
+          echo "realm-places-expected: cargo nextest run exited $status"
+          exit 1
+        fi
+        places=$(grep -cv '^#' "$out" 2>/dev/null || true)
+        if [ "${places:-0}" -eq 0 ]; then
+          echo "realm-places-expected: the walk wrote no place to $out"
+          exit 1
+        fi
+        cp "$out" "$file"
+        echo "realm-places-expected: $places places written to $file"

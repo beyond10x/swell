@@ -130,6 +130,9 @@ pub(crate) enum ScopeKey {
     /// steps 1 to 6), by the class's constructor: its own name, immutable and uninitialized
     /// until step 4.
     Class(FunctionId),
+    /// The private record of a class that declares a private name ("Private names", item 3), by
+    /// the class's constructor: inside the class scope, after the heritage.
+    Private(FunctionId),
 }
 
 /// What the code does at the entry of a lexical scope.
@@ -140,6 +143,9 @@ pub(crate) struct LexicalScope {
     pub env: Vec<(String, bool)>,
     /// The local slots it sets uninitialized: those an access checks.
     pub uninitialize: Vec<u32>,
+    /// Whether a lookup by name may reach its record (it encloses a `with` body or a direct
+    /// `eval` call): the private record of a class keeps the names of its slots only then.
+    pub named: bool,
 }
 
 /// Where a `let` or `const` binding lives.
@@ -179,6 +185,15 @@ pub(crate) enum Site {
     /// The class's own name in its class scope, by the class's constructor, which step 4 of
     /// ClassDefinitionEvaluation initializes with F (`class.rs`).
     ClassName(FunctionId),
+    /// The binding of the function of the private method, getter or setter `f` in the private
+    /// record, from the class's code, which stores the function there at step 3.
+    PrivateFunction(FunctionId),
+    /// The Private Name of the private method, getter or setter `f`, from the code that adds it
+    /// (PrivateMethodOrAccessorAdd): the class's code for a static one, the initializer of the
+    /// instance elements for any other.
+    PrivateAddName(FunctionId),
+    /// The binding of the function of `f`, from the same code as [`Site::PrivateAddName`].
+    PrivateAddFunction(FunctionId),
     /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
     /// item 6), from the top of the function: the constructor itself, or an arrow function whose
     /// nearest function that is not an arrow function is one (or eval code whose context has
@@ -341,6 +356,16 @@ pub(crate) struct Resolution {
     /// a computed key of an object literal. Their class code names F right after it is made
     /// ([`crate::bytecode::Instruction::SetClassName`]).
     pub named_by_key: BTreeSet<FunctionId>,
+    /// The initializer of the instance elements of each class that has private methods that
+    /// are not static, with the function of each such method, getter or setter in source order:
+    /// pass 1 of the initializer adds them (`class.rs`, `initializer_private_methods`).
+    pub initializer_methods: BTreeMap<FunctionId, Vec<FunctionId>>,
+    /// The number of private elements the adds of one class level make, keyed by the
+    /// initializer of the instance elements for the methods, getters and setters that are not
+    /// static, and by the constructor for the static ones: the private names among them, a
+    /// getter and a setter of one name counted once. Each add carries it as its `room`
+    /// (`crate::bytecode::Instruction::AddPrivateMethod`).
+    pub private_rooms: BTreeMap<FunctionId, u32>,
     /// The constructors of the classes with a heritage: each has the hidden binding `this`
     /// ([`Site::This`]) and returns by the derived rule (`class.rs`).
     pub derived_constructors: BTreeSet<FunctionId>,
@@ -432,6 +457,9 @@ enum Walk {
     Lexical(ScopeKey),
     /// Leaves the lexical scope of the node, if it was entered.
     LeaveLexical(ScopeKey),
+    /// Enters again the private record of a class ([`Resolver::private_record`]), the scope of
+    /// that index, made when the class was met: after the heritage.
+    Private(usize),
     Leave,
     /// The store of the computed field key `e` into its hidden binding ([`Site::FieldKey`]),
     /// right after the key, in the scope the key is walked in.
@@ -475,6 +503,13 @@ struct Resolver<'a, 'm> {
     instance_elements: BTreeSet<FunctionId>,
     /// [`Resolution::named_by_key`].
     named_by_key: BTreeSet<FunctionId>,
+    /// [`Resolution::initializer_methods`].
+    initializer_methods: BTreeMap<FunctionId, Vec<FunctionId>>,
+    /// [`Resolution::private_rooms`].
+    private_rooms: BTreeMap<FunctionId, u32>,
+    /// The Private Name (its text, with its `#`) of each private method, getter or setter, by
+    /// its function.
+    private_keys: BTreeMap<FunctionId, String>,
     /// [`Resolution::derived_constructors`].
     derived_constructors: BTreeSet<FunctionId>,
     /// [`Resolution::default_derived_constructors`].
@@ -531,6 +566,9 @@ pub(crate) fn resolve(
         checked_locals: BTreeSet::new(),
         instance_elements: BTreeSet::new(),
         named_by_key: BTreeSet::new(),
+        initializer_methods: BTreeMap::new(),
+        private_rooms: BTreeMap::new(),
+        private_keys: BTreeMap::new(),
         derived_constructors: BTreeSet::new(),
         default_derived_constructors: BTreeSet::new(),
         this_by_name: eval_code && this_by_name,
@@ -620,6 +658,8 @@ fn resolve_with(
         eval_env,
         instance_elements: core::mem::take(&mut r.instance_elements),
         named_by_key: core::mem::take(&mut r.named_by_key),
+        initializer_methods: core::mem::take(&mut r.initializer_methods),
+        private_rooms: core::mem::take(&mut r.private_rooms),
         derived_constructors: core::mem::take(&mut r.derived_constructors),
         default_derived_constructors: core::mem::take(&mut r.default_derived_constructors),
         this_by_name: r.this_by_name,
@@ -709,6 +749,12 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .saturating_add(self.function_scopes.len())
             .saturating_add(self.vars_scopes.len())
             .saturating_mul(map_entry_bytes::<FunctionId, usize>());
+        let private_keys = self.private_keys.values().fold(
+            self.private_keys
+                .len()
+                .saturating_mul(map_entry_bytes::<FunctionId, String>()),
+            |sum, key| sum.saturating_add(key.len()),
+        );
         let checked = self
             .bindings
             .len()
@@ -725,6 +771,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .saturating_add(capacity(&self.eval_calls))
             .saturating_add(given)
             .saturating_add(function_maps)
+            .saturating_add(private_keys)
             .saturating_add(checked)
     }
 
@@ -885,6 +932,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
             ScopeKey::CatchParameter(_) => (Vec::new(), true),
             // Entered by `Resolver::class_scope`, with the end of the class as the name's end.
             ScopeKey::Class(_) => (Vec::new(), false),
+            // Entered by `Resolver::private_record`.
+            ScopeKey::Private(_) => (Vec::new(), true),
             ScopeKey::Try(id) | ScopeKey::Catch(id) | ScopeKey::Finally(id) => {
                 let list = match (key, stmt(id)) {
                     (ScopeKey::Try(_), Some(Stmt::Try { block, .. })) => Some(block.as_slice()),
@@ -992,6 +1041,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
                         .and_then(|s| s.parent)
                         .ok_or_else(|| malformed("a lexical scope left twice"))?;
                 }
+                Ok(())
+            }
+            Walk::Private(scope) => {
+                self.current = scope;
                 Ok(())
             }
             Walk::Leave => {
@@ -1249,11 +1302,16 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 end: class.span.end,
             };
             self.declare_as(scope, &name.name, Some(data));
-            self.occur(Site::ClassName(ctor), &name.name);
             let units = self.m.utf16(&name.name)?;
             self.give_name(ctor, units)?;
         }
         self.field_key_bindings(scope, class, at)?;
+        // The private record, made current; step 4 initializes the own name inside it.
+        let private = self.private_record(class)?;
+        if let Some(name) = &class.name {
+            self.occur(Site::ClassName(ctor), &name.name);
+        }
+        self.current = scope;
         let instance = class.elements.iter().any(|e| match e {
             ClassElement::Field { is_static, .. } => !is_static,
             ClassElement::Method { is_static, key, .. } => {
@@ -1275,9 +1333,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
         // element (a field's key, its store and its run's function).
         let mut children: Vec<Walk> = self
             .m
-            .with_capacity(class.elements.len().saturating_mul(3).saturating_add(3))?;
+            .with_capacity(class.elements.len().saturating_mul(3).saturating_add(6))?;
         let (mut first_instance, mut run) = (class.instance_elements, None);
         children.extend(class.heritage.map(Walk::Expr));
+        children.extend(private.map(Walk::Private));
         children.push(Walk::Function(ctor));
         for element in &class.elements {
             match element {
@@ -1340,8 +1399,17 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 _ => None,
             };
         }
+        // The initializer of the instance elements, whose pass 1 adds the private methods, when
+        // no instance field walked it.
+        if let Some(f) = first_instance
+            && self.initializer_methods.contains_key(&f)
+        {
+            children.push(Walk::Function(f));
+        }
+        if private.is_some() {
+            children.push(Walk::LeaveLexical(ScopeKey::Private(ctor)));
+        }
         children.push(Walk::LeaveLexical(key));
-        self.private_record(class)?;
         self.m.grow_by(&mut self.work, children.len())?;
         self.work.extend(children.drain(..).rev());
         self.m.release(children);
@@ -1439,11 +1507,129 @@ impl<'a, 'm> Resolver<'a, 'm> {
         Ok(())
     }
 
-    /// The private record of `class` ("Private names", item 3), after the heritage: a binding
-    /// per private identifier the class declares. None here:
-    /// `story:private-names-and-private-methods` fills it.
-    fn private_record(&mut self, _class: &swell_syntax::ast::Class) -> Result<(), CompileError> {
-        Ok(())
+    /// The private record of `class` ("Private names", item 3), after the heritage, when the
+    /// class declares a private name: made inside the class scope and left current; `None`, and
+    /// nothing made, otherwise. Its bindings, in source order: one per private identifier, its
+    /// text with its `#`, which holds the identifier's Private Name; and one per private method,
+    /// getter or setter, which holds its function ([`private_function_name`]: no `#` first, so
+    /// it is never taken for an identifier). Every binding is captured, so the record exists
+    /// whenever the class declares a private name; it names its slots only when a lookup by
+    /// name may reach it ([`Resolver::mark_named`]). Each function is named by its Private Name
+    /// (a getter `get #x`, a setter `set #x`, `#sec-definemethodproperty`). The sites of the
+    /// class's code are sited here: the store of each function at step 3
+    /// ([`Site::PrivateFunction`]) and the adds of the static ones at step 4
+    /// ([`Site::PrivateAddName`], [`Site::PrivateAddFunction`]); the other methods are listed for
+    /// the initializer of the instance elements, whose scope sites their adds
+    /// ([`Resolver::function`]).
+    fn private_record(
+        &mut self,
+        class: &swell_syntax::ast::Class,
+    ) -> Result<Option<usize>, CompileError> {
+        let private = |e: &ClassElement| match e {
+            ClassElement::Method {
+                key: ClassKey::Private(_),
+                ..
+            }
+            | ClassElement::Field {
+                key: ClassKey::Private(_),
+                ..
+            } => true,
+            ClassElement::Method { .. }
+            | ClassElement::Field { .. }
+            | ClassElement::StaticBlock { .. } => false,
+        };
+        if !class.elements.iter().any(private) {
+            return Ok(None);
+        }
+        let owner = self.scopes.get(self.current).and_then(|s| s.owner);
+        let scope = self.new_scope(Kind::Lexical { straight: true }, owner);
+        if let Some(s) = self.scopes.get_mut(scope) {
+            s.key = Some(ScopeKey::Private(class.constructor));
+        }
+        // The elements the adds of the instance and of F make (`Resolution::private_rooms`).
+        let mut rooms = (0u32, 0u32);
+        for element in &class.elements {
+            let (is_static, name, kind, function) = match element {
+                ClassElement::Method {
+                    is_static,
+                    key: ClassKey::Private(name),
+                    kind,
+                    function,
+                    ..
+                } => (*is_static, name, *kind, *function),
+                ClassElement::Field {
+                    key: ClassKey::Private(name),
+                    ..
+                } => {
+                    self.declare(scope, &name.name);
+                    continue;
+                }
+                _ => continue,
+            };
+            let new_name = !self
+                .scopes
+                .get(scope)
+                .is_some_and(|s| s.names.contains_key(name.name.as_str()));
+            if new_name {
+                let room = if is_static {
+                    &mut rooms.1
+                } else {
+                    &mut rooms.0
+                };
+                *room = room.saturating_add(1);
+            }
+            self.declare(scope, &name.name);
+            let binding = private_function_name(kind, &name.name, self.m)?;
+            self.declare(scope, &binding);
+            let prefix = match kind {
+                FunctionKind::Getter => "get ",
+                FunctionKind::Setter => "set ",
+                _ => "",
+            };
+            let mut given = self
+                .m
+                .with_capacity(prefix.len().saturating_add(name.name.len()))?;
+            given.extend(prefix.encode_utf16().chain(name.name.encode_utf16()));
+            self.give_name(function, given)?;
+            self.occur(Site::PrivateFunction(function), &binding);
+            if is_static {
+                self.occur(Site::PrivateAddName(function), &name.name);
+                self.occur(Site::PrivateAddFunction(function), &binding);
+            } else if let Some(initializer) = class.instance_elements {
+                match self.initializer_methods.get_mut(&initializer) {
+                    Some(list) => self.m.push(list, function)?,
+                    None => {
+                        let mut list = self.m.with_capacity(1)?;
+                        list.push(function);
+                        self.m
+                            .insert_entry(&mut self.initializer_methods, initializer, list)?;
+                    }
+                }
+                let key = self.m.string(&name.name)?;
+                self.m.insert_entry(&mut self.private_keys, function, key)?;
+            }
+            self.m.release(binding);
+        }
+        if let (Some(initializer), true) = (class.instance_elements, rooms.0 > 0) {
+            self.m
+                .insert_entry(&mut self.private_rooms, initializer, rooms.0)?;
+        }
+        if rooms.1 > 0 {
+            self.m
+                .insert_entry(&mut self.private_rooms, class.constructor, rooms.1)?;
+        }
+        // Every binding of the record lives in it.
+        let order = self
+            .scopes
+            .get(scope)
+            .map(|s| s.order.as_slice())
+            .unwrap_or(&[]);
+        for &b in order {
+            if let Some(binding) = self.bindings.get_mut(b) {
+                binding.captured = true;
+            }
+        }
+        Ok(Some(scope))
     }
 
     /// Enters the scope of the `catch` clause of the try statement `id`.
@@ -1704,10 +1890,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
             Expr::SuperMember(SuperKey::Name(_)) => {}
             Expr::SuperMember(SuperKey::Computed(key)) => children.push(Walk::Expr(*key)),
             Expr::SuperCall(arguments) => children.extend(arguments.iter().map(|e| Walk::Expr(*e))),
-            // No source with a private name reaches the compiler while its element is held:
-            // `story:private-names-and-private-methods` and `story:private-fields-and-private-in`
-            // replace these arms.
-            Expr::PrivateMember { .. } => return Err(malformed("a private member")),
+            // `o.#x` resolves `#x` to the private record of the innermost class that declares it,
+            // as a captured name ("Private names", item 3).
+            Expr::PrivateMember { object, name, .. } => {
+                self.occur(Site::Expr(id), &name.name);
+                children.push(Walk::Expr(*object));
+            }
+            // No source with `#x in o` reaches the compiler while it is held:
+            // `story:private-fields-and-private-in` replaces this arm.
             Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
             Expr::New { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
@@ -1762,6 +1952,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
         let scope = self.new_scope(Kind::Function, Some(id));
         self.m.insert_entry(&mut self.function_scopes, id, scope)?;
         self.this_binding(id, f.kind, outer, scope)?;
+        self.private_adds(id)?;
         let simple = f.is_simple();
         for (i, p) in f.params.iter().enumerate() {
             // A parameter of a list that is not simple is initialized in order: an access
@@ -1807,6 +1998,33 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.give_name(g, name)?;
             }
             self.work.push(Walk::Expr(e));
+        }
+        Ok(())
+    }
+
+    /// The sites of the adds of the private methods of pass 1 of the initializer of the instance
+    /// elements `id` ([`Resolution::initializer_methods`]), from its own scope: the Private Name
+    /// and the function of each; nothing for any other function.
+    fn private_adds(&mut self, id: FunctionId) -> Result<(), CompileError> {
+        let count = self.initializer_methods.get(&id).map_or(0, Vec::len);
+        for i in 0..count {
+            let Some(&method) = self.initializer_methods.get(&id).and_then(|l| l.get(i)) else {
+                continue;
+            };
+            let kind = self
+                .ast
+                .function(method)
+                .map(|f| f.kind)
+                .ok_or_else(|| malformed("a private method's function"))?;
+            let key = match self.private_keys.get(&method) {
+                Some(key) => self.m.string(key)?,
+                None => return Err(malformed("a private method with no name")),
+            };
+            let binding = private_function_name(kind, &key, self.m)?;
+            self.occur(Site::PrivateAddName(method), &key);
+            self.occur(Site::PrivateAddFunction(method), &binding);
+            self.m.release(key);
+            self.m.release(binding);
         }
         Ok(())
     }
@@ -2133,7 +2351,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
         for s in &self.scopes {
             let Some(key) = s.key else { continue };
             let at_once = matches!(key, ScopeKey::Iteration(id) if self.for_in_identifier(id));
-            let mut scope = LexicalScope::default();
+            let mut scope = LexicalScope {
+                named: s.named,
+                ..LexicalScope::default()
+            };
             for &b in &s.order {
                 let Some(binding) = self.bindings.get(b) else {
                     continue;
@@ -2373,6 +2594,26 @@ impl<'a, 'm> Resolver<'a, 'm> {
         }
         Ok(info)
     }
+}
+
+/// The name of the binding of the private record that holds the function of the private method,
+/// getter or setter of kind `kind` named `name` (`#x`): `method #x`, `get #x` or `set #x`, so a
+/// getter and a setter of one name each have their own, and none starts with `#`, the mark of
+/// a binding that holds a Private Name ("Private names", items 1 and 4). Charged to `m`.
+pub(crate) fn private_function_name(
+    kind: FunctionKind,
+    name: &str,
+    m: &Meter<'_>,
+) -> Result<String, Stop> {
+    let prefix = match kind {
+        FunctionKind::Getter => "get ",
+        FunctionKind::Setter => "set ",
+        _ => "method ",
+    };
+    let mut text = m.string_with_capacity(prefix.len().saturating_add(name.len()))?;
+    text.push_str(prefix);
+    text.push_str(name);
+    Ok(text)
 }
 
 /// Whether a property name is `__proto__` (`#sec-object-initializer-runtime-semantics-propertydefinitionevaluation`):

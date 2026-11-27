@@ -1978,6 +1978,87 @@ const SWEEP_ROOM: u64 = 1 << 17;
 #[cfg(not(feature = "collect-every-safe-point"))]
 const FLOOR: u64 = 3_072;
 
+/// The room `memory_bytes` leaves above `heap_bytes()` of `agent`.
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn sweep_room_now(agent: &swell::Agent<support::host::TestHost>, memory_bytes: u64) -> u64 {
+    memory_bytes.saturating_sub(agent.heap_bytes().unwrap())
+}
+
+/// The room left above `target` taken by pads, Strings pushed to `pads`.
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn sweep_fill(
+    agent: &mut swell::Agent<support::host::TestHost>,
+    realm: &swell::Realm,
+    memory_bytes: u64,
+    target: u64,
+) {
+    let zero = Outcome::Normal("0".to_string());
+    let mut shift = 0;
+    loop {
+        let room = sweep_room_now(agent, memory_bytes);
+        let units = (room.saturating_sub(target) / 2) >> shift;
+        if room <= target + 64 || units == 0 {
+            return;
+        }
+        let pushed = eval_text(
+            agent,
+            realm,
+            &format!("pads.push(\"x\".repeat({units})); 0;"),
+        );
+        if pushed == zero {
+            shift = 0;
+        } else {
+            shift += 1;
+            // What the refused entry made is garbage.
+            collect(agent);
+        }
+    }
+}
+
+/// The run of `source`, then a collection (what the run made is garbage), and whether it
+/// started `op` (`started`).
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn sweep_run(
+    agent: &mut swell::Agent<support::host::TestHost>,
+    realm: &swell::Realm,
+    source: &str,
+) -> (Outcome, bool) {
+    let outcome = eval_text(agent, realm, source);
+    collect(agent);
+    let started = match eval_text(agent, realm, "started;") {
+        Outcome::Normal(s) if s == "1" => true,
+        Outcome::Normal(s) if s == "0" => false,
+        other => panic!("reading `started` after {outcome:?}: {other:?}"),
+    };
+    (outcome, started)
+}
+
+/// The agent of [`memory_sweep`] under `memory_bytes`: its realm runs [`THREE`], then the
+/// warm-up, `op` twice with pads and then alone (it must give `answer`), and a collection.
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn sweep_agent(
+    memory_bytes: u64,
+    source: &dyn Fn(u64) -> String,
+    answer: &Outcome,
+) -> (swell::Agent<support::host::TestHost>, swell::Realm) {
+    let zero = Outcome::Normal("0".to_string());
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    budget.memory_bytes = memory_bytes;
+    let mut agent = agent_with(budget).unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(eval_text(&mut agent, &realm, THREE), zero);
+    for target in [FLOOR, FLOOR + 4_096] {
+        sweep_fill(&mut agent, &realm, memory_bytes, target);
+        sweep_run(&mut agent, &realm, &source(0));
+        assert_eq!(eval_text(&mut agent, &realm, "pads = []; 0;"), zero);
+        collect(&mut agent);
+    }
+    assert_eq!(&sweep_run(&mut agent, &realm, &source(0)).0, answer);
+    collect(&mut agent);
+    (agent, realm)
+}
+
 /// The memory budget cut at every 64 bytes of what `op` needs over [`THREE`]. Entries
 /// push Strings to `pads`, each half of the room left above a target (a String costs twice its
 /// length while it is made), until the room left, `memory_bytes` less `heap_bytes()` after a
@@ -1991,7 +2072,10 @@ const FLOOR: u64 = 3_072;
 /// `Terminated(MemoryBudget)`; after each, one collection gives `live_bytes()` and
 /// `heap_bytes()` back their readings before the run, and at the end `pads = []` and one
 /// collection give them back their readings after the warm-up. No two rooms `op` started with,
-/// sorted, are more than 64 bytes apart below the last that ended.
+/// sorted, are more than 64 bytes apart below the last that ended. The base, what the agent
+/// holds after [`THREE`] and the warm-up, is read from an agent under the sweep's own budget
+/// until two readings agree: under the test limits an agent may grow an arena where one under
+/// the tight budget collects instead.
 #[cfg(not(feature = "collect-every-safe-point"))]
 fn memory_sweep(op: &str) {
     let mut budget = limits();
@@ -2009,58 +2093,36 @@ fn memory_sweep(op: &str) {
     let answer = eval_text(&mut probe, &probe_realm, &source(0));
     assert!(matches!(answer, Outcome::Normal(_)), "{op}: {answer:?}");
     collect(&mut probe);
-    let base = probe.heap_bytes().unwrap();
-    budget.memory_bytes = base + SWEEP_ROOM;
-    let mut agent = agent_with(budget).unwrap();
-    let realm = realm(&mut agent);
-    assert_eq!(eval_text(&mut agent, &realm, THREE), zero);
-    let room_now = |agent: &swell::Agent<support::host::TestHost>| {
-        budget
-            .memory_bytes
-            .saturating_sub(agent.heap_bytes().unwrap())
-    };
-    // The room left above `target` taken by pads.
-    let fill = |agent: &mut swell::Agent<support::host::TestHost>, target: u64| {
-        let mut shift = 0;
-        loop {
-            let units = (room_now(agent).saturating_sub(target) / 2) >> shift;
-            if room_now(agent) <= target + 64 || units == 0 {
-                return;
-            }
-            let pushed = eval_text(
-                agent,
-                &realm,
-                &format!("pads.push(\"x\".repeat({units})); 0;"),
-            );
-            if pushed == zero {
-                shift = 0;
-            } else {
-                shift += 1;
-                // What the refused entry made is garbage.
-                collect(agent);
-            }
+    // The base is the reading of the sweep's own agent after its warm-up. The probe's reading
+    // is the first guess only: under the test limits the probe's run of `op` may pass the
+    // collection threshold before a collection and grow an arena, where an agent with
+    // `SWEEP_ROOM` above the base collects instead (its entry ends in the memory budget, and
+    // the next safe point collects), so the two readings differ by that growth at some realm
+    // sizes. An agent is made again with the reading its warm-up left until the two agree.
+    let mut base = probe.heap_bytes().unwrap();
+    let mut guesses = vec![base];
+    let (mut agent, realm) = loop {
+        budget.memory_bytes = base + SWEEP_ROOM;
+        let (agent, realm) = sweep_agent(budget.memory_bytes, &source, &answer);
+        let heap = agent.heap_bytes().unwrap();
+        if heap == base {
+            break (agent, realm);
         }
+        base = heap;
+        guesses.push(base);
+        assert!(
+            guesses.len() <= 4,
+            "{op}: the base does not settle: {guesses:?}"
+        );
+    };
+    let room_now =
+        |agent: &swell::Agent<support::host::TestHost>| sweep_room_now(agent, budget.memory_bytes);
+    let fill = |agent: &mut swell::Agent<support::host::TestHost>, target: u64| {
+        sweep_fill(agent, &realm, budget.memory_bytes, target);
     };
     let run = |agent: &mut swell::Agent<support::host::TestHost>, units: u64| {
-        let outcome = eval_text(agent, &realm, &source(units));
-        // What the run made, `h` with it, is garbage.
-        collect(agent);
-        let started = match eval_text(agent, &realm, "started;") {
-            Outcome::Normal(s) if s == "1" => true,
-            Outcome::Normal(s) if s == "0" => false,
-            other => panic!("reading `started` after {outcome:?}: {other:?}"),
-        };
-        (outcome, started)
+        sweep_run(agent, &realm, &source(units))
     };
-    // The warm-up: `op` twice with pads, then alone.
-    for target in [FLOOR, FLOOR + 4_096] {
-        fill(&mut agent, target);
-        run(&mut agent, 0);
-        assert_eq!(eval_text(&mut agent, &realm, "pads = []; 0;"), zero);
-        collect(&mut agent);
-    }
-    assert_eq!(run(&mut agent, 0).0, answer);
-    collect(&mut agent);
     let live = agent.live_bytes().unwrap();
     let heap = agent.heap_bytes().unwrap();
     let (mut in_op, mut before_op, mut answered, mut streak) = (0u32, 0u32, 0u32, 0u32);
@@ -2161,6 +2223,77 @@ fn memory_budget_at_every_64_bytes_through_for_in_over_three_proxies() {
 #[test]
 fn memory_budget_at_every_64_bytes_through_json_stringify_of_three_proxies() {
     memory_sweep("JSON.stringify(c).length");
+}
+
+/// The setup of [`a_budget_end_inside_a_trap_gives_back_the_nesting_and_the_bytes`]: `p`, a
+/// Proxy of 50 keys whose values are a String of 1,000 code units, whose `get` trap for `k40`
+/// keeps objects until the memory budget ends the entry; `depth()`, how many `get` traps of a
+/// Proxy reading itself run before the re-entry bound throws its `RangeError`; `fill()`, which
+/// keeps objects in `hold`, counting them in `held`, until the budget ends the entry.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const TRAP_END: &str = "var big = \"x\".repeat(1000), keys = [], held = 0, hold = null;\n\
+  for (var i = 0; i < 50; i++) keys.push(\"k\" + i);\n\
+  var p = new Proxy({}, {\n\
+    ownKeys: function () { return keys; },\n\
+    getOwnPropertyDescriptor: function () { return { value: big, writable: true, enumerable: true, configurable: true }; },\n\
+    get: function (t, k) { if (k === \"k40\") { var hog = []; for (;;) hog.push({}); } return big; }\n\
+  });\n\
+  function depth() { var n = 0; var q = new Proxy({}, { get: function (t, k) { n++; return q[k]; } });\n\
+    try { q.x; } catch (e) { if (!(e instanceof RangeError)) throw e; } return n; }\n\
+  function fill() { held = 0; hold = []; for (;;) { hold.push({}); held++; } }\n\
+  0;";
+
+/// A run that ends in the memory budget inside a Proxy trap gives back what the Proxy method
+/// and the builtin around it hold (`object/proxy.rs`, `in_proxy_method`: the kept values and
+/// the nesting count on every way out; `builtins/json/mod.rs`: what `JSON.stringify` charged
+/// for its output, credited on every way out). `JSON.stringify(p)` has charged 40 values of
+/// [`TRAP_END`]'s `p` when the `get` trap of `k40` ends the entry. Then, after a collection,
+/// as before the run: `heap_bytes()`, the depth `depth()` reaches before the re-entry bound
+/// (a nesting count left behind lowers it), and the objects `fill()` keeps before the budget
+/// ends its entry (a charge left behind lowers it). Three runs, so that a leak of each run
+/// adds up. Beside the sweeps ([`memory_sweep`]), which read bytes only.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn a_budget_end_inside_a_trap_gives_back_the_nesting_and_the_bytes() {
+    let zero = Outcome::Normal("0".to_string());
+    let base = {
+        let mut probe = agent_with(limits()).unwrap();
+        let r = realm(&mut probe);
+        assert_eq!(eval_text(&mut probe, &r, TRAP_END), zero);
+        collect(&mut probe);
+        probe.heap_bytes().unwrap()
+    };
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    budget.memory_bytes = base + (1 << 18);
+    let mut agent = agent_with(budget).unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(eval_text(&mut agent, &r, TRAP_END), zero);
+    let readings = |agent: &mut swell::Agent<support::host::TestHost>| {
+        let depth = eval_text(agent, &r, "depth();");
+        assert_eq!(
+            eval_text(agent, &r, "fill();"),
+            Outcome::Terminated(Termination::MemoryBudget)
+        );
+        let held = eval_text(agent, &r, "held;");
+        assert_eq!(eval_text(agent, &r, "hold = null; 0;"), zero);
+        collect(agent);
+        (agent.heap_bytes().unwrap(), depth, held)
+    };
+    // Two warm-ups grow the arenas to what the runs need.
+    readings(&mut agent);
+    readings(&mut agent);
+    let before = readings(&mut agent);
+    for round in 0..3 {
+        assert_eq!(
+            eval_text(&mut agent, &r, "JSON.stringify(p).length;"),
+            Outcome::Terminated(Termination::MemoryBudget),
+            "round {round}"
+        );
+        collect(&mut agent);
+        assert_eq!(readings(&mut agent), before, "round {round}");
+    }
+    println!("heap_bytes, depth() and fill()'s objects after each run: {before:?}");
 }
 
 /// `L` `for`-`in` loops in one entry over a Proxy whose `getPrototypeOf` trap answers a

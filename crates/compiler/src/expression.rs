@@ -55,13 +55,22 @@ pub(crate) enum Target {
     SuperIndex {
         key: ExprId,
     },
+    /// `object.#x`, the Private Name of `#x` in slot `slot` of the environment `hops` outward
+    /// (`#sec-makeprivatereference`): the reference `[o]`.
+    Private {
+        object: ExprId,
+        hops: u32,
+        slot: u32,
+    },
 }
 
 impl Target {
     /// How many operand stack entries the evaluated reference takes.
     pub(crate) fn reference_items(&self) -> u32 {
         match self {
-            Target::Binding(Binding::Global(_) | Binding::Dynamic(_)) | Target::Member { .. } => 1,
+            Target::Binding(Binding::Global(_) | Binding::Dynamic(_))
+            | Target::Member { .. }
+            | Target::Private { .. } => 1,
             Target::Binding(_) => 0,
             Target::Index { .. } | Target::SuperNamed { .. } => 2,
             Target::SuperIndex { .. } => 3,
@@ -137,7 +146,28 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 name: self.string(name)?,
             }),
             Expr::SuperMember(SuperKey::Computed(key)) => Ok(Target::SuperIndex { key: *key }),
+            Expr::PrivateMember {
+                object,
+                optional: false,
+                ..
+            } => match self.binding(Site::Expr(e))? {
+                Binding::Env { hops, slot } => Ok(Target::Private {
+                    object: *object,
+                    hops,
+                    slot,
+                }),
+                _ => Err(malformed("a private name outside its private record")),
+            },
             _ => Err(malformed("an assignment target that is no reference")),
+        }
+    }
+
+    /// `GetPrivate` of the private reference `e`, `object.#x`: the Private Name read where `#x`
+    /// resolves, a slot of the private record of the innermost class that declares it.
+    fn private_get(&self, e: ExprId) -> Result<Instruction, CompileError> {
+        match self.binding(Site::Expr(e))? {
+            Binding::Env { hops, slot } => Ok(Instruction::GetPrivate { hops, slot }),
+            _ => Err(malformed("a private name outside its private record")),
         }
     }
 
@@ -163,7 +193,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::Emit(Instruction::ResolveName(name), span))?;
             }
             Target::Binding(_) => {}
-            Target::Member { object, .. } => t.push(Task::Expr(*object))?,
+            Target::Member { object, .. } | Target::Private { object, .. } => {
+                t.push(Task::Expr(*object))?;
+            }
             Target::Index { object, key } => {
                 t.push(Task::Expr(*object))?;
                 t.push(Task::Expr(*key))?;
@@ -207,6 +239,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Target::SuperIndex { .. } => {
                 t.push(Task::Emit(Instruction::SuperKey, span))?;
                 t.push(Task::Emit(Instruction::GetSuperIndex, span))?;
+            }
+            Target::Private { hops, slot, .. } => {
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                t.push(Task::Emit(
+                    Instruction::GetPrivate {
+                        hops: *hops,
+                        slot: *slot,
+                    },
+                    span,
+                ))?;
             }
         }
         Ok(t)
@@ -258,6 +300,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Target::Index { .. } => Instruction::PutIndex,
             Target::SuperNamed { name } => Instruction::PutSuperNamed(*name),
             Target::SuperIndex { .. } => Instruction::PutSuperIndex,
+            Target::Private { hops, slot, .. } => Instruction::SetPrivate {
+                hops: *hops,
+                slot: *slot,
+            },
             // A `const` binding throws for every assignment, a `let` one before its declaration.
             Target::Binding(Binding::Lexical {
                 at, name, constant, ..
@@ -654,6 +700,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     }
                 }
             }
+            // `#sec-property-accessors-runtime-semantics-evaluation`, MemberExpression .
+            // PrivateIdentifier, and the link `?.#x` of an optional chain: GetValue of the
+            // private reference (PrivateGet).
+            Expr::PrivateMember {
+                object, optional, ..
+            } => {
+                let get = self.private_get(id)?;
+                t.push(Task::Expr(*object))?;
+                if *optional {
+                    t.push(Task::ChainCheck(1, span))?;
+                }
+                t.push(emit(get))?;
+            }
             // `#sec-super-keyword-runtime-semantics-evaluation`, SuperCall (`docs/design/engine.md`,
             // "Classes", item 7): GetSuperConstructor before the arguments, the construction
             // with the running frame's NewTarget, BindThisValue, then InitializeInstanceElements
@@ -675,9 +734,6 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(emit(Instruction::InitInstance))?;
                 t.push(emit(Instruction::Pop))?;
             }
-            // No source with a private name reaches the compiler while its element is held:
-            // `story:private-names-and-private-methods` replaces this arm.
-            Expr::PrivateMember { .. } => return Err(malformed("a private member")),
             // `story:private-fields-and-private-in` replaces this arm.
             Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
             // `#sec-new-operator-runtime-semantics-evaluation`.
@@ -1526,7 +1582,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         let node = self.ast.expr(callee).ok_or_else(|| malformed("a callee"))?;
-        let (link, chain) = match &node.expr {
+        let (link, link_id, chain) = match &node.expr {
             Expr::OptionalChain(inner) => {
                 let inner_node = self
                     .ast
@@ -1538,15 +1594,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         | Expr::Index { .. }
                         | Expr::OptionalMember { .. }
                         | Expr::OptionalIndex { .. }
+                        | Expr::PrivateMember { .. }
                 ) {
                     t.push(Task::Emit(Instruction::Undefined, span))?;
                     t.push(Task::Expr(callee))?;
                     return Ok(());
                 }
                 t.push(Task::ChainOpen(Short::Pair))?;
-                (inner_node, Some(node.span))
+                (inner_node, *inner, Some(node.span))
             }
-            _ => (node, None),
+            _ => (node, callee, None),
         };
         match &link.expr {
             Expr::Member { object, property } | Expr::OptionalMember { object, property } => {
@@ -1568,6 +1625,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::Emit(Instruction::Dup, span))?;
                 t.push(Task::Expr(*index))?;
                 t.push(Task::Emit(Instruction::GetIndex, span))?;
+            }
+            // A private reference gives its base as this value, also after `?.`.
+            Expr::PrivateMember {
+                object, optional, ..
+            } => {
+                let get = self.private_get(link_id)?;
+                t.push(Task::Expr(*object))?;
+                if *optional {
+                    t.push(Task::ChainCheck(1, link.span))?;
+                }
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                t.push(Task::Emit(get, span))?;
             }
             // GetThisValue of a Super Reference is its receiver (`#sec-getthisvalue`).
             Expr::SuperMember(key) if chain.is_none() => {

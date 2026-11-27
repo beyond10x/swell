@@ -18,7 +18,7 @@ scope:
   path: crates/swell/tests/support/host.rs
 - confidence: cited
   path: taskfiles/realm-places.yml
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 3}
@@ -866,3 +866,46 @@ row. The walk is then a defect that gets a story.
   the `scope:` and `depends_on` entries of the front matter, which the coordinator writes.
 - The text of `story:map-upsert-and-group-by`, `story:realm-size-lane-within-its-share` and
   `story:host-object-overrides`; how this story meets them is in Change item 7.
+
+## As delivered
+
+The unit `realmwalk` of wave big-2 delivered the story on `impl/realmwalk` (its second start,
+one correction after the adversary's pass), merged into `wave/big-2`. Where the delivery
+differs from the text above, and what it measured:
+
+- 2 parts, 181 and 163 of 344 places (724 and 652 calls in the default mode, 362 and 326 in
+  the collect mode at the gate count). The stop rule did not fire: the equality test takes
+  0.061 CPU s alone (bound 1.2).
+- Times, each test alone, CPU seconds, three runs: part 0 0.022 in the default mode, 0.317
+  in the collect mode at the gate count, 0.672 at the full count; the other part 0.018,
+  0.279, 0.583; the cover test 0.005; the partition test 0.025. The one walk before read
+  0.069, 4.10 and 6.59.
+- The two variables of the gate's test build, `TEST_RUSTFLAGS` and `TEST_NEXTEST_ARGS`, live
+  in `taskfiles/realm-places.yml` (included flat and optional in `Taskfile.yml`). Since the
+  correction they are in `GATE_VARIABLES`, and the internal task `test-vars-check`, the first
+  command of `build`, `build-tests`, `test`, `test-doc` and the writer, fails the step when
+  either is empty or is not that file's value. Measured with Task 3.54.0: a plain value
+  under the top-level `vars:` of a flattened optional include is overridden by the command
+  line and not by an exported value while the file exists.
+- A part takes from the file what it owes before it walks (its places, their calls, the
+  `Always` rows of `WALK_EXPECTED` among them) and compares after. The cover test refuses an
+  empty part, a part under half the mean, and more than 8 parts (`MOST_PARTS`).
+- The file's two comment lines have one definition, `REALM_PLACES_HEADER` of the test, which
+  the writing mode writes and the equality test compares. The writing mode reads every place
+  back through `parse_place` and `resolve_place` before it writes.
+- A third test of the partition: `the_partition_of_the_file_agrees_with_an_fnv_computed_apart`
+  pins the part sizes `[181, 163]`; a writer run that changes the file changes them.
+- Literal copies of the flags stay in the lane's steps (`slow-tests`, `build-realm-sizes`),
+  in `taskfiles/collect-mode.yml`, `taskfiles/test-binaries.yml` and the steps with a manifest
+  or a target of their own; `AGENTS.md` names them.
+- The reviews: `review-result:adversary-realmwalk-pass-1` (green; one warning, twelve notes)
+  and `review-result:realmwalk-correction-1-coordinator-read`. Three older limits the pass
+  named are drafts of the backlog, not part of this story: a builtin that answers where a
+  TypeError is due stays green in the walk; 10 functions of intrinsics no property path
+  reaches (the `next` of five iterator prototypes, `%GeneratorFunction.prototype%.constructor`,
+  `%IteratorPrototype%[Symbol.iterator]`, `next`, `return` and `throw` of
+  `%GeneratorPrototype%`) are not walked; an exported `RUSTFLAGS` wins over a step's `env:`.
+- Acceptance 9, the whole gate on the unit's head, was run by the coordinator: every step passed
+  but `test262-check`, which is red on the wave branch until its close writes the expected file
+  and its digest again (the unit changes no file the digest covers); `test262-moves-check` and
+  `gate-selftest` (99 passed) ran apart.

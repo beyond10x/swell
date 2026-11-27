@@ -51,6 +51,7 @@ pub(crate) mod host_overrides;
 pub(crate) mod invariants;
 pub(crate) mod keyed_entries;
 pub(crate) mod ordinary;
+pub(crate) mod private_names;
 pub(crate) mod promise;
 pub(crate) mod property;
 pub(crate) mod proxy;
@@ -181,6 +182,11 @@ pub(crate) struct ObjectRecord {
     pub(crate) extensible: bool,
     pub(crate) properties: Properties,
     pub(crate) kind: ObjectKind,
+    /// [[PrivateElements]] (`#sec-privateelement-specification-type`; `docs/design/engine.md`,
+    /// "Private names", item 2), `None` until the first is added (`object/private_names.rs`):
+    /// every kind of object has it, since the adds act on the object itself, through no trap.
+    /// The box and its list are charged before they grow and recorded in `grown`.
+    pub(crate) private_elements: Option<alloc::boxed::Box<private_names::PrivateElements>>,
     grown: Grown,
 }
 
@@ -269,18 +275,22 @@ impl ObjectRecord {
             extensible: true,
             properties: Properties::default(),
             kind,
+            private_elements: None,
             grown: Grown::default(),
         }
     }
 
-    /// Kind site of the collector: [[Prototype]], the property keys and values, then the slots
-    /// of the object's kind.
+    /// Kind site of the collector: [[Prototype]], the property keys and values, the private
+    /// elements (each one's Private Name and its values), then the slots of the object's kind.
     pub(crate) fn trace(&self, mark: &mut Mark) {
         mark.count("object/mod.rs ObjectRecord::trace");
         if let Some(prototype) = self.prototype {
             mark.object(prototype);
         }
         self.properties.trace(mark);
+        if let Some(elements) = &self.private_elements {
+            elements.trace(mark);
+        }
         match &self.kind {
             ObjectKind::Ordinary(ordinary) => ordinary.trace(mark),
             ObjectKind::Array(array) => array.trace(mark),

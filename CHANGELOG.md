@@ -273,7 +273,70 @@ Every number below comes from the gate, `task check`, on the released commit.
   clear. The refusal `eval in a class field initializer is not supported before slice 8` is
   gone (`story:eval-in-class-field-initializers`).
 
+- Private methods and accessors run (`#sec-private-names`,
+  `#sec-privateelement-specification-type`): each evaluation of a class makes one Private Name
+  per private identifier (a heap record of its own, its description the identifier with its
+  `#`), held by the class's private record, a lexical scope pushed after the heritage. An
+  object holds its private elements in a list of its own, charged to the memory budget before
+  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  exactly the elements that level adds (a getter and a setter of one name are one element), so
+  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
+  methods 200, with 17 methods 772
+  (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
+  methods and accessors are added by the class's instance initializer before any other
+  element, the static ones to the constructor before the first static element runs
+  (PrivateMethodOrAccessorAdd); an object a base constructor returns gets them too, and a
+  second add of the same name is a `TypeError`. `o.#m`, `o.#m()` with `o` as `this`,
+  `o?.#m()`, and every assignment form on a private reference (plain, compound, logical,
+  update, destructuring and the `for`-`in`/`of` head) run PrivateGet and PrivateSet, which
+  throw a `TypeError` for a missing element, a primitive, a write to a method and a read or
+  write of an accessor that lacks that half. A find spends a step per comparison past the
+  eighth entry, so a construction that adds n private elements of one class level spends
+  (n - 9)(n - 8)/2 steps on its adds for n over 9 and none below. Private names are not
+  visible to any listing of the language or of the host interface; the collector frees a
+  Private Name that nothing holds. One class holds at most 32,768 private methods with names
+  of their own (the 65,536 slots of its private record); past it the class is the
+  `SyntaxError` `more private record slots in one class than the bytecode can number`. Direct
+  eval code that reads a private name an enclosing class declares is refused with the
+  `SyntaxError` `private name #x in direct eval code is not supported before slice 8` until
+  `story:private-names-in-eval-code`; a name no enclosing class declares, an indirect `eval`
+  and `Function` keep the early error `private name #x is not declared in an enclosing
+  class`. The hold `private method is not supported before slice 8` is gone
+  (`story:private-names-and-private-methods`).
+
 ### Changed
+
+- The walk that calls every function of the realm with a Symbol in each place runs in 2
+  parts and reads the places of the functions from a committed file,
+  `crates/swell/tests/fixtures/realm_places.txt` (344 places), which the task
+  `realm-places-expected` writes. A place is in the part its line hashes to (FNV-1a, 64 bit),
+  so a function the realm gains moves no other place. Each part takes from the file the
+  places, calls and rows it owes and fails when it walked, called or met fewer. The test
+  `the_realm_places_file_equals_the_walk` makes the list again in the default mode at every
+  gate run and fails when the file differs, its two comment lines included; before the writer
+  writes, it reads every place back to its function and fails naming one that does not read
+  back. The cover test `the_parts_of_the_walk_cover_every_function_of_the_realm` holds the
+  file's form, the partition, no empty part, no part under half the mean, at most 8 parts and
+  the rows of `WALK_EXPECTED`, two of which (`Array.prototype.with` with the Symbol as
+  argument 2 or 3) carry the condition their clause tests, an index at least the length that
+  earlier calls left. The slowest part takes 0.022 CPU seconds alone in the default mode,
+  0.317 with a collection at every safe point and 0.672 there at the full count, against
+  0.069, 4.10 and 6.59 for the one walk before. The gate's steps `build`, `build-tests`, `test`
+  and `test-doc` read their flags and nextest arguments from `TEST_RUSTFLAGS` and
+  `TEST_NEXTEST_ARGS` of `taskfiles/realm-places.yml`, which the writer reads too, list both
+  in `gate-vars`, and fail with one line when either is empty or is not that file's value
+  (`story:realm-walk-in-parts-under-the-cpu-bound`).
+
+- The record of every object is 208 bytes, before 200: it holds the box of the object's
+  private elements (`private_elements`, empty for an object without one). Every reading that
+  counts objects rises by 8 bytes per object, over the readings of the next entry:
+  `heap_bytes()` after `create_realm` reads 393,818 bytes (389,722 without the field),
+  `live_bytes()` 281,115 (277,947); the reading of HOST-187 is 398,621 bytes (394,525), its
+  bound `BINDINGS_REALM_HEAP_BYTES` (506,112) unchanged; a host function reads 512 live bytes
+  (504) and a host object 208 (200), with 4,096 bytes of host data 4,624 (4,616) and 4,304
+  (4,296) (`host_186`, `host_187`). `JSON.parse` of 100,000 nested brackets, which returned
+  its result under a memory budget of 64 MiB, needs 66,304 KiB now
+  (`story:private-names-and-private-methods`).
 
 - A realm reads larger. The collector's workspace holds a head word per slot of every arena
   besides the mark word and the room on the worklist, charged with the arenas' capacity

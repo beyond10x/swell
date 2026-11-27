@@ -73,6 +73,30 @@ impl SymbolRecord {
     }
 }
 
+/// A Private Name (`#sec-private-names`; `docs/design/engine.md`, "Private names", item 1): a
+/// handle into the arena `Heap.private_names`. It is no [`Value`]: no host and no script is
+/// handed one. A binding of a private record holds it (`SlotValue::PrivateName`,
+/// `interp/frame.rs`), and an object's [[PrivateElements]] key their entries by it
+/// (`object/private_names.rs`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PrivateNameRef {
+    pub(crate) handle: Handle,
+}
+
+/// The record of a Private Name: its [[Description]], the identifier's text with its `#`.
+pub(crate) struct PrivateNameRecord {
+    /// [[Description]].
+    pub(crate) description: StringRef,
+}
+
+impl PrivateNameRecord {
+    /// Kind site of the collector: the description.
+    pub(crate) fn trace(&self, mark: &mut Mark) {
+        mark.count("heap/mod.rs PrivateNameRecord::trace");
+        mark.value(Value::String(self.description));
+    }
+}
+
 /// The number of code units.
 fn units_len(units: CodeUnits<'_>) -> usize {
     match units {
@@ -281,6 +305,8 @@ pub(crate) struct Heap {
     pub(crate) accounting: Accounting,
     pub(crate) strings: Arena<HeapString>,
     pub(crate) symbols: Arena<SymbolRecord>,
+    /// The Private Names ([`PrivateNameRecord`]), `story:private-names-and-private-methods`.
+    pub(crate) private_names: Arena<PrivateNameRecord>,
     pub(crate) objects: Arena<ObjectRecord>,
     pub(crate) realms: Arena<RealmRecord>,
     pub(crate) environments: Arena<EnvironmentRecord>,
@@ -320,6 +346,7 @@ impl Heap {
             accounting: Accounting::new(memory_bytes),
             strings: Arena::new(key),
             symbols: Arena::new(key),
+            private_names: Arena::new(key),
             objects: Arena::new(key),
             realms: Arena::new(key),
             environments: Arena::new(key),
@@ -340,12 +367,13 @@ impl Heap {
         }
     }
 
-    /// The counting build: the floor of the six arenas ([`Arena::ledger_floor`]).
+    /// The counting build: the floor of the seven arenas ([`Arena::ledger_floor`]).
     #[cfg(test)]
     pub(crate) fn ledger_floor(&self) -> u64 {
         [
             self.strings.ledger_floor(),
             self.symbols.ledger_floor(),
+            self.private_names.ledger_floor(),
             self.objects.ledger_floor(),
             self.realms.ledger_floor(),
             self.environments.ledger_floor(),
@@ -356,7 +384,7 @@ impl Heap {
     }
 
     /// The counting build: the capacity charge, the bytes that stay charged while the agent
-    /// lives: the six arenas' capacity, each slot with its workspace ([`Arena::capacity_bytes`]),
+    /// lives: the seven arenas' capacity, each slot with its workspace ([`Arena::capacity_bytes`]),
     /// the atom table's room ([`Atoms::room_charge`]) and the registry's
     /// ([`SymbolRegistry::room_charge`]).
     #[cfg(test)]
@@ -364,6 +392,7 @@ impl Heap {
         [
             self.strings.capacity_bytes(),
             self.symbols.capacity_bytes(),
+            self.private_names.capacity_bytes(),
             self.objects.capacity_bytes(),
             self.realms.capacity_bytes(),
             self.environments.capacity_bytes(),
@@ -375,22 +404,24 @@ impl Heap {
         .fold(0u64, |sum, bytes| sum.saturating_add(*bytes))
     }
 
-    /// The counting build: the slots of the six arenas, live or free.
+    /// The counting build: the slots of the seven arenas, live or free.
     #[cfg(test)]
     pub(crate) fn slot_total(&self) -> usize {
         self.strings.slot_count()
             + self.symbols.slot_count()
+            + self.private_names.slot_count()
             + self.objects.slot_count()
             + self.realms.slot_count()
             + self.environments.slot_count()
             + self.scripts.slot_count()
     }
 
-    /// The counting build: the pushes past capacity onto the six free lists so far.
+    /// The counting build: the pushes past capacity onto the seven free lists so far.
     #[cfg(test)]
     pub(crate) fn free_list_growths(&self) -> u64 {
         self.strings.growths
             + self.symbols.growths
+            + self.private_names.growths
             + self.objects.growths
             + self.realms.growths
             + self.environments.growths
@@ -411,6 +442,7 @@ impl Heap {
         let room = [
             self.strings.room_bytes(),
             self.symbols.room_bytes(),
+            self.private_names.room_bytes(),
             self.objects.room_bytes(),
             self.realms.room_bytes(),
             self.environments.room_bytes(),
@@ -427,6 +459,7 @@ impl Heap {
     pub(crate) fn clear_marks(&mut self) {
         self.strings.clear_marks();
         self.symbols.clear_marks();
+        self.private_names.clear_marks();
         self.objects.clear_marks();
         self.realms.clear_marks();
         self.environments.clear_marks();
@@ -501,6 +534,20 @@ impl Heap {
             0,
         )?;
         Ok(SymbolRef { handle })
+    }
+
+    /// Store a new Private Name whose [[Description]] is `description` (`#sec-private-names`).
+    pub(crate) fn new_private_name(
+        &mut self,
+        description: StringRef,
+    ) -> Result<PrivateNameRef, OverBudget> {
+        let handle = store(
+            &mut self.accounting,
+            &mut self.private_names,
+            PrivateNameRecord { description },
+            0,
+        )?;
+        Ok(PrivateNameRef { handle })
     }
 
     /// The Symbol of the GlobalSymbolRegistry whose [[Key]] has the code units of `key`
