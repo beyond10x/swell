@@ -69,7 +69,7 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/scope.rs
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 13, executor: "agent:coordinator"}
@@ -127,3 +127,49 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 `extends`, SuperCall, derived constructors and subclassing builtins (`story:derived-classes-and-super-call`); fields, static blocks and private names (their stories, which fill the functions named above); `Reflect.construct` (slice 9); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `classes` of wave big-2 delivered the story on `impl/classes` (corrections 1 and 2
+after the adversary's two passes), merged into `wave/big-2`. Where the delivery differs from
+the text above:
+
+- Class code is strict on every instruction. The Change names neither of the two
+  instructions this took, `SetStrict(bool)` and `SetClassName`, nor the field `strict` of
+  `Handler`. The adversary's first pass showed the computed keys of a class in non-strict code
+  running as non-strict code, and an anonymous class under a computed key of an object
+  literal named after its elements ran. The design says how both hold now
+  (`docs/design/engine.md`, "Classes", item 2). The compiler fixtures `class-declaration.disasm`
+  and `class-expression-computed-keys.disasm` carry the `SetStrict` pair; the fixture
+  `strict-code-of-a-class.{js,disasm}` shows a class in a key, the naming, a `yield*` handler
+  and the return completions.
+- `Function.prototype.toString` of a static method gives its source text without `static` and
+  the trivia after it; the text above says "`static` included". The clause and the ten pinned
+  cases `built-ins/Function/prototype/toString/*-class-{statement,expression}-static.js`
+  decide.
+- Counts of three tests differ from the text, each smaller count shown red with its defect
+  planted:
+  - `classes::a_class_made_in_a_loop_is_charged_and_freed` runs 2,000 rounds in the gate, the
+    text's 10,000 with `SWELL_FULL_COUNTS=1`, and 20 with `collect-every-safe-point`, with 10
+    classes held (the text: 100) and 16 KiB of budget room (the text: 256 KiB) there. 10,000
+    rounds took 1.5 to 1.8 CPU s alone, and 1,000 rounds with a collection at every safe point
+    took 45 s.
+  - `classes::a_class_with_1000_methods` runs 40 methods with `collect-every-safe-point`.
+  - `classes::a_method_recursion_stops_at_frame_depth` runs with `frame_depth` 100,
+    `reentry_depth` 8 and `steps_per_entry` 5,000 with `collect-every-safe-point`.
+- Compiler fixtures: the Change's two (`class-declaration`, `class-expression-computed-keys`),
+  not the `class-base.{js,disasm}` of the scope line.
+- Written outside the Writes line, each the smallest change that compiles or passes:
+  `crates/compiler/src/function.rs` (the class prologue `This; InitInstance; Pop` before the
+  parameters are bound, the `FieldInitializer` arm, the `EnvsUp` and `EnvsDown` tasks of the
+  class scope in a function body); `crates/swell/src/interp/object_literal.rs`
+  (`set_function_name` is `pub(super)`); `crates/swell/src/object/generator.rs` and
+  `object/async_generator.rs` (`RECORD_BYTES` 200, the fallback of "Sizes":
+  `size_of::<ObjectRecord>()` went from 192 to 200); `crates/syntax/tests/sources.rs` (the
+  sources that answered the hold of `class` parse now; the hold `class heritage` has its
+  fixture `held/class-expression-heritage.js` and the test
+  `sources::the_heritage_hold_stands_at_extends`).
+- At the join with `story:class-element-syntax-and-early-errors` a source with a held element
+  answers the hold of its first held element (`class field`, `private field`, `private
+  method`, `private name in`, `class static block`), where that story's text says "the hold of
+  its class".

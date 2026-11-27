@@ -316,8 +316,36 @@ fn held_sources_answer_their_first_construct_still_held() {
     );
 }
 
+/// The hold `class heritage` is answered at its `extends`, the first one of the source, as
+/// long as it is a line of `HOLDS`.
+#[test]
+fn the_heritage_hold_stands_at_extends() {
+    if !swell_syntax::HOLDS
+        .iter()
+        .any(|(c, _)| *c == "class heritage")
+    {
+        return;
+    }
+    for (text, at) in [
+        ("class A\n  extends B {}", (2, 3)),
+        ("x = class\n  extends B {};", (2, 3)),
+        ("class A {}\nclass B extends C {}", (2, 9)),
+        ("x = class extends (class {}) {};", (1, 11)),
+    ] {
+        let errors = parse(text)
+            .err()
+            .unwrap_or_else(|| panic!("{text:?}: parsed"));
+        assert_eq!(
+            messages(&errors),
+            vec!["class heritage is not supported before slice 8".to_string()],
+            "{text:?}"
+        );
+        assert_eq!((errors[0].line, errors[0].column), at, "{text:?}");
+    }
+}
+
 /// The answer of a class source that the parser reads whole: the one error of a source with a
-/// grammar or an early error, or the refusal it holds (`class` first, while that is held).
+/// grammar or an early error, or the refusal of the first construct it holds.
 fn class_answer(text: &str) -> Result<String, String> {
     match parse(text) {
         Ok(_) => Ok("parses".to_string()),
@@ -336,23 +364,24 @@ fn class_answer(text: &str) -> Result<String, String> {
 /// (`language/statements/class/elements/fields-asi-*.js`). `static`, `get`, `set` and `async`
 /// are field names where no element follows them on their line, and a name with an escape is
 /// never the word (`escaped-*-field-*.js`). Each source of the first list parses to the hold of
-/// its class; each of the second is a grammar error.
+/// its first field (a class is not held); each of the second is a grammar error.
 #[test]
 fn fields_end_where_a_semicolon_is_inserted() {
-    let held = "class is not supported before slice 8";
-    for text in [
-        "class C { x\n y }",
-        "class C { x = 1\n ['a'] = 2 }",
-        "class C { x = a\n in\n z\n y = b }",
-        "class C { get\n *a() {} }",
-        "class C { \\u0067et\n *a() {} }",
-        "class C { static\n x }",
-        "class C { static }",
-        "class C { static = 1; get; set; async\n x }",
-        "class C { static\n async\n *m() {} }",
-        "class C { #x\n #y }",
-        "class C { static #x = 1; static y; z }",
-        "x = class { 'a'; 1 = 2; [b]; }",
+    let field = "class field is not supported before slice 8";
+    let private = "private field is not supported before slice 8";
+    for (text, held) in [
+        ("class C { x\n y }", field),
+        ("class C { x = 1\n ['a'] = 2 }", field),
+        ("class C { x = a\n in\n z\n y = b }", field),
+        ("class C { get\n *a() {} }", field),
+        ("class C { \\u0067et\n *a() {} }", field),
+        ("class C { static\n x }", field),
+        ("class C { static }", field),
+        ("class C { static = 1; get; set; async\n x }", field),
+        ("class C { static\n async\n *m() {} }", field),
+        ("class C { #x\n #y }", private),
+        ("class C { static #x = 1; static y; z }", private),
+        ("x = class { 'a'; 1 = 2; [b]; }", field),
     ] {
         assert_eq!(class_answer(text), Ok(held.to_string()), "{text:?}");
     }
@@ -378,11 +407,11 @@ fn fields_end_where_a_semicolon_is_inserted() {
 /// `PrivateIdentifier in ShiftExpression` is a RelationalExpression
 /// (`#sec-relational-operators`): a private name stands only directly before `in`, where `in`
 /// is an operator, as the left operand at the precedence of `<`; its right operand is a
-/// ShiftExpression. Every source of the first list parses to the hold of its class; each of the
-/// second is a grammar error at the private name.
+/// ShiftExpression. Every source of the first list parses to the hold of its first element, the
+/// private field `#x`; each of the second is a grammar error at the private name.
 #[test]
 fn a_private_name_stands_only_before_in() {
-    let held = "class is not supported before slice 8";
+    let held = "private field is not supported before slice 8";
     let class = |body: &str| format!("class C {{ #x; m(o, p) {{ {body} }} }}");
     for body in [
         "return #x in o;",
@@ -423,11 +452,11 @@ fn a_private_name_stands_only_before_in() {
 /// script, eval code and `Function` code, none of which has an enclosing class body with names
 /// for it (`#sec-performeval`, `#sec-createdynamicfunction`): through each entry a private
 /// reference outside a class is the early error, and one inside a class that declares the name
-/// answers the hold of the class.
+/// answers the hold of that declaration, the private field `#x`.
 #[test]
 fn a_private_name_outside_a_class_is_an_early_error_through_every_entry() {
     let undeclared = "private name #x is not declared in an enclosing class";
-    let held = "class is not supported before slice 8";
+    let held = "private field is not supported before slice 8";
     for (text, message) in [
         ("o.#x;", undeclared),
         ("o?.#x;", undeclared),
@@ -454,21 +483,21 @@ fn a_private_name_outside_a_class_is_an_early_error_through_every_entry() {
 /// A class is strict mode code from `class` to its `}` and no further (`#sec-strict-mode-code`):
 /// the parser and the walk of the early errors both give the code after a class declaration or
 /// expression the strictness of the code around it. So, through each entry, a source with a
-/// class and, after it, code that only non-strict code admits answers the hold of the class
-/// alone; an `if` clause that is a function declaration answers its refusal of slice 18, which
+/// class and, after it, code that only non-strict code admits parses (`None`);
+/// an `if` clause that is a function declaration answers its refusal of slice 18, which
 /// stops the parse at its token, as it does in non-strict code without a class.
 #[test]
 fn code_after_a_class_is_not_strict() {
-    let held = "class is not supported before slice 8";
-    let if_clause = "function declaration as an if clause is not supported before slice 18";
-    let mut cases: Vec<(String, &str)> = Vec::new();
+    let parses = None;
+    let if_clause = Some("function declaration as an if clause is not supported before slice 18");
+    let mut cases: Vec<(String, Option<&str>)> = Vec::new();
     for class in ["class A {}", "x = class {};", "x = class { m() {} };"] {
         for (tail, message) in [
-            ("with (a) {}", held),
-            ("x = 010;", held),
-            ("delete x;", held),
-            ("var eval;", held),
-            ("function f(a, a) {}", held),
+            ("with (a) {}", parses),
+            ("x = 010;", parses),
+            ("delete x;", parses),
+            ("var eval;", parses),
+            ("function f(a, a) {}", parses),
             ("if (a) function f() {}", if_clause),
         ] {
             cases.push((format!("{class} {tail}"), message));
@@ -479,8 +508,8 @@ fn code_after_a_class_is_not_strict() {
     for (text, message) in &cases {
         for entry in ENTRIES {
             let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
-            if answer.as_ref().map_err(|errors| messages(errors)) != Err(vec![message.to_string()])
-            {
+            let expected = message.map(|m| vec![m.to_string()]);
+            if answer.as_ref().err().map(|errors| messages(errors)) != expected {
                 wrong.push(format!("{entry:?} {text:?}: {answer:?}"));
             }
         }
@@ -2307,13 +2336,15 @@ fn function_spans_are_their_source_text() {
 
 // The class elements of `story:class-element-syntax-and-early-errors`, each source against the
 // verdict of the pinned ECMA-262 draft, through every parse entry. `H` is a source the standard
-// admits, which answers the hold of its class; `E` is a SyntaxError of the standard, a grammar
-// or an early error and never a refusal. Every mismatch of a list is reported at once.
+// admits, which parses or answers the hold of its first held element; `E` is a SyntaxError of
+// the standard, a grammar or an early error and never a refusal. Every mismatch of a list is
+// reported at once.
 
 /// The expected answer of a source of these lists.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Verdict {
-    /// Admitted by the standard: the one error is the hold of `class`.
+    /// Admitted by the standard: the source parses, or its one error is the refusal of a line of
+    /// [`swell_syntax::HOLDS`] (a class is not held, so a class of methods alone parses).
     H,
     /// A SyntaxError of the standard: an error that is no refusal.
     E,
@@ -2321,17 +2352,24 @@ enum Verdict {
 
 /// The mismatches of `cases` through `entries`, each with what the parser answered.
 fn verdict_mismatches(entries: &[Entry], cases: &[(&str, Verdict)]) -> Vec<String> {
-    let held = "class is not supported before slice 8";
+    let held = |message: &str| {
+        swell_syntax::HOLDS.iter().any(|(construct, slice)| {
+            message == format!("{construct} is not supported before slice {slice}")
+        })
+    };
     let mut wrong = Vec::new();
     for &(text, verdict) in cases {
         for &entry in entries {
             let answer = parse_through(entry, &units(text), LIMIT).map(|_| ());
             let ok = match (&answer, verdict) {
-                (Err(errors), Verdict::H) => messages(errors) == vec![held.to_string()],
+                (Ok(()), Verdict::H) => true,
+                (Err(errors), Verdict::H) => {
+                    matches!(errors.as_slice(), [error] if held(&error.message))
+                }
                 (Err(errors), Verdict::E) => errors
                     .iter()
                     .all(|e| !e.message.contains("is not supported before slice")),
-                (Ok(()), _) => false,
+                (Ok(()), Verdict::E) => false,
             };
             if !ok {
                 let got = answer.map_err(|errors| messages(&errors));
@@ -2820,7 +2858,7 @@ fn field_ends_answer_the_standard() {
 #[test]
 fn dynamic_function_entries_read_class_elements() {
     let options = ParseOptions { max_nesting: LIMIT };
-    let held = vec!["class is not supported before slice 8".to_string()];
+    let held = vec!["class field is not supported before slice 8".to_string()];
     let undeclared = vec!["private name #x is not declared in an enclosing class".to_string()];
     let mut wrong = Vec::new();
     let mut check =
@@ -2922,8 +2960,9 @@ fn parse_cost(text: &str) -> (Vec<String>, usize, usize, std::time::Duration) {
     (errors, ledger.charged, ledger.peak, time)
 }
 
-/// A named shape of a class source and the source of it with n elements.
-type Shape = (&'static str, fn(usize) -> String);
+/// A named shape of a class source, the construct its first element holds, and the source of it
+/// with n elements.
+type Shape = (&'static str, &'static str, fn(usize) -> String);
 
 /// Hostile sizes of class elements: a class of n private fields each used once, one private
 /// name used n times, n public fields, n static blocks, n undeclared private references. Each
@@ -2932,24 +2971,23 @@ type Shape = (&'static str, fn(usize) -> String);
 /// most ten times the time.
 #[test]
 fn class_elements_scale_linearly() {
-    let held = vec!["class is not supported before slice 8".to_string()];
     let shapes: [Shape; 5] = [
-        ("private fields used once", |n| {
+        ("private fields used once", "private field", |n| {
             let fields: String = (0..n).map(|i| format!("#p{i};")).collect();
             let uses: String = (0..n).map(|i| format!("this.#p{i};")).collect();
             format!("class C {{ {fields} m() {{ {uses} }} }}")
         }),
-        ("one private name used n times", |n| {
+        ("one private name used n times", "private field", |n| {
             format!("class C {{ #x; m() {{ {} }} }}", "this.#x;".repeat(n))
         }),
-        ("public fields with initializers", |n| {
+        ("public fields with initializers", "class field", |n| {
             let fields: String = (0..n).map(|i| format!("f{i} = {i};")).collect();
             format!("class C {{ {fields} }}")
         }),
-        ("static blocks", |n| {
+        ("static blocks", "class static block", |n| {
             format!("class C {{ {} }}", "static { var v = 1; }".repeat(n))
         }),
-        ("private names in nested classes", |n| {
+        ("private names in nested classes", "private field", |n| {
             let inner: String = (0..n)
                 .map(|i| format!("class D{i} {{ #y; m() {{ this.#x; this.#y; }} }}"))
                 .collect();
@@ -2957,7 +2995,8 @@ fn class_elements_scale_linearly() {
         }),
     ];
     let mut wrong = Vec::new();
-    for (name, make) in shapes {
+    for (name, construct, make) in shapes {
+        let held = vec![format!("{construct} is not supported before slice 8")];
         let n = 2_500;
         let (small, small_charged, small_peak, small_time) = parse_cost(&make(n));
         let (large, large_charged, large_peak, large_time) = parse_cost(&make(4 * n));

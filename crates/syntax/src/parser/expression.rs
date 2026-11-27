@@ -40,7 +40,8 @@
 //! `#sec-relational-operators`), whose private name stands only directly before `in`, where a
 //! relational expression may start, and holds `private name in`.
 //!
-//! A ClassExpression is parsed whole and held (`parser/class.rs`). Refused, each with its slice:
+//! A ClassExpression is parsed whole, its heritage held (`parser/class.rs`). Refused, each with
+//! its slice:
 //! `super` in an arrow function in a method and in eval code (8), `import.meta` and dynamic
 //! `import` (11).
 //!

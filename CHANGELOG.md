@@ -136,6 +136,65 @@ Every number below comes from the gate, `task check`, on the released commit.
   bounds. The own keys of `%Set.prototype%` stand in the order of the clauses
   (`story:set-methods`).
 
+- Class declarations and class expressions without `extends`, three stories of the eighth
+  slice (`#sec-class-definitions`, `#sec-runtime-semantics-classdefinitionevaluation`). The
+  parser reads a class where a declaration stands and as an expression, with methods, getters,
+  setters, generator, async and async generator methods, `static` or not, with literal, string,
+  number or computed keys, and empty elements; a class is strict code from `class` to its `}`.
+  Its early errors are answered: a second `constructor`, a `constructor` that is a special
+  method, a `static` method named `prototype`, a reserved or restricted class name, the strict
+  rules in its methods, and the redeclaration of its name in a block, a `switch` and a script
+  (`story:class-syntax-and-early-errors`). A class runs: the class scope with its own name
+  uninitialized and immutable while the computed keys run, the prototype with
+  `%Object.prototype%` as [[Prototype]], the constructor F made from the constructor's template
+  (or the default base constructor) with the prototype as [[HomeObject]] and its name at
+  creation, `prototype` (not writable, not enumerable, not configurable) and `constructor`,
+  then the methods, getters and setters in source order, non-enumerable, on the prototype or,
+  for a static one, on F; a computed key is converted by ToPropertyKey once, and a static
+  element keyed `prototype` throws a `TypeError`. A class constructor called without `new`
+  throws a `TypeError` of its own realm; `new` makes `this` from NewTarget (through a bound
+  function too). A class at the top of a script binds in the declarative record of the global
+  environment; in a block and in eval code it binds lexically. The computed keys of a class in
+  non-strict code run as strict mode code (`#sec-strict-mode-code`): an assignment to an
+  undeclared name throws a `ReferenceError`, a write to a frozen property and `delete` of a
+  non-configurable one throw a `TypeError`, a direct `eval` there keeps its `var` to itself,
+  and a class, function or arrow function made there is strict; the code around the class, its
+  `catch` and `finally`, and a frame resumed after a `yield` in a key keep their own
+  strictness. An anonymous class under a computed key of an object literal takes the key's
+  name before its elements are defined, so a static `name` method wins and `Reflect.ownKeys`
+  lists `length`, `name`, `prototype` first. `Function.prototype.toString` of a class gives
+  its source text from `class` to `}`, of a method its source text without a leading `static`.
+  The compiler emits thirteen instructions, `ClassPrototype`, `MakeClassConstructor`,
+  `DefineClassMethod`, `DefineClassGetter`, `DefineClassSetter`, their three computed forms,
+  `StoreInitializer`, `MakeMethod`, `InitInstance`, `SetStrict` and `SetClassName`; a class
+  constructor carries a box of its kind (`ConstructorKind::Base`) and its instance
+  initializer, charged with F. The refusal `class is not supported before slice 8` is gone
+  (`story:class-definition-evaluation`).
+- The parser reads every other element of a class and holds it: fields, public and private,
+  static or not, with or without an initializer, ending at `;`, before `}` or where a line
+  terminator lets a semicolon be inserted, with `static`, `get`, `set` and `async` as field
+  names; private methods and accessors (`#m() {}`, `get #x() {}`, `static async *#m() {}`);
+  static blocks; the private name token (`#` and an identifier name, escapes included); the
+  member forms `a.#x` and `a?.#x` and `#x in a`, whose private name stands only directly
+  before `in` where a relational expression may start. The tree holds the functions of the
+  elements: one `FieldInitializer` per run of consecutive static fields, one for the instance
+  elements of a class with a field or a private method that is not static, one `StaticBlock`
+  per static block. Their early errors are answered: a field named `constructor`, a static
+  field named `prototype` or `constructor`, `#constructor`, a private name declared twice but
+  for a getter and setter pair of the same placement, `arguments` in a field initializer or a
+  static block (arrow functions in them included), a SuperCall there, `await` as an identifier
+  and `return` in a static block (a class nested in it included), a YieldExpression or an
+  AwaitExpression in a field initializer (refused at its token, a stated difference from the
+  pinned draft: no runtime can run one in an initializer's own function), the var and lexical
+  names of a static block, AllPrivateIdentifiersValid in a script, a function body, `Function`
+  code, eval code and a class body (a class's heritage excepted), `delete` of a private
+  reference, and a private name in an object literal or after `super.`. A source that has
+  such an element and no early error answers its hold: `class field`, `private method`,
+  `private field`, `private name in` or `class static block is not supported before slice 8`;
+  a heritage answers `class heritage is not supported before slice 8`. The refusal `private
+  name is not supported before slice 8` of the lexer is gone
+  (`story:class-element-syntax-and-early-errors`).
+
 ### Changed
 
 - The lane `slow` states its bound: `task slow` fails when it ran over 900 s or one of its
@@ -290,6 +349,16 @@ Every number below comes from the gate, `task check`, on the released commit.
   refuses what those let through: an inner `allow` of the lint, an `allow` or `expect` of a
   group that holds it, an `expect` with a blank reason, and an attribute naming the lint in
   another crate of the workspace (`story:buffer-growth-outside-the-charged-list-is-listed`).
+
+- `Agent::run_builtin` picks one of four functions by the group of the builtin and makes one
+  call, where one match held the arms of every group. In the `stack-debug` profile a re-entry
+  through a builtin passes at most 736 bytes of dispatch (1,424 with the arms of `WeakMap`
+  and `WeakSet` in the one match), and the stack test through builtins needs 12,195,840 of
+  its 12,838,560 bytes at depth 1,000. In the release profile 27 of the 31 measured routes
+  are larger, by up to 1,184 bytes per re-entry; the largest takes 5,872 of the 14,336 bytes
+  promised per re-entry (measured on x86_64 with rustc 1.99.1).
+  `limits_scripts::min_stack_bytes_is_enough_through_builtins` runs a fifth route, `Math.max`
+  through a `valueOf`.
 
 ### Fixed
 

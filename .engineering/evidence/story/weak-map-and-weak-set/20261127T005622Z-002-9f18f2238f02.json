@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T00:56:22Z",
+  "actor": "human:operator",
+  "artifact": "story:weak-map-and-weak-set",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/stackjoin at 22842da5, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1347 passed and 1 skipped in both modes; lib 269 passed; test-stack-profiles: 4 passed in release and in stack-debug; clippy 0; fmt 0"
+  }
+}

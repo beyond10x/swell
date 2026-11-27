@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-27T00:56:22Z",
+  "actor": "human:operator",
+  "artifact": "story:weak-map-and-weak-set",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:stackjoin-coordinator-read-1",
+    "review": "review-result:stackjoin-coordinator-read-1",
+    "outcome": "fixed"
+  }
+}

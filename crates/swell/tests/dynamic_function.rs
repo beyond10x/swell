@@ -798,14 +798,14 @@ fn async_function_constructor_is_refused_by_the_hook_of_compile_strings() {
         &mut agent,
         &realm,
         &format!(
-            "{ASYNC_FUNCTION}try {{ AF(\"class C {{}}\"); }} catch (e) {{ e.name + \": \" + e.message; }}"
+            "{ASYNC_FUNCTION}try {{ AF(\"1n\"); }} catch (e) {{ e.name + \": \" + e.message; }}"
         ),
     );
     let Outcome::Normal(caught) = caught else {
         panic!("the script did not complete normally: {caught:?}");
     };
     assert!(
-        caught.starts_with("\"SyntaxError: class is not supported before slice 8"),
+        caught.starts_with("\"SyntaxError: BigInt literal is not supported before slice 12"),
         "{caught}"
     );
     assert_eq!(agent.refusals(), before + 1);
@@ -1218,14 +1218,14 @@ fn async_generator_function_constructor_is_refused_by_the_hook_of_compile_string
         &mut agent,
         &realm,
         &format!(
-            "{ASYNC_GENERATOR_FUNCTION}try {{ AGF(\"class C {{}}\"); }} catch (e) {{ e.name + \": \" + e.message; }}"
+            "{ASYNC_GENERATOR_FUNCTION}try {{ AGF(\"1n\"); }} catch (e) {{ e.name + \": \" + e.message; }}"
         ),
     );
     let Outcome::Normal(caught) = caught else {
         panic!("the script did not complete normally: {caught:?}");
     };
     assert!(
-        caught.starts_with("\"SyntaxError: class is not supported before slice 8"),
+        caught.starts_with("\"SyntaxError: BigInt literal is not supported before slice 12"),
         "{caught}"
     );
     assert_eq!(agent.refusals(), before + 1);

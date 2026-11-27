@@ -16,9 +16,8 @@
 //! (F's [[SourceText]]). A second such method, and a getter, a setter, a generator or an `async`
 //! method named `constructor`, stays an element, which the early errors refuse (`early.rs`).
 //!
-//! A class is parsed whole and held ([`Parser::hold`], [`super::HOLDS`]): `class` at its first
-//! token and `class heritage` at `extends`, so the parse goes on and the early errors of the
-//! source come first.
+//! A class is parsed whole; its heritage is held ([`Parser::hold`], [`super::HOLDS`]): `class
+//! heritage` at `extends`, so the parse goes on and the early errors of the source come first.
 //!
 //! The other elements (`#sec-class-definitions`, ClassElement), each held at its first token:
 //! a field (FieldDefinition, `class field`, or with a private name `private field`), a private
@@ -157,12 +156,10 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok((self.reserve_expr(Expr::Class(class)), outer))
     }
 
-    /// The current `class`: holds the refusal `class` at it, makes the code strict and consumes
-    /// it; answers the strictness of the code around.
+    /// The current `class`: makes the code strict and consumes it; answers the strictness of the
+    /// code around.
     #[inline(never)]
     fn class_keyword(&mut self) -> R<bool> {
-        let span = self.start();
-        self.hold("class", 8, span);
         let outer = self.strict;
         self.strict = true;
         self.advance()?;

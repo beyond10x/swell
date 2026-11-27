@@ -811,6 +811,21 @@ session coordinates; this section is its procedure, taken from how surf is run
   opened on the branch and nothing is reported as merged and working before it exits 0. The
   combined test run of the merged branch stays what it was: a later check of several units
   at once.
+- **A change under `crates/swell/src` runs the stack lane on its merged head.** The gate does
+  not run `test-stack-profiles`; the lane `slow` does. On 2026-11-27 the merge of a unit that
+  added two arms to `Agent::run_builtin` (`object/builtin_function.rs`) grew that frame from
+  1,360 to 1,424 bytes in the `stack-debug` profile, the route through `toJSON` needed
+  12,899,328 bytes at depth 1,000, and
+  `limits_scripts::min_stack_bytes_is_enough_through_builtins` overflowed its thread of
+  12,838,560 bytes; the red was found after the merge. So: a unit that changes
+  `crates/swell/src` merges the wave branch into its head and runs `slot --timeout 30m task
+  test-stack-profiles` there before it reports, and the coordinator runs the same task on the
+  wave branch after each merge of such a unit. Since that day `run_builtin` picks one of four
+  parts (`run_builtin_part_a` to `run_builtin_part_d`, each `#[inline(never)]`) and makes one
+  call; a route through a builtin passes at most 736 bytes of dispatch in `stack-debug`. A new
+  group of `BuiltinId` goes into the last part while that part holds fewer than nine groups
+  (it holds eight), and into a new part after that; a part's match names every variant and
+  has no `_` arm.
 - **Quota is shared with surf's session.** Prefer fewer, longer units to many short ones, and
   keep every unit resumable (a brief file, a worktree, a report form): a sub-agent cut off by a
   rate limit is resumed with its context on the same model, never restarted.

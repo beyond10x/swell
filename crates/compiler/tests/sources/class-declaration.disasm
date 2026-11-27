@@ -1,0 +1,53 @@
+script locals 0
+  lexical let "A"
+  0000 2:1 SetStrict true
+  0001 2:1 PushLexicalEnv 0 const "A"
+  0002 2:1 ClassPrototype
+  0003 2:1 MakeClassConstructor 0 base
+  0004 2:42 Dup2
+  0005 2:42 Pop
+  0006 2:42 Closure 1
+  0007 2:42 DefineClassMethod "m"
+  0008 2:42 Pop
+  0009 2:60 Dup2
+  0010 2:60 Pop
+  0011 2:60 Closure 2
+  0012 2:60 DefineClassGetter "g"
+  0013 2:60 Pop
+  0014 2:82 Dup
+  0015 2:82 Closure 3
+  0016 2:82 DefineClassMethod "s"
+  0017 2:82 Pop
+  0018 2:1 SetEnv 0 0
+  0019 2:1 Nip 1
+  0020 2:1 PopEnv
+  0021 2:1 SetStrict false
+  0022 2:1 InitGlobal "A"
+  0023 2:1 Pop
+  0024 0:0 LoadCompletion
+  0025 0:0 Return
+
+function 0 class constructor "A" length 1 locals 1 strict
+  params local 0
+  0000 2:28 This
+  0001 2:37 GetLocal 0
+  0002 2:28 PutNamed "x"
+  0003 2:28 Pop
+  0004 2:1 Undefined
+  0005 2:1 Return
+
+function 1 method "m" length 0 locals 0 strict
+  0000 2:55 GetEnvChecked 0 0
+  0001 2:48 Return
+  0002 2:42 Undefined
+  0003 2:42 Return
+
+function 2 getter "get g" length 0 locals 0 strict
+  0000 2:77 Number 1
+  0001 2:70 Return
+  0002 2:60 Undefined
+  0003 2:60 Return
+
+function 3 method "s" length 0 locals 0 strict
+  0000 2:82 Undefined
+  0001 2:82 Return

@@ -135,9 +135,10 @@ mod tests {
     use super::{Request, request_bytes};
 
     /// `size_of::<ObjectRecord>()` before async generators, as `object/generator.rs` states it:
-    /// 200 bytes, and 192 since `story:new-target-meta-property` (the arrow function's box in
-    /// place of its `Option<Value>`), until `story:class-definition-evaluation` sets it again.
-    const RECORD_BYTES: usize = 192;
+    /// 200 bytes, 192 since `story:new-target-meta-property` (the arrow function's box in place
+    /// of its `Option<Value>`), and 200 again since `story:class-definition-evaluation` (the
+    /// class constructor's box): measured.
+    const RECORD_BYTES: usize = 200;
 
     /// The bytes of a [`Request`] on this target, which the integration test
     /// `async_generators::settling_a_request_credits_nothing_until_the_generator_is_freed` reads
