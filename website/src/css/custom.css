@@ -365,3 +365,6 @@
 .sw-cmp-best-mark { color: var(--b10x-color-heading); font-size: 0.75rem; font-weight: 600; }
 .sw-cmp-source { margin-top: 4px; }
 .sw-cmp-foot { margin-top: 1.5rem; color: var(--b10x-color-muted); font-size: 0.85rem; }
+.sw-cmp-loaded { display: inline-block; margin-inline-start: 6px; padding: 0 5px; border: 1px dashed currentColor; border-radius: 3px; color: var(--b10x-color-heading); font-size: 0.72rem; font-weight: 600; cursor: help; }
+.sw-cmp-legend { margin-top: 1rem; color: var(--b10x-color-muted); font-size: 0.85rem; }
+.sw-cmp-legend .sw-cmp-loaded { margin-inline-start: 0; margin-inline-end: 4px; }

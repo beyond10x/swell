@@ -3,7 +3,7 @@ import Layout from '@theme/Layout';
 import Link from '@docusaurus/Link';
 import {useHistory, useLocation} from '@docusaurus/router';
 import useIsBrowser from '@docusaurus/useIsBrowser';
-import {bestOf, count, engineById, engines, groups, kpiAnchor, selectionFrom} from '../data/engines';
+import {bestOf, count, engineById, engines, groups, kpiAnchor, loadedReasons, selectionFrom} from '../data/engines';
 import type {Cell, Engine, Row} from '../data/engines';
 
 /**
@@ -37,6 +37,19 @@ function SourceLine({cell}: {cell: Cell}): ReactNode {
   );
 }
 
+const LOADED_MEANS = 'the figure was measured while another job ran on the build node';
+
+/** The mark beside a figure of our runs that was measured beside another job; nothing otherwise. */
+function LoadedMark({cell}: {cell: Cell}): ReactNode {
+  if (cell.loaded !== true) return null;
+  const why = loadedReasons(cell);
+  return (
+    <span className="sw-cmp-loaded" title={`loaded${why ? ` (${why})` : ''}: ${LOADED_MEANS}`}>
+      loaded{why ? `: ${why}` : ''}
+    </span>
+  );
+}
+
 function Value({row, cell}: {row: Row; cell: Cell}): ReactNode {
   if (cell.status === 'not-measured' || cell.status === 'not-applicable' || (cell.status === 'unknown' && !cell.text)) {
     const word = cell.status === 'not-measured' ? 'not measured' : cell.status === 'not-applicable' ? 'not applicable' : 'unknown';
@@ -52,6 +65,7 @@ function Value({row, cell}: {row: Row; cell: Cell}): ReactNode {
       <>
         <span className="sw-cmp-number">{count(cell.value)}</span> of {count(cell.of)}
         {cell.percent ? <span className="sw-cmp-percent"> · {cell.percent} %</span> : null}
+        <LoadedMark cell={cell} />
         {cell.secondary ? (
           <div className="sw-cmp-secondary">
             {count(cell.secondary.value)} of {count(cell.secondary.of)} {cell.secondary.label}, {cell.secondary.percent} %
@@ -64,6 +78,7 @@ function Value({row, cell}: {row: Row; cell: Cell}): ReactNode {
     return (
       <>
         <span className="sw-cmp-number">{count(cell.value)}</span> {cell.unit ?? row.unit ?? ''}
+        <LoadedMark cell={cell} />
         {typeof cell.runs === 'number' ? (
           <div className="sw-cmp-secondary">
             median of {count(cell.runs)} runs
@@ -211,6 +226,15 @@ export default function Compare(): ReactNode {
             ))}
           </table>
         </div>
+        <p className="sw-cmp-legend">
+          <span className="sw-cmp-loaded" title={`loaded: ${LOADED_MEANS}`}>
+            loaded
+          </span>{' '}
+          beside a figure of our runs: {LOADED_MEANS}. A figure made of others, such as a geomean, is loaded when any of them was. The
+          reason follows the mark: <code>neighbour</code>, another pool job ran on the node; <code>load</code>, the node’s load per CPU
+          was over the bound; <code>unwatched</code>, the run has no record of the node. See the{' '}
+          <Link to="/docs/kpis">KPI page</Link>.
+        </p>
         <p className="sw-cmp-foot">
           Published values:{' '}
           {published.map((p, i) => (

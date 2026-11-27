@@ -80,11 +80,33 @@ $catalog_lines as $catalog
      + [$configs[] | select(.engine == $row.engine and .mode == $row.mode)]
      + [$configs[] | select(.id == $row.engine)])
     | (.[0].id // null);
+  # The rows a derived row (a geomean: `of` names its benchmarks) is made of: the rows of the same
+  # file, configuration, mode and KPI whose measurement is "<suite>/<a name of of>".
+  def parts_of($file; $row):
+    if ($row.of | type) == "array" then
+      ($row.suite // ($row.measurement | sub("/[^/]*$"; ""))) as $suite
+      | [$row.of[] | "\($suite)/\(.)"] as $names
+      | [$file.rows[] | select(.engine == $row.engine and (.config // .engine) == ($row.config // $row.engine)
+                               and .mode == $row.mode and .kpi == $row.kpi
+                               and (.measurement as $m | any($names[]; . == $m)))]
+    else [] end;
+  # Whether a figure was measured while another job ran on the build node: the row's loaded and,
+  # when loaded, its loaded_reason. A derived figure is loaded when it or any row it is made of
+  # is, with the reasons of those rows (one as a string, more as a list, as the result file
+  # writes them). A row without loaded gives no field: the file does not say.
+  def loaded_of($file; $row):
+    [$row, parts_of($file; $row)[] | select(.loaded == true)] as $hot
+    | if ($hot | length) > 0 then
+        ([$hot[] | .loaded_reason | if type == "array" then .[] else . end | select(. != null)] | unique) as $why
+        | {loaded: true} + (if ($why | length) == 0 then {} elif ($why | length) == 1 then {loaded_reason: $why[0]} else {loaded_reason: $why} end)
+      elif $row.loaded == false then {loaded: false}
+      else {} end;
   def result_cell($file; $row):
     if $row.status == "measured" then
       {status: "measured", value: $row.median, unit: $row.unit, runs: $row.runs,
-       min: ($row.values | min), max: ($row.values | max), basis: "swell-bench-\($file.host.runner // "run")",
-       source: {label: "our run, \($file.host.runner // "build node"), \($file.host.cpus // "?") CPUs",
+       min: ($row.values | min), max: ($row.values | max), basis: "swell-bench-\($file.host.runner // "run")"}
+      + loaded_of($file; $row)
+      + {source: {label: "our run, \($file.host.runner // "build node"), \($file.host.cpus // "?") CPUs",
                 url: gh($file.file; null), date: $file.date,
                 revision: "swell \($file.commit | tostring | short), \($row.engine) \($row.version)",
                 method: "\($row.measurement): median of \($row.runs) runs, min and max beside it"

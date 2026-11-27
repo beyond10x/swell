@@ -34,7 +34,22 @@ export interface Cell {
   min?: number;
   max?: number;
   secondary?: {value: number; of: number; percent: string; label: string};
+  /**
+   * A figure of our runs: true when it was measured while another job ran on the build node (a
+   * figure made of others, such as a geomean, when any of them was), false when measured alone;
+   * absent when the result file does not say.
+   */
+  loaded?: boolean;
+  /** Why it is loaded, when it is: neighbour, load or unwatched (bench/RUNBOOK.md); a list when more than one holds. */
+  loaded_reason?: string | string[];
   source?: Source;
+}
+
+/** The reasons of a loaded cell as one line: "neighbour", "neighbour, load". */
+export function loadedReasons(cell: Cell): string {
+  const r = cell.loaded_reason;
+  if (!r) return '';
+  return Array.isArray(r) ? r.join(', ') : r;
 }
 
 export interface Row {
