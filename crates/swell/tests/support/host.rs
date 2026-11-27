@@ -240,10 +240,11 @@ pub fn stack_with_room(limits: Limits) -> usize {
     limits.min_stack_bytes() / 8 * 7
 }
 
-/// The variable the lane's run of the collect mode at opt-level 1 sets for its test processes
-/// (task `slow-tests` of `Taskfile.yml`): that run holds no test that runs on a bounded stack,
-/// since such a test proves the stack with frames whose size depends on the optimization
-/// level and runs at opt-level 0 there.
+/// The variable the two runs at opt-level 1 that take the tests the stack rule prints "other"
+/// set for their test processes: the gate's run of this binary (task `test` of `Taskfile.yml`)
+/// and the lane's run of the collect mode (task `slow-tests`). Neither holds a test that runs
+/// on a bounded stack, since such a test proves the stack with frames whose size depends on
+/// the optimization level and runs at opt-level 0 in both places.
 pub const NO_STACK_TESTS: &str = "SWELL_NO_STACK_TESTS";
 
 /// The thread a test runs its body on with a stack of `bytes`: the one way of the tests to a
@@ -254,11 +255,11 @@ pub fn stack_thread(bytes: usize) -> std::thread::Builder {
 }
 
 /// The line a stack test fails with when it runs where [`NO_STACK_TESTS`] is set.
-pub const NO_STACK_TESTS_LINE: &str = "this test runs on a bounded stack, but SWELL_NO_STACK_TESTS is set: it runs in the lane's run at opt-level 1 (task slow-tests), because taskfiles/realm-room-tests.awk -v rule=stack did not find it; it must run at opt-level 0: call stack_with_room or stack_thread in the test's own text, or in a function the rule reads it through";
+pub const NO_STACK_TESTS_LINE: &str = "this test runs on a bounded stack, but SWELL_NO_STACK_TESTS is set: it runs at opt-level 1, in the gate's run of swell::main (task test) or in the lane's run of the collect mode (task slow-tests), because taskfiles/realm-room-tests.awk -v rule=stack did not find it; it must run at opt-level 0: call stack_with_room or stack_thread in the test's own text, or in a function the rule reads it through";
 
-/// Panics with [`NO_STACK_TESTS_LINE`] when [`NO_STACK_TESTS`] is set: a test the rule of
-/// `slow-tests` did not find fails in that run, by itself, instead of passing on frames of
-/// another size.
+/// Panics with [`NO_STACK_TESTS_LINE`] when [`NO_STACK_TESTS`] is set: a test the stack rule
+/// of `test` and `slow-tests` did not find fails in either run at opt-level 1, by itself,
+/// instead of passing on frames of another size.
 fn no_stack_test_here() {
     if std::env::var_os(NO_STACK_TESTS).is_some() {
         panic!("{NO_STACK_TESTS_LINE}");
