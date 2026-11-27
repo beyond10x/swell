@@ -369,6 +369,7 @@ fn host_error_object(
             brand: Brand(179),
             data: None,
             error_kind,
+            overrides: None,
         })
         .unwrap()
         .unwrap();
@@ -511,6 +512,7 @@ fn host_179_an_error_is_read_without_running_code() {
                 brand: Brand(1),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })

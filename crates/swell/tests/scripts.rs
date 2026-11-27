@@ -222,6 +222,7 @@ fn host_50_setup_this_is_script_this() {
                 brand: Brand(brand),
                 data: None,
                 error_kind: None,
+                overrides: None,
             };
             let global = cx.new_host_object(spec(1)).unwrap()?;
             let this = cx.new_host_object(spec(2)).unwrap()?;

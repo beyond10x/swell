@@ -26,7 +26,7 @@ use crate::host::outcome::{Completion, Termination};
 use crate::host::{ErrorKind, Host};
 use crate::object::builtin_function::KeptRoom;
 use crate::object::property::{Descriptor, Key, Property, Slot};
-use crate::object::{KeyList, KindTag, ObjectKind, key_list_bytes};
+use crate::object::{KeyList, ObjectKind, key_list_bytes};
 use crate::value::{ObjectRef, Value};
 use alloc::vec::Vec;
 
@@ -803,7 +803,7 @@ impl<H: Host> Agent<H> {
         let mut current = Some(object);
         while let Some(o) = current {
             self.charge_steps(1)?;
-            if !held && self.kind_of(o)? == KindTag::Proxy {
+            if !held && self.methods_may_run_code(o)? {
                 held = true;
                 self.keep_visited(visited, room)?;
                 self.record_chain_before(object, before, chain, room)?;
@@ -888,9 +888,10 @@ impl<H: Host> Agent<H> {
             match self.get_prototype_of(o)? {
                 Some(parent) => {
                     self.charge_steps(1)?;
-                    // The object before is no longer read; a Proxy parent runs traps next.
+                    // The object before is no longer read; a Proxy parent runs traps next, a
+                    // host parent with an override table its overrides.
                     self.release(mark);
-                    if self.kind_of(parent)? == KindTag::Proxy {
+                    if self.methods_may_run_code(parent)? {
                         self.keep(Value::Object(parent));
                     }
                     o = parent;

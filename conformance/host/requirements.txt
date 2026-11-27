@@ -38,7 +38,7 @@ HOST-37 test swell::scripts::host_37_throw_and_normal_completion_values
 HOST-38 pending slice 11
 HOST-39 pending slice 11
 HOST-40 pending slice 11
-HOST-41 pending slice 9
+HOST-41 test swell::host_overrides::host_41_a_global_object_that_refuses_a_clause_19_property_fails_create_realm
 HOST-42 pending slice 11
 HOST-43 pending slice 11
 HOST-44 pending slice 11
@@ -109,9 +109,9 @@ HOST-108 test swell::host_objects::host_108_host_data_checks_brand_and_type
 HOST-109 test swell::host_objects::host_109_trace_keeps_listed_values
 HOST-110 test swell::host_objects::host_110_trace_of_a_stale_handle_faults_collect
 HOST-111 test swell::host_objects::host_111_host_data_is_dropped_with_its_object
-HOST-112 pending slice 9
-HOST-113 pending slice 9
-HOST-114 pending slice 9
+HOST-112 test swell::host_overrides::host_112_a_non_configurable_property_reported_absent_later_faults_the_agent
+HOST-113 test swell::host_overrides::host_113_a_descriptor_that_is_not_fully_populated_faults_the_agent
+HOST-114 test swell::host_overrides::host_114_each_override_runs_and_a_missing_one_runs_the_ordinary_method
 HOST-115 pending slice 18
 HOST-116 test swell::eval::host_116_eval_asks_the_host_before_parsing
 HOST-117 test swell::dynamic_function::host_117_function_asks_the_host_with_its_parts
@@ -219,4 +219,4 @@ HOST-218 test swell::host_objects::host_218_trace_keeps_a_listed_string_and_symb
 HOST-219 pending slice 12
 HOST-220 test swell::values::host_220_to_utf16_len_counts_code_units
 HOST-221 test swell::interrupt::host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run
-HOST-222 pending slice 9
+HOST-222 test swell::host_overrides::host_222_an_override_result_with_a_stale_handle_faults_the_agent
