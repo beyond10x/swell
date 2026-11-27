@@ -117,6 +117,12 @@ tasks:
       naming the build task that builds what it compiled (task compile-check). The doc tests
       are the exception: rustdoc compiles them when it runs them, so test-doc's seconds hold
       that compilation.
+
+      Right after gate-time-start, before the first test step, the gate prints the machine it
+      runs on, one line "gate-runner: <n> cores, <cpu>, <memory>, sh is <sh>" (task slow-runner
+      with LABEL gate-runner), so that two runs on the same code whose seconds differ can be
+      read against their machines: the forge ran the test steps on the same code in 77.2 s and
+      in 147.6 s, and its log did not name the runner's CPU.
     cmds:
       - task: gate-vars
       - task: python-check
@@ -142,6 +148,8 @@ tasks:
       - task: build-tests
       - task: clippy
       - task: gate-time-start
+      - task: slow-runner
+        vars: {LABEL: gate-runner}
       - task: test
       - task: gate-time
         vars: {STEP: test}
@@ -231,10 +239,11 @@ tasks:
       - task: slow-time-sum
 
   slow-runner:
-    desc: Internal, called by slow after gate-time-start. Print one line that names the machine the lane runs on; it never fails.
+    desc: Internal, called by slow and by check after gate-time-start. Print one line that names the machine the lane or the gate runs on; it never fails.
     summary: |
-      Internal, called by the lane slow right after gate-time-start. Prints one line,
-      "slow-runner: <n> cores, <cpu>, <memory>, sh is <sh>": the number of processors online
+      Internal, called right after gate-time-start by the lane slow and by the gate check (with
+      LABEL gate-runner, before its first test step). Prints one line, "<LABEL>: <n> cores,
+      <cpu>, <memory>, sh is <sh>", LABEL default slow-runner: the number of processors online
       (getconf _NPROCESSORS_ONLN, else the processor lines of /proc/cpuinfo; "cores not read"
       when neither gives a number), the first "model name" of /proc/cpuinfo ("cpu not read"
       when the file is missing or has none, as on most ARM machines), MemTotal of
@@ -242,12 +251,19 @@ tasks:
       the forge's runner, "bash" here; "/bin/sh, not a link" or "not read" otherwise). The
       forge ran the lane twice on the same code in 882.6 s and 1,142.0 s, its single tests 1.4
       to 1.56 times slower in the second run and its builds 1.11 to 1.14 times, and its log
-      did not name the runner's CPU. POSIX sh and awk only; whatever it cannot read, it exits
-      0. tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh reads the line in
-      the output of task slow.
+      did not name the runner's CPU; it ran the gate's test steps twice on the same code in
+      77.2 s and 147.6 s, 1.94 times the CPU seconds. The line is written in one place, here,
+      for both. POSIX sh and awk only; whatever it cannot read, it exits 0.
+      tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh reads the line in the
+      output of task slow, and
+      tests/gate/check-prints-the-runner-line-before-its-first-test-step.sh holds the line of
+      check.
     silent: true
+    vars:
+      LABEL: '{{.LABEL | default "slow-runner"}}'
     cmds:
       - |
+        label={{shellQuote .LABEL}}
         cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null) || cores=
         case "$cores" in ''|*[!0-9]*) cores=$(awk '/^processor[ \t]*:/ { n++ } END { if (n) print n }' /proc/cpuinfo 2>/dev/null) || cores= ;; esac
         case "$cores" in ''|*[!0-9]*) cores="cores not read" ;; *) cores="$cores cores" ;; esac
@@ -257,7 +273,7 @@ tasks:
         [ -n "$mem" ] || mem="memory not read"
         sh=$(ls -l /bin/sh 2>/dev/null | awk '{ i = index($0, " -> "); print (i ? substr($0, i + 4) : "/bin/sh, not a link"); exit }') || sh=
         [ -n "$sh" ] || sh="not read"
-        echo "slow-runner: $cores, $cpu, $mem, sh is $sh"
+        echo "$label: $cores, $cpu, $mem, sh is $sh"
 
   slow-collect-start:
     desc: Internal, called by slow after gate-time-start. Start the build of the profile collect that slow-tests and test-realm-sizes run on in the background, and return.
