@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:55:32Z",
+  "actor": "human:operator",
+  "artifact": "story:set-methods",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 8ab9456, exit 0, on the build node; the unit was merged by commit fbddbb50, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/builtins_set_methods.rs (swell::builtins_set_methods::*) and the cases of docs/plan/slice-09/story-set-methods.cases.txt in conformance/test262/expected.txt"
+  }
+}

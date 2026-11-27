@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:weak-map-and-weak-set
 kind: story
-status: active
+status: implemented
 title: WeakMap and WeakSet with symbol keys, getOrInsert, and ephemeron clearing in the collector
 summary: object/weak_collection.rs, linear ephemeron marking with a pending head per slot and clearing after marking, CanBeHeldWeakly; order 3; 247 cases.
 relations:
@@ -42,10 +42,11 @@ scope:
   path: crates/swell/tests/builtins_weak_collections.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:32Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":4,"verification":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 

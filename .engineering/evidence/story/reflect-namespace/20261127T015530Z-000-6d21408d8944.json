@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:55:30Z",
+  "actor": "human:operator",
+  "artifact": "story:reflect-namespace",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 8ab9456, exit 0, on the build node; the unit was merged by commit dc310c6c, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/builtins_reflect.rs (swell::builtins_reflect::*) and the cases of docs/plan/slice-09/story-reflect.cases.txt in conformance/test262/expected.txt"
+  }
+}

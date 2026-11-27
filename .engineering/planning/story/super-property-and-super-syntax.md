@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:super-property-and-super-syntax
 kind: story
-status: active
+status: implemented
 title: 'super outside classes: SuperProperty and SuperCall grammar, their early errors, super.x in object-literal methods'
 summary: 66 cases (128 runs); super in an arrow and in eval code are held for the derived story.
 relations:
@@ -56,10 +56,11 @@ scope:
   path: crates/syntax/tests/sources/refused/super.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/super-property.js
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:44Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:44Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:31Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

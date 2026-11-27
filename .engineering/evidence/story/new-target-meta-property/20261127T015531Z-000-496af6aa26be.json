@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:55:31Z",
+  "actor": "human:operator",
+  "artifact": "story:new-target-meta-property",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 8ab9456, exit 0, on the build node; the unit was merged by commit 334790ab, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/new_target.rs (swell::new_target::*) and the cases of docs/plan/slice-08/story-new-target.cases.txt in conformance/test262/expected.txt"
+  }
+}
