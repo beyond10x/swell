@@ -400,6 +400,46 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
+- The gate's step `test` runs each test once in two runs
+  (story gate-test-steps-hold-the-budget-on-the-slower-runner): the tests of swell's
+  integration-test binary (`swell::main`) that `taskfiles/realm-room-tests.awk -v rule=stack`
+  prints "other" run at opt-level 1 (`TEST_OPT1_ARGS`: the profile `collect` without the
+  feature `collect-every-safe-point`, with `SWELL_NO_STACK_TESTS=1`), 1,647 of the binary's
+  1,770; the stack tests, the tests a macro writes and every other test of the workspace run
+  at opt-level 0 with `TEST_NEXTEST_ARGS` unchanged. The internal task `test-split` fails,
+  naming the test, when `cargo nextest list` puts a test in not exactly one run or when the
+  run at opt-level 1 does not hold the profile's test, and prints `test: swell::main <a> at
+  opt-level 1, <b> at opt-level 0`; `test-sum` prints one line of counts for both runs
+  (`ignored`: the tests neither run ran) and the ten slowest over both. `build-tests` builds
+  the binary at opt-level 1 before the clock, before `build-collect`, whose `.debug_` check
+  covers it. Debug assertions and overflow checks stay on in that run: the test
+  `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on` fails when the
+  profile it is built in turns either off, and `build-tests` refuses, naming file and line, a
+  profile of one package or of build scripts in the profile `dev` or `test`, a definition of
+  the profile `collect` outside `.cargo/collect-profile.toml`, and a key `include` at the top
+  of `.cargo/config.toml` (internal task `test-opt1-profile-check`). The steps `test` and
+  `build-tests` refuse a caller's value of `TEST_OPT1_ARGS`, `NO_STACK_TESTS` and
+  `TEST_OPT1_PROFILE_TEST` (internal task `test-opt1-vars-check`). The guard's line
+  (`NO_STACK_TESTS_LINE`) names both runs at opt-level 1, the gate's (task `test`) and the
+  lane's (task `slow-tests`). On a build node of 32 cores the CPU seconds of the test steps
+  went from 416.9 to 315.9, from 314.1 to 245.6 and from 476.5 to 348.7 in three pairs of
+  whole gates (ratios 0.76, 0.78 and 0.73; the readings of one code differ by up to half on
+  that node), the step `test` from 231.9 to 141.7, from 191.6 to 118.7 and from 294.3 to
+  160.2; the build of the binary at opt-level 1 took 5 min 14 s to 8 min 44 s there. Planted
+  scripts under
+  `tests/gate/`: `test-runs-each-test-once-at-one-opt-level.sh`,
+  `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
+  `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh`,
+  `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh`,
+  `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh` and
+  `build-tests-refuses-a-profile-its-profile-test-does-not-see.sh`.
+- The gate names the machine its test steps run on: `task check` prints, after
+  `gate-time-start` and before its first test step, one line `gate-runner: <n> cores,
+  <model name>, <MemTotal> kB, sh is <sh>`, from the task `slow-runner` with the label
+  `gate-runner` (the lane `slow` keeps its line `slow-runner: ...`; the line is written in
+  one place). The planted script
+  `tests/gate/check-prints-the-runner-line-before-its-first-test-step.sh` holds it
+  (story gate-test-steps-hold-the-budget-on-the-slower-runner).
 - The interpreter spends fewer CPU seconds per instruction in a loop of the kind of the test262
   harness's `buildString` (story property-escape-cases-spend-less-in-the-interpreter-loop): a
   push of a value and a replace of the operand stack write in place, the next instruction is

@@ -8,7 +8,7 @@ summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in
 relations:
 - informed_by: story:realm-size-lane-within-its-share
 - informed_by: story:slow-lane-holds-its-bound-on-the-slower-runner
-revision: 6
+revision: 7
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T10:38:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T10:38:24Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
@@ -270,3 +270,79 @@ Checked on the unit's report:
   cut them.
 - The lane `slow`: `story:slow-lane-holds-its-bound-on-the-slower-runner`.
 - The interpreter's speed: `story:property-escape-cases-spend-less-in-the-interpreter-loop`.
+
+## As delivered
+
+The unit `lanesix` of wave big-2 delivered the story on `impl/lanesix` (two corrections after
+two adversary passes), merged into `wave/big-2`. Where the delivery differs from the text
+above, and what was measured:
+
+- Item 1 (`92f3d55`): the line `gate-runner: ...` in the log of `check`, as written.
+- Item 3 (`4d04f9dd`, `1bdddc9a`, `1910825c`): the step `test` in two runs. On the head
+  `test: swell::main 1647 at opt-level 1, 123 at opt-level 0`; `19 test binaries: 2532
+  passed, 0 failed, 1 ignored` (2531 on the base: the new test). The new test is
+  `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on`; with
+  `--config 'profile.collect.debug-assertions=false'` and with `--config
+  'profile.collect.overflow-checks=false'` it fails with its own text for each.
+- Differences from the story's text:
+  - The count of test binaries in the summed line is read from the run at opt-level 0,
+    whose line counts every binary of the workspace (19), not from the lists, which name
+    only the 14 binaries that hold tests.
+  - The step takes `cargo nextest list` three times inside the clock.
+  - The task `test-split` sets `RUSTFLAGS` itself (a task's `env` does not reach the tasks
+    it calls), and a list that compiles fails the step.
+  - The lane's `slow-tests` prints the same binaries, passed and failed on base and head;
+    each of its `ignored` counts reads one more on the head, because the new test is in
+    `swell::main` and outside the lane's filter.
+  - The profile's two checks with the `--config` keys were run before the commit of the
+    test and again by the adversary's first pass on `808f926b`.
+- The CPU seconds of the test steps, whole gates on a build node of 32 cores, base
+  `f93ab563` against head `1910825c`:
+  - pair 1: 441.5 (load 30.8) against 232.4 (load 10.1): the loads differ by more than 5,
+    the pair does not count;
+  - pair 1 taken again: 416.9 (load 36.7) against 315.9 (load 38.5), ratio 0.758; the
+    head's gate exited non-zero on wall time alone (the test steps 136.7 s of 120 at a load
+    above the core count, the untouched step `test-collect` 52.1 s);
+  - pair 2: 314.1 (load 16.3) against 245.6 (load 19.5), ratio 0.782.
+  Two pairs count and are at or under 0.80. The step `test` alone went from 231.9 to 141.7
+  and from 191.6 to 118.7.
+- After the corrections the coordinator took one more pair on `362b69b1`, each side two
+  gates in a row: the second gates (nothing built) read 476.5 against 348.7 (loads 15.4
+  and 14.1), ratio 0.732; the first gates read 294.0 against 338.4 (loads 13.5 and 10.0),
+  ratio 1.151.
+- That last pair is not a reading of the unit: in it the step `test-collect`, which the
+  unit does not change, read 64.8 CPU seconds on the base and 121.1 on the head. Across
+  the gates of this unit that step read 64.8 to 127.9 on one code and one node: the node
+  gives two levels of CPU seconds for the same work, and the load does not say which.
+  Read against `test-collect` of the same gate, the step `test` costs 2.2 to 2.9 times
+  that step on the base (four gates) and 1.25 to 1.74 times on the head (seven gates).
+  At one level the pairs read 0.73 to 0.78; a base at the lower level against the one
+  head read there (294.0 against 245.6) reads 0.84. The cut is about a quarter of the
+  test steps; the node cannot show a margin under the bound of 0.80.
+- Item 4: no entry for 32 cores in `CPU_BOUNDS_BY_CORES`. The highest head is 315.9 and the
+  lowest base 314.1; an entry needs the head at 0.64 of the base. The local gate still
+  cannot see the forge's wall time.
+- The build before the clock: `build-tests` with a target directory of its own took 473.0 s
+  on the base and 883.9 s on the head (loads 8 to 15 and 20 to 32; 1,078,024 and 1,134,912
+  kB); the binary at opt-level 1 alone 5 min 34 s to 8 min 44 s after a change of swell's
+  tests. `build-collect` counts one test executable more.
+- The adversary's first pass (`review-result:adversary-lanesix-pass-1`) found that a
+  caller's value of `TEST_OPT1_ARGS` or `NO_STACK_TESTS` was accepted, that the summed line
+  failed when `task` was called by a relative path, and that nothing kept the profile's
+  test in the run at opt-level 1. Correction 1 (`69868891`, `4ad70476`, `c63040c1`) added
+  the internal tasks `test-opt1-vars-check` and `test-opt1-profile-check`, the variable
+  `TEST_OPT1_PROFILE_TEST` and four planted scripts.
+- The second pass (`review-result:adversary-lanesix-pass-2`) found that the profile check
+  did not read an included cargo configuration and that `test-split` failed without a line
+  of its own with no support file. Correction 2 (`ef47efb7`, `362b69b1`) refuses the
+  include, narrows the check to the profiles `dev`, `test` and `collect`, gives the step
+  its line, and adds a sixth planted script. `gate-selftest` reads 112 passed.
+- Limits that stay, stated in the tasks' summaries: the profile check does not read a cargo
+  configuration file outside the tree, a key written with an escape or an inline table
+  over several lines; the summed line of a run that a signal ends undercounts while the
+  step is red; the tasks described as internal can be called by name.
+- Not the unit's and left as they were: the loop form that ends a command silently in two
+  tasks of the lane `slow`, and the path of the executable in `check-runner`.
+- The acceptance on the forge (the test steps of the first attempt of `check` against its
+  yardstick and the budget, the duration of the job, the lane's `slow-time slow-tests`) is
+  read on the wave's second pull request.
