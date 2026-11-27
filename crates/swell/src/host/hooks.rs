@@ -190,7 +190,14 @@ pub trait Host: Sized + 'static {
     }
 
     /// HostEnsureCanAddPrivateElement (`#sec-hostensurecanaddprivateelement`): the default
-    /// "Return NormalCompletion(unused)".
+    /// "Return NormalCompletion(unused)". The engine calls it only for a host object with an
+    /// override table (`HostObjectSpec::overrides`), before a private field (HOST-119), a private
+    /// method or a private accessor (HOST-223) is added to it, once per element (a getter and a
+    /// setter of one name are one element); for any other object it calls nothing. A `Throw` is
+    /// the add's throw, and the element is not added; a `Throw` value that holds a stale handle
+    /// or a handle of another agent ends the run in `Terminated(EngineFault)` (decision 6). A set
+    /// interrupt flag ends the run before the element is added. The `HookCx` runs no code and
+    /// is no safe point.
     fn host_ensure_can_add_private_element(
         _cx: &mut HookCx<'_, Self>,
         _obj: ObjectRef,

@@ -179,6 +179,8 @@ mod object_patterns;
 mod objects;
 #[cfg(any(not(test_modules), test_modules = "parameters"))]
 mod parameters;
+#[cfg(any(not(test_modules), test_modules = "private_element_hook"))]
+mod private_element_hook;
 #[cfg(any(not(test_modules), test_modules = "private_fields"))]
 mod private_fields;
 #[cfg(any(not(test_modules), test_modules = "private_methods"))]
