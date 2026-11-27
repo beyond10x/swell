@@ -276,10 +276,15 @@ fn a_throw_of_the_iterator_closes_nothing_and_a_throw_of_resolve_closes_it() {
 /// The number of pending promises of
 /// [`the_values_of_a_pending_promise_all_are_charged_until_it_settles`].
 /// 1,000 in the default mode; with the feature `collect-every-safe-point`, where every
-/// instruction of the loops that make and settle the promises collects the heap, 20 (50 took
-/// 2.5 s of nextest time on the build node).
+/// instruction of the loops that make and settle the promises collects the heap, 12 (50 took
+/// 2.5 s of nextest time on the build node). The test runs four times [`PENDING`] promises
+/// (a first round of twice as many, the race round, the measured round) at about 0.11 s each
+/// in that mode in the test profile, opt-level 0: 20 took 2.2 s alone on 2026-11-27, about
+/// half of it making the promises and two fifths settling them, and 12 took 1.3 s. A box
+/// charged twice and credited once still leaves 144 bytes per promise against the 32 of the
+/// room of the Array of values, whatever the count.
 const PENDING: u32 = if cfg!(feature = "collect-every-safe-point") {
-    20
+    12
 } else {
     1_000
 };
