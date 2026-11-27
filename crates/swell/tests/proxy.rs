@@ -892,8 +892,8 @@ const SQUARE_REENTRY: u32 = BUILTINS_REENTRY / 2;
 
 /// One stack test per route in the default mode: [`chain_at_the_bound`] at `BUILTINS_REENTRY`
 /// (or the depth given after the route) in a child process on seven eighths of
-/// `min_stack_bytes()` of that depth. With the feature `collect-every-safe-point` one test runs
-/// every route instead (`chains_of_every_route_on_the_promised_stack`): the stack per level
+/// `min_stack_bytes()` of that depth. With the feature `collect-every-safe-point` three tests run
+/// every route instead (`combined_chain_test`, a part of the routes each): the stack per level
 /// does not depend on the collector, and a chain test per route there took 2.4 to 4.6 CPU
 /// seconds.
 macro_rules! chain_test {
@@ -1137,33 +1137,43 @@ const ROUTES: [&Route; 22] = [
     &FOR_IN,
 ];
 
-/// The `reentry_depth` of [`chains_of_every_route_on_the_promised_stack`].
+/// The `reentry_depth` of the tests made by [`combined_chain_test`].
 #[cfg(feature = "collect-every-safe-point")]
 const COMBINED_REENTRY: u32 = 4;
 
-/// With the feature `collect-every-safe-point`, one test covers the routes of the default mode's
-/// chain tests: every route of [`ROUTES`] by [`chain_at_the_bound`] in one agent of
-/// `reentry_depth` `COMBINED_REENTRY`, on seven eighths of the `min_stack_bytes()` of that
-/// depth. A value held without a root shows at any depth, while the collections at every safe
-/// point cost with the length of each chain; the formula of [`allowed_depth`] is checked at a
-/// third `reentry_depth` besides.
-#[cfg(feature = "collect-every-safe-point")]
-#[test]
-fn chains_of_every_route_on_the_promised_stack() {
-    fn body() {
-        let (mut agent, realm) = stack_agent(COMBINED_REENTRY);
-        for route in ROUTES {
-            chain_at_the_bound(&mut agent, &realm, route, COMBINED_REENTRY);
+/// With the feature `collect-every-safe-point`, three tests cover the routes of the default
+/// mode's chain tests: each runs a part of [`ROUTES`] (the three parts together are all of it)
+/// by [`chain_at_the_bound`] in one agent of `reentry_depth` `COMBINED_REENTRY`, on seven
+/// eighths of the `min_stack_bytes()` of that depth. A value held without a root shows at any
+/// depth, while the collections at every safe point cost with the length of each chain; the
+/// formula of [`allowed_depth`] is checked at a third `reentry_depth` besides. Three parts, not
+/// one test: all 22 routes in one took 1.83 to 2.51 CPU seconds alone, near the bound of 2.
+macro_rules! combined_chain_test {
+    ($name:ident, $routes:expr) => {
+        #[cfg(feature = "collect-every-safe-point")]
+        #[test]
+        fn $name() {
+            fn body() {
+                let (mut agent, realm) = stack_agent(COMBINED_REENTRY);
+                for route in $routes {
+                    chain_at_the_bound(&mut agent, &realm, route, COMBINED_REENTRY);
+                }
+            }
+            let stack = stack_with_room(stack_limits(COMBINED_REENTRY));
+            on_bounded_stack(test_path!(stringify!($name)), stack, body).unwrap();
         }
-    }
-    let stack = stack_with_room(stack_limits(COMBINED_REENTRY));
-    on_bounded_stack(
-        test_path!("chains_of_every_route_on_the_promised_stack"),
-        stack,
-        body,
-    )
-    .unwrap();
+    };
 }
+
+combined_chain_test!(chains_of_routes_1_to_8_on_the_promised_stack, &ROUTES[..8]);
+combined_chain_test!(
+    chains_of_routes_9_to_15_on_the_promised_stack,
+    &ROUTES[8..15]
+);
+combined_chain_test!(
+    chains_of_routes_16_to_22_on_the_promised_stack,
+    &ROUTES[15..]
+);
 
 /// The `reentry_depth` of the tests that check that no Proxy count is left behind.
 const EXACT_DEPTH: u32 = 20;
@@ -1634,16 +1644,27 @@ fn with_over_a_proxy_reads_in_the_order_of_the_object_environment() {
     );
 }
 
+/// The helpers of the tests of every invariant: `attempt` answers a call's value (`-0` for
+/// negative zero) or the name of what it threw, `fixed` an object with the property `k` defined
+/// by a descriptor.
+const INVARIANT_HELPERS: &str = "var r = [];\n\
+     function attempt(f) { try { var v = f(); return typeof v === \"number\" && v === 0 && 1 / v < 0 ? \"-0\" : String(v); } catch (e) { return e.name; } }\n\
+     function fixed(desc) { var t = {}; Object.defineProperty(t, \"k\", desc); return t; }\n";
+
 /// Every invariant of the six traps, the case that must throw and its nearest case that must
 /// not, SameValue for `+0`/`-0` and NaN; the same with a target that is itself a Proxy, whose
-/// [[GetOwnProperty]] the invariant read forwards through.
+/// [[GetOwnProperty]] the invariant read forwards through. In three tests, each within the CPU
+/// bound of the lane's collect build (one test took 1.95 CPU seconds alone): this one the `get`
+/// and `set` traps, `each_invariant_both_sides_of_has_and_delete_property` the failed set and
+/// delete in strict code, `has` and `deleteProperty`, and
+/// `each_invariant_both_sides_of_construct_and_a_proxy_target` `construct` and a target that is
+/// a Proxy.
 #[test]
 fn each_invariant_both_sides() {
     answers(
-        "var r = [];\n\
-         function attempt(f) { try { var v = f(); return typeof v === \"number\" && v === 0 && 1 / v < 0 ? \"-0\" : String(v); } catch (e) { return e.name; } }\n\
-         function fixed(desc) { var t = {}; Object.defineProperty(t, \"k\", desc); return t; }\n\
-         function getter(desc, answer) { return attempt(function () { return new Proxy(fixed(desc), { get: function () { return answer; } }).k; }); }\n\
+        &[
+            INVARIANT_HELPERS,
+            "function getter(desc, answer) { return attempt(function () { return new Proxy(fixed(desc), { get: function () { return answer; } }).k; }); }\n\
          var noGet = { set: function (v) {} };\n\
          r.push(getter({ value: 1 }, 2), getter({ value: 1 }, 1), getter({ value: 0 }, -0), getter({ value: -0 }, 0), getter({ value: -0 }, -0),\n\
            getter({ value: NaN }, NaN), getter({ value: \"ab\" }, \"a\" + \"b\"), getter({ value: 1, writable: true }, 2), getter({ value: 1, configurable: true }, 2),\n\
@@ -1653,7 +1674,22 @@ fn each_invariant_both_sides() {
          r.push(\"|\", setter({ value: 1 }, 2, true), setter({ value: 1 }, 1, true), setter({ value: 0 }, -0, true), setter({ value: NaN }, NaN, true),\n\
            setter({ value: 1 }, 2, false), setter({ value: 1, writable: true }, 2, true), setter({ get: function () {} }, 1, true),\n\
            setter({ get: function () {} }, 1, false), setter({ set: function (v) {} }, 1, true), setter({ value: 1 }, 2, \"yes\"), setter({ value: 1 }, 2, 0));\n\
-         var sp = new Proxy({}, { set: function () { return false; } });\n\
+         r.join();",
+        ]
+        .concat(),
+        "TypeError,1,TypeError,TypeError,-0,NaN,ab,2,2,undefined,TypeError,TypeError,2,1,\
+         |,TypeError,true,TypeError,true,false,true,TypeError,false,true,TypeError,false",
+    );
+}
+
+/// The second part of [`each_invariant_both_sides`]: a `set` and a `deleteProperty` trap that
+/// answer false, in strict and in sloppy code; the invariants of `has` and `deleteProperty`.
+#[test]
+fn each_invariant_both_sides_of_has_and_delete_property() {
+    answers(
+        &[
+            INVARIANT_HELPERS,
+            "var sp =new Proxy({}, { set: function () { return false; } });\n\
          var dp = new Proxy({ x: 1 }, { deleteProperty: function () { return false; } });\n\
          r.push(attempt(function () { \"use strict\"; sp.x = 1; return \"assigned\"; }), attempt(function () { return Function(\"sp\", \"sp.x = 1; return 'assigned';\")(sp); }),\n\
            attempt(function () { \"use strict\"; return delete dp.x; }), attempt(function () { return Function(\"dp\", \"return delete dp.x;\")(dp); }));\n\
@@ -1663,8 +1699,24 @@ fn each_invariant_both_sides() {
          function deleter(t, answer) { return attempt(function () { return Reflect.deleteProperty(new Proxy(t, { deleteProperty: function () { return answer; } }), \"k\"); }); }\n\
          r.push(\"|\", deleter(fixed({ value: 1 }), true), deleter(fixed({ value: 1 }), false), deleter(Object.preventExtensions({ k: 1 }), true),\n\
            deleter(Object.preventExtensions({}), true), deleter({ k: 1 }, true), deleter(fixed({ value: 1, configurable: true }), 1));\n\
-         function constructed(answer) { return attempt(function () { return typeof new (new Proxy(function () {}, { construct: function () { return answer; } }))(); }); }\n\
-         r.push(\"|\", constructed(1), constructed(null), constructed(undefined), constructed(Symbol()), constructed(\"s\"), constructed(function () {}), constructed([]));\n\
+         r.join();",
+        ]
+        .concat(),
+        "TypeError,assigned,TypeError,false,\
+         |,TypeError,false,TypeError,false,true,false,TypeError,\
+         |,TypeError,false,TypeError,true,true,true",
+    );
+}
+
+/// The third part of [`each_invariant_both_sides`]: the answer of a `construct` trap, and the
+/// invariants of `get`, `has`, `deleteProperty` and `set` over a target that is itself a Proxy.
+#[test]
+fn each_invariant_both_sides_of_construct_and_a_proxy_target() {
+    answers(
+        &[
+            INVARIANT_HELPERS,
+            "function constructed(answer) { return attempt(function () { return typeof new (new Proxy(function () {}, { construct: function () { return answer; } }))(); }); }\n\
+         r.push(constructed(1), constructed(null), constructed(undefined), constructed(Symbol()), constructed(\"s\"), constructed(function () {}), constructed([]));\n\
          var frozen = Object.freeze({ k: 1 });\n\
          function inner() { return new Proxy(frozen, { get: function () { return 2; }, has: function () { return false; } }); }\n\
          r.push(\"|\", attempt(function () { return new Proxy(inner(), { get: function () { return 2; } }).k; }),\n\
@@ -1673,11 +1725,9 @@ fn each_invariant_both_sides() {
            attempt(function () { return Reflect.set(new Proxy(inner(), { set: function () { return true; } }), \"k\", 2); }),\n\
            attempt(function () { return new Proxy(inner(), { get: function () { return 1; } }).k; }));\n\
          r.join();",
-        "TypeError,1,TypeError,TypeError,-0,NaN,ab,2,2,undefined,TypeError,TypeError,2,1,\
-         |,TypeError,true,TypeError,true,false,true,TypeError,false,true,TypeError,false,TypeError,assigned,TypeError,false,\
-         |,TypeError,false,TypeError,false,true,false,TypeError,\
-         |,TypeError,false,TypeError,true,true,true,\
-         |,TypeError,TypeError,TypeError,TypeError,TypeError,function,object,\
+        ]
+        .concat(),
+        "TypeError,TypeError,TypeError,TypeError,TypeError,function,object,\
          |,TypeError,TypeError,TypeError,TypeError,1",
     );
 }
