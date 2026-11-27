@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T02:54:52Z",
+  "actor": "human:operator",
+  "artifact": "story:derived-classes-and-super-call",
+  "kind": "story",
+  "revision": 15,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/derived at 6ae01278, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax main 79 passed (79 at full counts); swell-compiler main 17 passed; swell main 1549 passed, 1 skipped; swell main with collect-every-safe-point 1528 passed, 1 skipped; swell lib 278 passed; test-stack-profiles release and stack-debug 4 passed each; task clippy exit 0; cargo fmt --check exit 0"
+  }
+}
