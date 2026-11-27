@@ -142,6 +142,26 @@ fn blocks_and_static_fields_run_in_source_order() {
     );
 }
 
+/// A method or an accessor between static fields ends their run (`docs/design/engine.md`,
+/// "Classes", item 4: one function per run of consecutive static fields), so the static elements
+/// after it are called too, in source order: a static field, a method, a static field, a block that
+/// reads both, a static accessor, a static field; the answer names every value in order.
+#[test]
+fn a_method_between_static_fields_ends_their_run() {
+    let source = "var log = [];\n\
+         class C {\n\
+           static a = log.push(\"a\");\n\
+           m() {}\n\
+           static b = log.push(\"b\");\n\
+           static { log.push(\"block \" + this.a + \" \" + this.b); }\n\
+           static get g() { return \"g\"; }\n\
+           static c = log.push(\"c\");\n\
+         }\n\
+         log.join() + \"|\" + [C.a, C.b, C.c, C.g].join();";
+    let answer = Outcome::Normal("\"a,b,block 1 2,c|1,2,4,g\"".to_string());
+    assert_eq!(run_both(source), (answer.clone(), answer), "{source}");
+}
+
 /// ClassDefinitionEvaluation, step 31.b: an abrupt completion of a block ends the class's
 /// definition (`static-init-abrupt.js`): the rest of the block, the fields and blocks after it do
 /// not run; the class scope's own name is initialized (step 27), so an arrow made in the block
