@@ -235,7 +235,10 @@ pub fn parse_eval(
     parse_eval_with(source, context, options, &mut Unlimited).map_err(Failure::into_errors)
 }
 
-/// [`parse_eval`] charged to `ledger` (the module's documentation).
+/// [`parse_eval`] charged to `ledger` (the module's documentation). The ContainsArguments error
+/// of [`EvalContext::in_class_field_initializer`] is answered before a refusal the parser held in
+/// the eval code, as the parser's rule on holds orders every error before a held refusal
+/// (`Parser::hold`), so such eval code counts no refusal.
 pub fn parse_eval_with(
     source: &[u16],
     context: impl Into<EvalContext>,

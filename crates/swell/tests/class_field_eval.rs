@@ -114,14 +114,21 @@ fn indirect_eval_of_arguments_reads_the_global_binding() {
 }
 
 /// ContainsArguments looks into arrow functions and no other function: in the eval code of an
-/// initializer a function expression, a method, an accessor, a generator and a class's method
-/// have `arguments` of their own; a property name, a string and a member name `arguments` are
-/// no IdentifierReference; a direct eval in a function made in the initializer is that
-/// function's, with its own `arguments`.
+/// initializer a function declaration and a function expression, a generator declaration and
+/// expression, an `async` function and an `async` method (each reads `arguments` before its
+/// first `await`), a method, a getter and a setter, and a class's constructor and method have
+/// `arguments` of their own; a property name, a string and a member name `arguments` are no
+/// IdentifierReference; a direct eval in a function made in the initializer is that function's,
+/// with its own `arguments`.
 #[test]
 fn arguments_in_a_function_inside_the_eval_is_allowed() {
     both_pass(
         "class C {\n\
+           declaration = eval(\"function f() { return arguments.length; } f(1, 2)\");\n\
+           generator = eval(\"function* g() { yield arguments.length; } g(1, 2, 3, 4).next().value\");\n\
+           asyncFunction = eval(\"var n; (async function () { n = arguments.length; })(1, 2, 3); n\");\n\
+           asyncMethod = eval(\"var n; ({ async m() { n = arguments.length; } }).m(1); n\");\n\
+           setter = eval(\"var n, o = { set s(v) { n = arguments.length; } }; o.s = 1; n\");\n\
            a = eval(\"(function () { return arguments.length; })(7, 8)\");\n\
            b = eval(\"({ m() { return arguments[0]; } }).m(3)\");\n\
            c = eval(\"({ get g() { return typeof arguments; } }).g\");\n\
@@ -133,8 +140,31 @@ fn arguments_in_a_function_inside_the_eval_is_allowed() {
            static s = eval(\"(function () { return arguments.length; })(1)\");\n\
          }\n\
          var c = new C();\n\
-         c.a === 2 && c.b === 3 && c.c === \"object\" && c.d === 3 && c.e === 1 && c.f === 13\n\
+         c.declaration === 2 && c.generator === 4 && c.asyncFunction === 3 && c.asyncMethod === 1\n\
+           && c.setter === 1\n\
+           && c.a === 2 && c.b === 3 && c.c === \"object\" && c.d === 3 && c.e === 1 && c.f === 13\n\
            && c.g === 5 && new c.h().m(1, 2) === 2 && C.s === 1;",
+    );
+}
+
+/// inClassFieldInitializer is set only where GetThisEnvironment is a field initializer's: a
+/// direct eval in a method, a static method, a getter and the constructor body of a class with
+/// fields, and in a method of an object literal, is in a function with a [[HomeObject]] (so
+/// inMethod is set there) but no [[ClassFieldInitializerName]], and reads that function's
+/// `arguments`.
+#[test]
+fn eval_of_arguments_in_a_method_of_a_class_with_fields_reads_its_own() {
+    both_pass(
+        "class C {\n\
+           f = 1;\n\
+           constructor() { this.c = eval(\"arguments.length\"); }\n\
+           m() { return eval(\"arguments.length\"); }\n\
+           static n() { return eval(\"arguments.length\"); }\n\
+           get g() { return eval(\"typeof arguments + arguments.length\"); }\n\
+         }\n\
+         var o = { m() { return eval(\"arguments.length\"); } };\n\
+         var c = new C(1, 2, 3, 4);\n\
+         c.c === 4 && c.m(1, 2) === 2 && C.n(1) === 1 && c.g === \"object0\" && o.m(1, 2, 3) === 3;",
     );
 }
 
