@@ -703,6 +703,10 @@ pub struct Class {
     /// The constructor, a function of kind [`FunctionKind::ClassConstructor`]: the written one
     /// or the default one.
     pub constructor: FunctionId,
+    /// Whether `constructor` is the default one the parser made (ClassDefinitionEvaluation,
+    /// step 14: ConstructorMethod of the ClassBody is empty): of a class with a heritage it
+    /// passes its arguments to the parent as they are, which a written one cannot say.
+    pub default_constructor: bool,
     /// The ClassElements but the constructor and the empty ones (`;`), in source order.
     pub elements: Vec<ClassElement>,
     /// The initializer of the instance elements (`docs/design/engine.md`, section 3, "Classes",

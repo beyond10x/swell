@@ -781,7 +781,7 @@ try { top = eval('super.x'); } catch (e) { top = e.name; }
 var ind;
 try { ind = (0, eval)('super.x'); } catch (e) { ind = e.name; }
 [o.d(), o.i(), top, ind].join();"#,
-        "SyntaxError,SyntaxError,SyntaxError,SyntaxError",
+        "1,SyntaxError,SyntaxError,SyntaxError",
     );
 }
 
@@ -1038,32 +1038,26 @@ fn async_rejection_inside_a_super_reference() {
 /// `#sec-arrow-function-definitions-static-semantics-early-errors`: a SuperProperty belongs to
 /// the nearest function that is not an arrow function. In a method nested in the parameters of
 /// an arrow function inside a method, that function is the nested method; no source here has
-/// `super` in an arrow's own code. Today the parser scans the whole cover of an arrow's
-/// parameters inside a method, the nested method included, and the script answers the refusal
-/// `super in an arrow function is not supported before slice 8` (the base before this story
-/// refused the same source with the refusal of `super`). `story:derived-classes-and-super-call`
-/// lifts that refusal with the refusal of `super` in an arrow; the source must then answer
-/// `"t,b,p"` in both modes, the value of `super.x` read through each nested method's home object.
+/// `super` in an arrow's own code. Until `story:derived-classes-and-super-call` the parser
+/// refused `super` in the whole cover of an arrow's parameters inside a method, the nested
+/// method included; with that refusal lifted the source answers `"t,b,p"` in both modes, the
+/// value of `super.x` read through each nested method's home object.
 #[test]
-fn a_method_in_an_arrow_parameter_inside_a_method_is_refused_until_derived_classes() {
+fn a_method_in_an_arrow_parameter_inside_a_method_reads_its_own_home_object() {
     let source = r#"var top = (a = { __proto__: { x: 't' }, n() { return super.x; } }) => a.n();
 var o = { __proto__: { x: 'o' },
   body() { var f = () => ({ __proto__: { x: 'b' }, n() { return super.x; } }).n(); return f(); },
   params() { var f = (a = { __proto__: { x: 'p' }, n() { return super.x; } }) => a.n(); return f(); } };
 [top(), o.body(), o.params()].join();"#;
-    let refused = |line: u32| {
-        Outcome::Errors(vec![format!(
-            "super in an arrow function is not supported before slice 8 ({line}:65)"
-        )])
-    };
-    assert_eq!(run_both(source), (refused(4), refused(5)), "{source}");
+    let answer = Outcome::Normal("\"t,b,p\"".to_string());
+    assert_eq!(run_both(source), (answer.clone(), answer), "{source}");
 }
 
-/// Every SuperCall is an early error before derived classes, wherever it stands (a method, an
-/// accessor, the parameters of a method, an arrow and a plain function in a method, a
-/// generator and an `async` method, the top, `Function` code), so no `Expr::SuperCall` reaches
-/// the compiler; in eval code it is the refusal of `super` in eval code, a SyntaxError a script
-/// catches.
+/// A SuperCall outside the constructor of a class with a heritage is an early error, wherever it
+/// stands (a method, an accessor, the parameters of a method, an arrow and a plain function in
+/// a method, a generator and an `async` method, the top, `Function` code), so no such
+/// `Expr::SuperCall` reaches the compiler; in the eval code of a method it is the same early
+/// error, a SyntaxError a script catches.
 #[test]
 fn no_source_reaches_a_super_call() {
     let sources = [

@@ -1,0 +1,2 @@
+// sec-runtime-semantics-classfielddefinitionevaluation: a computed field key is evaluated at the definition, converted by ToPropertyKey and kept in a hidden binding of the class scope, which the initializers read; the instance fields are pass 2 of the instance initializer, each run of static fields a function of its own called with this F; an anonymous function takes the field's name
+class C { a = 1; [k] = function () {}; b; static s = this; static [k + 1]; m() {} static t = () => 2; }

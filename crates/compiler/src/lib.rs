@@ -55,7 +55,19 @@ use swell_syntax::ledger::{Ledger, Meter, Stop, Unlimited, map_entry_bytes};
 use crate::bytecode::{
     Code, Handler, HandlerKind, Instruction, LexicalName, SlotName, TAG_FIRST_JUMP, TAG_RETURN,
 };
-use crate::resolve::{Binding, Resolution, Site};
+use crate::resolve::{Binding, LexicalPlace, Resolution, Site};
+
+/// How the code of a derived constructor, its arrow functions or eval code in it uses the
+/// constructor's `this` binding ([`Compiler::this_instruction`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ThisUse {
+    /// `this`, and the receiver of a SuperProperty: a checked read.
+    Read,
+    /// BindThisValue after a SuperCall.
+    Bind,
+    /// The binding copied into the frame's `this` before a `Return`.
+    Keep,
+}
 
 /// Why a script did not compile.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -118,12 +130,20 @@ pub fn compile_script(script: &Script) -> Result<Code, CompileError> {
 /// [`swell_syntax::ledger::POLL_INTERVAL`] nodes the step visits. A stop answers
 /// [`CompileError::Stopped`] with everything credited.
 pub fn compile_script_with(script: &Script, ledger: &mut dyn Ledger) -> Result<Code, CompileError> {
-    compile(script, false, ledger)
+    compile(script, (false, false), ledger)
 }
 
-/// [`compile_eval`] charged to `ledger`, as [`compile_script_with`].
-pub fn compile_eval_with(script: &Script, ledger: &mut dyn Ledger) -> Result<Code, CompileError> {
-    compile(script, true, ledger)
+/// [`compile_eval`] charged to `ledger`, as [`compile_script_with`], for eval code whose context
+/// (`#sec-performeval`, steps 7 to 11) has inDerivedConstructor when `in_derived_constructor`:
+/// then `this` in it, its arrow functions included, is the checked lookup of the derived
+/// constructor's binding `this` by name, and a SuperCall binds it (`docs/design/engine.md`,
+/// "Classes", item 6).
+pub fn compile_eval_with(
+    script: &Script,
+    in_derived_constructor: bool,
+    ledger: &mut dyn Ledger,
+) -> Result<Code, CompileError> {
+    compile(script, (true, in_derived_constructor), ledger)
 }
 
 /// Compiles eval code, a script that `swell_syntax::parse_eval` parsed, into its [`Code`]
@@ -134,7 +154,7 @@ pub fn compile_eval_with(script: &Script, ledger: &mut dyn Ledger) -> Result<Cod
 /// EvalDeclarationInstantiation (`#sec-evaldeclarationinstantiation`); the code returns its
 /// completion value, as a script's does.
 pub fn compile_eval(script: &Script) -> Result<Code, CompileError> {
-    compile_eval_with(script, &mut Unlimited)
+    compile_eval_with(script, false, &mut Unlimited)
 }
 
 /// The compile step of a script or of eval code, charged to `ledger`.
@@ -149,11 +169,11 @@ pub fn compile_eval(script: &Script) -> Result<Code, CompileError> {
 /// other answer, nothing.
 fn compile(
     script: &Script,
-    eval_code: bool,
+    (eval_code, this_by_name): (bool, bool),
     ledger: &mut dyn Ledger,
 ) -> Result<Code, CompileError> {
     let meter = Meter::new(ledger);
-    let compiled = compile_charged(script, eval_code, &meter);
+    let compiled = compile_charged(script, (eval_code, this_by_name), &meter);
     let compiled = match (compiled, meter.stopped()) {
         (_, Some(stop)) => Err(CompileError::Stopped(stop)),
         (compiled, None) => compiled,
@@ -183,8 +203,12 @@ fn compile(
     }
 }
 
-fn compile_charged(script: &Script, eval_code: bool, m: &Meter<'_>) -> Result<Code, CompileError> {
-    let resolution = resolve::resolve(script, eval_code, m)?;
+fn compile_charged(
+    script: &Script,
+    (eval_code, this_by_name): (bool, bool),
+    m: &Meter<'_>,
+) -> Result<Code, CompileError> {
+    let resolution = resolve::resolve(script, eval_code, this_by_name, m)?;
     let mut constants = Constants::default();
     let body = function::compile_script_body(script, &resolution, &mut constants, m)?;
     let mut functions = m.with_capacity(script.ast.functions().len())?;
@@ -531,6 +555,14 @@ pub(crate) struct Compiler<'a, 'm> {
     /// template, both are the slot of its async generator object, and its `return` ends in
     /// [`Instruction::AsyncGeneratorReturn`].
     pub(crate) asynchronous: Option<u32>,
+    /// Of a derived constructor, an arrow function in one, and eval code whose context has
+    /// inDerivedConstructor: where the constructor's `this` binding is ([`Site::This`]), so
+    /// every [`Instruction::This`] the template emits becomes its checked read
+    /// ([`Compiler::emit`]); `None` elsewhere.
+    pub(crate) this_binding: Option<Binding>,
+    /// Whether the template is a derived constructor's: `KeepThis` before each `Return`
+    /// ([`Compiler::emit_return`]).
+    pub(crate) derived: bool,
 }
 
 /// The finished code of one template.
@@ -658,6 +690,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
             scopes: Vec::new(),
             generator: None,
             asynchronous: None,
+            this_binding: None,
+            derived: false,
         }
     }
 
@@ -719,6 +753,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
         instruction: Instruction,
         span: Span,
     ) -> Result<(), CompileError> {
+        // In a derived constructor, its arrow functions and eval code in it, ResolveThisBinding
+        // reads the constructor's binding: `this`, a SuperProperty's receiver, a super call's
+        // and `delete super[x]`'s, all emitted as `This` (`docs/design/engine.md`, "Classes",
+        // item 6).
+        let instruction = match instruction {
+            Instruction::This if self.this_binding.is_some() => {
+                self.this_instruction(ThisUse::Read)?
+            }
+            other => other,
+        };
         if let Some(label) = instruction.target()
             && !matches!(instruction, Instruction::LoopJump(_))
             && self.bound(label).is_some()
@@ -929,9 +973,98 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 (Some(slot), Some(_)) => self.emit(Instruction::AsyncGeneratorReturn(slot), span),
                 (Some(slot), None) => self.emit(Instruction::GeneratorReturn(slot), span),
                 (None, Some(slot)) => self.emit(Instruction::AsyncReturn(slot), span),
-                (None, None) => self.emit(Instruction::Return, span),
+                (None, None) => self.emit_return(span),
             },
         }
+    }
+
+    /// `Return`, after `KeepThis` in a derived constructor ("Classes", item 8: the return rule
+    /// reads the frame's `this`, which `KeepThis` sets from the binding after every `finally`
+    /// block ran).
+    pub(crate) fn emit_return(&mut self, span: Span) -> Result<(), CompileError> {
+        if self.derived {
+            let keep = self.this_instruction(ThisUse::Keep)?;
+            self.emit(keep, span)?;
+        }
+        self.emit(Instruction::Return, span)
+    }
+
+    /// The instruction by which the code uses the `this` binding of a derived constructor
+    /// ([`Compiler::this_binding`], "Classes", items 6 to 8): a checked read, `BindThis` or
+    /// `KeepThis` in the form of its place, a record's hops counted from the LexicalEnvironment
+    /// here (the site is at the top of the function, so the environments this frame pushed are
+    /// added); in eval code a lookup by name.
+    pub(crate) fn this_instruction(&mut self, use_: ThisUse) -> Result<Instruction, CompileError> {
+        let binding = self
+            .this_binding
+            .clone()
+            .ok_or_else(|| malformed("a `this` binding outside a derived constructor"))?;
+        let out = |hops: u32, envs: u32| {
+            hops.checked_add(envs)
+                .ok_or(CompileError::TooMany("environment hops"))
+        };
+        Ok(match (binding, use_) {
+            (
+                Binding::Lexical {
+                    at: LexicalPlace::Local(slot),
+                    name,
+                    ..
+                },
+                ThisUse::Read,
+            ) => Instruction::GetLocalChecked {
+                slot,
+                name: self.string(&name)?,
+            },
+            (
+                Binding::Lexical {
+                    at: LexicalPlace::Env { hops, slot },
+                    ..
+                },
+                ThisUse::Read,
+            ) => Instruction::GetEnvChecked {
+                hops: out(hops, self.envs)?,
+                slot,
+            },
+            (
+                Binding::Lexical {
+                    at: LexicalPlace::Local(slot),
+                    ..
+                },
+                ThisUse::Bind,
+            ) => Instruction::BindThis(slot),
+            (
+                Binding::Lexical {
+                    at: LexicalPlace::Env { hops, slot },
+                    ..
+                },
+                ThisUse::Bind,
+            ) => Instruction::BindThisEnv {
+                hops: out(hops, self.envs)?,
+                slot,
+            },
+            (
+                Binding::Lexical {
+                    at: LexicalPlace::Local(slot),
+                    ..
+                },
+                ThisUse::Keep,
+            ) => Instruction::KeepThis(slot),
+            (
+                Binding::Lexical {
+                    at: LexicalPlace::Env { hops, slot },
+                    ..
+                },
+                ThisUse::Keep,
+            ) => Instruction::KeepThisEnv {
+                hops: out(hops, self.envs)?,
+                slot,
+            },
+            (Binding::Dynamic(name), ThisUse::Read) => Instruction::GetName(self.string(&name)?),
+            (Binding::Dynamic(name), ThisUse::Bind) => {
+                Instruction::BindThisName(self.string(&name)?)
+            }
+            _ => return Err(malformed("a `this` binding")),
+        })
     }
 
     /// `break` or `continue` at the current position: without a label to the innermost loop, or
@@ -1441,7 +1574,7 @@ mod tests {
             high: &high,
         };
         let meter = Meter::new(&mut ledger);
-        let resolution = resolve::resolve(&script, false, &meter).unwrap();
+        let resolution = resolve::resolve(&script, false, false, &meter).unwrap();
         let mut constants = Constants::default();
         let mut c = Compiler::new(
             &script.ast,

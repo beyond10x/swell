@@ -87,6 +87,8 @@ mod builtins_uri;
 mod builtins_weak_collections;
 #[cfg(any(not(test_modules), test_modules = "calls"))]
 mod calls;
+#[cfg(any(not(test_modules), test_modules = "class_fields"))]
+mod class_fields;
 #[cfg(any(not(test_modules), test_modules = "classes"))]
 mod classes;
 #[cfg(any(not(test_modules), test_modules = "collect"))]
@@ -105,6 +107,8 @@ mod date_setters;
 mod date_text;
 #[cfg(any(not(test_modules), test_modules = "date_zone"))]
 mod date_zone;
+#[cfg(any(not(test_modules), test_modules = "derived_classes"))]
+mod derived_classes;
 #[cfg(any(not(test_modules), test_modules = "determinism"))]
 mod determinism;
 #[cfg(any(not(test_modules), test_modules = "dynamic_function"))]

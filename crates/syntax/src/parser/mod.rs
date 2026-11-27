@@ -65,8 +65,6 @@ pub(crate) struct Parsed {
 /// `rustfmt` would join a short list on one line; it is skipped so each hold keeps its own.
 #[rustfmt::skip]
 pub const HOLDS: &[(&str, u32)] = &[
-    ("class heritage", 8),
-    ("class field", 8),
     ("private field", 8),
     ("private name in", 8),
     ("class static block", 8),
@@ -122,10 +120,15 @@ pub(crate) struct Parser<'a, 'm> {
     /// (`#sec-function-definitions-static-semantics-early-errors`,
     /// `#sec-method-definitions-static-semantics-early-errors`,
     /// `#sec-scripts-static-semantics-early-errors`): set by the parameters and body of a
-    /// MethodDefinition, cleared by those of every other function that is not an arrow function;
-    /// an arrow function takes the answer of the code around it, which `super` in it is refused
-    /// in before slice 8, as is `super` in eval code outside a function of its own.
+    /// MethodDefinition, and with a SuperCall by those of the constructor of a class with a
+    /// heritage, cleared by those of every other function that is not an arrow function; an
+    /// arrow function takes the answer of the code around it, and eval code the answer of its
+    /// context ([`parse_eval`]).
     super_property: SuperProperty,
+    /// The constructor of a class with a heritage whose parameters and body the parser is about
+    /// to read (`parser/class.rs`): [`Parser::open_context`] takes it and gives that function
+    /// [`SuperProperty::DerivedConstructor`].
+    derived_constructor: Option<FunctionId>,
     /// The `super_property` of the code around each function whose parameters or body the
     /// parser is in, beside `outer_awaits`, saved and put back with it; the growth charged first.
     outer_super_properties: Vec<SuperProperty>,
@@ -158,15 +161,16 @@ pub(crate) enum SuperProperty {
     /// The nearest function that is not an arrow function is no MethodDefinition, or there is
     /// none: a SuperProperty is an early error.
     Outside,
-    /// The nearest function is a MethodDefinition (an accessor, a method, a generator, `async`
-    /// or async generator method): a SuperProperty stands.
+    /// The nearest function that is not an arrow function is a MethodDefinition (an accessor, a
+    /// method, a generator, `async` or async generator method, a class's constructor, a field
+    /// initializer or a static block): a SuperProperty stands, a SuperCall is an early error.
     Method,
-    /// The nearest function that is not an arrow function is a MethodDefinition, with an arrow
-    /// function between: refused before slice 8.
-    Arrow,
-    /// Eval code outside any function of its own, whose caller the parse does not know: refused
-    /// before slice 8.
-    Eval,
+    /// The nearest function that is not an arrow function is the constructor of a class with a
+    /// heritage (`#sec-class-definitions-static-semantics-early-errors`, ClassElement :
+    /// MethodDefinition): a SuperProperty and a SuperCall stand. This is the SuperCall flag of
+    /// `story:derived-classes-and-super-call`, folded into the one flag, since a SuperCall
+    /// stands only where a SuperProperty does.
+    DerivedConstructor,
 }
 
 impl HeapBytes for SuperProperty {
@@ -184,7 +188,9 @@ pub(crate) fn parse(source: &[u16], max: u32, m: &Meter<'_>) -> Result<Parsed, S
 /// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
 /// step 9, `ParseText(x, Script)`) in the eval context `context` (steps 6 and 7): the code is
 /// strict from its start when the caller is strict, and from its directive prologue on when
-/// that holds a Use Strict Directive; `new.target` stands at its top when `in_function` is set.
+/// that holds a Use Strict Directive; `new.target` stands at its top when `in_function` is set;
+/// a SuperProperty when `in_method` is set, and a SuperCall too when `in_derived_constructor`
+/// is (steps 7 to 11), so elsewhere `super` answers the early errors a script answers.
 /// [`Parsed::strict`] is whether the eval code is strict. Charged to `m`; after a stop of the
 /// meter the answer is an error the caller does not read.
 pub(crate) fn parse_eval(
@@ -196,7 +202,13 @@ pub(crate) fn parse_eval(
     let mut parser = Parser::new(source, max, m);
     parser.strict = context.strict_caller;
     parser.new_target = context.in_function;
-    parser.super_property = SuperProperty::Eval;
+    parser.super_property = if context.in_derived_constructor {
+        SuperProperty::DerivedConstructor
+    } else if context.in_method {
+        SuperProperty::Method
+    } else {
+        SuperProperty::Outside
+    };
     parse_script_with(parser, context.strict_caller)
 }
 
@@ -427,6 +439,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             new_target: false,
             outer_new_target: Vec::new(),
             super_property: SuperProperty::Outside,
+            derived_constructor: None,
             outer_super_properties: Vec::new(),
             field_code: false,
             outer_field_code: Vec::new(),

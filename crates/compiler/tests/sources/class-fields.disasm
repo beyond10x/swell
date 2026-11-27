@@ -1,0 +1,92 @@
+script locals 1
+  lexical let "C"
+  0000 2:1 SetStrict true
+  0001 2:1 PushLexicalEnv 0 "#key 1" "#key 6"
+  0002 2:1 ClassPrototype
+  0003 2:1 MakeClassConstructor 0 base
+  0004 2:19 GetGlobal "k"
+  0005 2:19 ToPropertyKey
+  0006 2:19 SetEnv 0 0
+  0007 2:19 Pop
+  0008 2:68 GetGlobal "k"
+  0009 2:72 Number 1
+  0010 2:68 Add
+  0011 2:68 ToPropertyKey
+  0012 2:68 SetEnv 0 1
+  0013 2:68 Pop
+  0014 2:76 Dup2
+  0015 2:76 Pop
+  0016 2:76 Closure 4
+  0017 2:76 DefineClassMethod "m"
+  0018 2:76 Pop
+  0019 2:1 SetLocal 0
+  0020 2:1 Nip 1
+  0021 2:1 StoreInitializer 1
+  0022 2:1 Dup
+  0023 2:1 MakeMethod 3
+  0024 2:1 Call 0
+  0025 2:1 Pop
+  0026 2:1 Dup
+  0027 2:1 MakeMethod 5
+  0028 2:1 Call 0
+  0029 2:1 Pop
+  0030 2:1 PopEnv
+  0031 2:1 SetStrict false
+  0032 2:1 InitGlobal "C"
+  0033 2:1 Pop
+  0034 0:0 LoadCompletion
+  0035 0:0 Return
+
+function 0 class constructor "C" length 0 locals 0 strict
+  0000 2:1 This
+  0001 2:1 InitInstance
+  0002 2:1 Pop
+  0003 2:1 Undefined
+  0004 2:1 Return
+
+function 1 field initializer "" length 0 locals 0 strict
+  0000 2:11 This
+  0001 2:15 Number 1
+  0002 2:11 DefineField "a"
+  0003 2:18 GetEnv 0 0
+  0004 2:24 Closure 2
+  0005 2:18 SetFunctionName
+  0006 2:18 DefineComputedField
+  0007 2:40 Undefined
+  0008 2:40 DefineField "b"
+  0009 2:11 Pop
+  0010 2:11 Undefined
+  0011 2:11 Return
+
+function 2 expression "" length 0 locals 0 strict
+  0000 2:24 Undefined
+  0001 2:24 Return
+
+function 3 field initializer "" length 0 locals 0 strict
+  0000 2:43 This
+  0001 2:54 This
+  0002 2:43 DefineField "s"
+  0003 2:60 GetEnv 0 1
+  0004 2:60 Undefined
+  0005 2:60 DefineComputedField
+  0006 2:43 Pop
+  0007 2:43 Undefined
+  0008 2:43 Return
+
+function 4 method "m" length 0 locals 0 strict
+  0000 2:76 Undefined
+  0001 2:76 Return
+
+function 5 field initializer "" length 0 locals 0 strict
+  0000 2:83 This
+  0001 2:94 ArrowClosure 6
+  0002 2:83 DefineField "t"
+  0003 2:83 Pop
+  0004 2:83 Undefined
+  0005 2:83 Return
+
+function 6 arrow "t" length 0 locals 0 strict
+  0000 2:100 Number 2
+  0001 2:100 Return
+  0002 2:94 Undefined
+  0003 2:94 Return
