@@ -328,10 +328,16 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   18 cores, tests of 4 to 18 CPU seconds were killed at 60 s
   (`story:heavy-tests-far-from-the-kill`), and at a bound of 5 s for the full count
   `builtins_iterators::each_next_is_charged`, 4.2 CPU seconds, was still killed while the
-  load rose from 37 to 165 (`story:lane-tests-under-2-5-cpu-seconds`). Two tests are over
-  the bound and stay so: `determinism::host_133_same_calls_same_hooks_same_outcomes` (4.2 to
-  4.4 s in collect mode, gate and lane, three runs of its corpus) and `language` part 3 (2.2
-  to 2.5 s in the collect gate). The full count of the parser's stack-bound check is 7,500
+  load rose from 37 to 165 (`story:lane-tests-under-2-5-cpu-seconds`).
+  `determinism::host_133_same_calls_same_hooks_same_outcomes` takes 1.65 s alone in collect
+  mode (300 steps per entry, 5 squares), and the `language` scripts run in 47 parts of at
+  most 1.36 s. The parts read no room of the realm, so `taskfiles/realm-room-tests.awk`
+  leaves them to the gate's `test-collect`; `test-realm-sizes` does not run them. A file of
+  `crates/swell/tests/language/` other than a script `*.js` fails
+  `language::the_language_directory_holds_only_scripts_the_parts_run`. A test whose count in
+  collect mode is made smaller for the bound keeps the earlier count under
+  `SWELL_FULL_COUNTS=1` when that count takes at most 2.5 s alone there; a smaller count is
+  shown red in collect mode with the defect the test exists for planted. The full count of the parser's stack-bound check is 7,500
   levels on three quarters of the stack of `parser_nesting` 10,000, and the gate count 2,500
   on a quarter; the derivation is in `crates/syntax/tests/sources.rs`.
 - A new language script stays under 0.5 CPU seconds per run, and a new test under 2 s alone,

@@ -163,6 +163,19 @@ Every number below comes from the gate, `task check`, on the released commit.
   gate compiles every module, as before, and `gate-vars` fails when a caller's `RUSTFLAGS`
   (or `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`, `CARGO_TARGET_<triple>_RUSTFLAGS`)
   names `test_modules`.
+- The tests over 2 CPU seconds alone in the lane's collect build (a collection at every safe
+  point, opt-level 0) run under that bound: smaller counts in collect mode for `host_133`, the
+  memory-budget fill of `termination`, five tests of Map and Set, two of async generators,
+  `for_await`, `property_index`, `tagged_templates` and two of `new_target`; with
+  `SWELL_FULL_COUNTS=1` four of them run their earlier count again, under 2.5 s. The surface
+  test of Map and Set is three tests, its random operations two tests over two seeds, the
+  re-entry through `super` four, the parse cases of `new.target` two; the `language` scripts
+  run in 47 parts, the 13 try-completion scripts each split by `break` and `continue`, and
+  `test-realm-sizes` no longer runs the parts, which read no room of the realm. Every smaller
+  count was shown red with the defect it tests planted. The collect runs of
+  `test-realm-sizes` went from 2,588 to 1,626 test-seconds on the build node (the sums of
+  cargo-nextest's JUnit files, measured at different loads)
+  (`story:realm-size-lane-within-its-share`).
 - `swell_syntax::parse_eval` and `parse_eval_with` take `context: impl Into<EvalContext>` in
   place of `strict_caller: bool`: the new public `EvalContext` holds the caller's strictness
   and PerformEval's four flags (`in_function`, `in_method`, `in_derived_constructor`,
