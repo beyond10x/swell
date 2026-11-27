@@ -312,9 +312,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   Private Name that nothing holds. One class holds at most 32,768 private methods with names
   of their own (the 65,536 slots of its private record); past it the class is the
   `SyntaxError` `more private record slots in one class than the bytecode can number`. Direct
-  eval code that reads a private name an enclosing class declares is refused with the
-  `SyntaxError` `private name #x in direct eval code is not supported before slice 8` until
-  `story:private-names-in-eval-code`; a name no enclosing class declares, an indirect `eval`
+  eval code reads the private names of the classes around the call
+  (`story:private-names-in-eval-code`); a name no enclosing class declares, an indirect `eval`
   and `Function` keep the early error `private name #x is not declared in an enclosing
   class`. The hold `private method is not supported before slice 8` is gone
   (`story:private-names-and-private-methods`).
@@ -383,6 +382,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   getter and a setter of one name are one element). A `Throw` from the hook is the add's
   throw, and the element is not added. Every other object calls no hook. "Host interface"
   below has HOST-119 and HOST-223 (`story:host-ensure-can-add-private-element`).
+
+- Private names in direct eval code, a story of the eighth slice: direct `eval` code reads,
+  writes, calls and tests (`#x in o`) the private names of every class around the call
+  (`#sec-evaldeclarationinstantiation`, privateIdentifiers and AllPrivateIdentifiersValid,
+  with the caller's PrivateEnvironment that PerformEval passes). `swell_syntax::EvalContext`
+  gains a lifetime and the field `EvalContext::private_names` (the texts the parse takes as
+  declared), `parse_eval` and `parse_eval_with` take `impl Into<EvalContext<'a>>`, and
+  `swell_compiler::compile_eval_with` gains `private_names: &[(&str, u32, u32)]` (text, hops
+  from the caller's environment, slot). A direct `eval` whose String holds no `#` code unit
+  costs what it cost before: it does not walk the caller's records for private names. One
+  whose String holds a `#` anywhere (also only in a string literal or a comment) spends a
+  step per record of the caller's chain and, in a record whose slots are named, a step per
+  slot and per text compared past the first 8; `eval("'#'")` in a non-strict function of
+  1,000 `var`s spends 995 steps more than `eval("1")` there
+  (`story:private-names-in-eval-code`).
 
 ### Changed
 
