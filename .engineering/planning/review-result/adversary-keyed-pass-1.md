@@ -6,7 +6,7 @@ status: active
 title: 'Adversary pass 1 on the unit keyed: 7 findings, 3 red cases of 13'
 relations:
 - reviews: story:keyed-entry-table
-revision: 1
+revision: 2
 ---
 Adversary, pass 1 on the unit keyed of wave big-2 (impl/keyed at d9efe364), 2026-11-26.
 Verdict: needs change. 7 findings (3 warnings, 4 notes), all introduced; 13 cases added, 3 red.
@@ -80,7 +80,7 @@ The green cases, with what each covers:
 - `suite-default.log`
 - `suite-collect.log`
 
-One rule slip: while waiting I ran a `pgrep -f` once, which `~/.claude/CLAUDE.md` forbids. It found nothing and changed nothing.
+One rule slip: while waiting I ran a `pgrep -f` once, which the rules of this host forbid. It found nothing and changed nothing.
 
 ```findings
 - file: crates/swell/src/object/keyed_entries.rs

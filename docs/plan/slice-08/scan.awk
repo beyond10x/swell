@@ -36,7 +36,7 @@
 #     class-syntax    any other (the block redeclarations of a class name)
 #   the other cases without B:
 #     element-syntax  D, E, PM or PF, or a private name in the text (eval and Function given a private name)
-#     derived         EV with SP or C (super in eval code: the flags of PerformEval, step 7, are the new.target
+#     derived         EV with SP or C (super in eval code: the flags of PerformEval, steps 7 to 11, are the new.target
 #                     story's and the rules that read them for super the derived story's), or SP with A
 #                     (the arrow takes [[HomeObject]] through the new.target story's box)
 #     super           SP or C (super in functions and object literals)

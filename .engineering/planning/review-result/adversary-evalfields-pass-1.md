@@ -6,7 +6,7 @@ status: active
 title: Adversary pass 1 on the unit evalfields
 relations:
 - reviews: story:eval-in-class-field-initializers
-revision: 1
+revision: 2
 ---
 Adversary pass 1 on the unit evalfields, branch impl/evalfields at 5451f25, 2026-11-27.
 Verdict green: no failing case; three mutants survive the tests, one judgement note.
@@ -105,7 +105,7 @@ None left in the tree. Probes and catchers were in `crates/swell/tests/class_fie
 - baseline `cargo nextest run --locked --no-fail-fast -p swell -p swell-syntax --test main -E '…'` → `17 tests run: 17 passed, 1639 skipped`
 - mutants a to g, the same command (exit 100 each) → a `12 passed, 4 failed`; b `14/2`; c `14/2` (one of the two red tests is my catcher); d `12/4`; e `15/1`; f `15/1`; g `15/1` (the single reds in e, f and g are my catchers)
 - mutants f and g with `-E 'not test(/adv_/)'` → `1640 tests run: 1640 passed, 16 skipped` each
-- `slot --timeout 30m sh -c "<time-tests.sh>"` → exit 0, every run `rc 0`. The first try with the script path was refused by slot (a file under `~/.cache/scratch`).
+- `slot --timeout 30m sh -c "<time-tests.sh>"` → exit 0, every run `rc 0`. The first try with the script path was refused by slot (a file under the scratch directory of the session).
 
 ## Not attacked
 

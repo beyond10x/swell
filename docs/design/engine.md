@@ -2010,7 +2010,8 @@ mechanism.
   of a host sees them.
 - A private identifier that no enclosing class declares is an early error
   (`sec-static-semantics-allprivateidentifiersvalid`). In eval code it is checked against the names
-  of the running PrivateEnvironment and its outer ones (`sec-performeval`).
+  of the running PrivateEnvironment and its outer ones (`sec-evaldeclarationinstantiation`,
+  steps 4 to 7; PerformEval passes the PrivateEnvironment).
 
 What a host sees: `host_ensure_can_add_private_element` (HOST-119) before an add to a host object
 with an override table, and nowhere else. The requirement that the story of the hook adds is
@@ -2079,13 +2080,30 @@ with an override table, and nowhere else. The requirement that the story of the 
 
    Rejected: a PrivateEnvironment chain of its own, beside the frame's and in every function
    object. It costs a field per frame and per function, and a second chain to trace.
-4. Resolution in eval code (decision 5 of slice 8). PerformEval walks the caller's LexicalEnvironment
-   chain once, a step per record, and lists each slot whose name starts with `#` as its text, its
-   hops and its slot; an inner name hides an outer one of the same text. The list is charged
-   while it lives.
-   - The parse gets the texts, for AllPrivateIdentifiersValid.
-   - The compile entry of eval code gets the positions. Eval code then uses the same instructions
-     as other code, with hops counted as the eval code's own records plus the caller's hops.
+4. Resolution in eval code (decision 5 of slice 8). A direct eval whose String holds a `#` code
+   unit walks the caller's LexicalEnvironment chain once (`Agent::eval_private_names`,
+   `env/mod.rs`) and lists each slot that holds a Private Name as its text, its hops and its
+   slot; an inner name hides an outer one of the same text. The walk spends a step per record
+   and, in a record whose slots are named, a step per slot read and per text compared past the
+   first 8. The two lists are charged to the memory budget while they live.
+   - A String without a `#` code unit is not walked (`Agent::source_holds_hash`,
+     `dynamic_code.rs`): every PrivateIdentifier starts with a literal `#`, and an escape is
+     none. The scan reads each code unit once; the parse charges a step per code unit of the
+     same String in the same entry. Such an eval costs what an eval cost before private names.
+   - The clause: privateIdentifiers and AllPrivateIdentifiersValid are steps 4 to 7 of
+     EvalDeclarationInstantiation, after its var checks of step 3. The engine checks them at
+     the parse, before the var checks the run makes. Both are a `SyntaxError` before any of the
+     eval code runs, and the var checks run for non-strict eval code only, which has no
+     PrivateEnvironment (a class body is strict): no eval text tells the two orders apart but
+     by the message.
+   - No safe point stands between the walk, the parse and the compile; the first one after the
+     walk is the eval code's first instruction.
+   - The parse gets the texts (`EvalContext::private_names`), for AllPrivateIdentifiersValid:
+     `early::check` puts them into the checker's private map before it walks the body.
+   - The compile entry of eval code gets the positions (`compile_eval_with`). Eval code then uses
+     the same instructions as other code, with hops counted as the eval code's own records plus
+     the caller's hops, and one more where strict eval code without a top-level binding runs in
+     the empty declarative record PerformEval makes for it (steps 17 and 19).
    - The list holds no handle, so nothing in it needs a root, and it is dropped after the compile.
 
    Rejected:

@@ -26,7 +26,7 @@ scope:
   path: crates/syntax/src/early.rs
 - confidence: cited
   path: crates/syntax/src/lib.rs
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
@@ -79,3 +79,50 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 The hook of HOST-119 (`story:host-ensure-can-add-private-element`); private names in `Function` code (none, per `#sec-createdynamicfunction`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `evalprivate` of wave big-2 delivered the story on `impl/evalprivate` (two
+corrections after the adversary's two passes), merged into `wave/big-2`. Where the delivery
+differs from the text above:
+
+- A direct eval walks the caller's records only when its String holds a `#` code unit
+  (`Agent::source_holds_hash`). The first build walked for every direct eval: a step per
+  record and per named slot, 992 steps in a non-strict function of 1,000 `var`s with no
+  class around it. The adversary's first pass found it; the coordinator decided the scan.
+  A String without `#` costs what it cost before the story; one with a `#` anywhere, also
+  in a string literal or a comment, walks.
+- The clause is `#sec-evaldeclarationinstantiation`, steps 4 to 7 of the pinned draft, not
+  PerformEval: the story's text and the first build cited PerformEval. The engine checks
+  AllPrivateIdentifiersValid at the parse, before the var checks of step 3 that the run
+  makes; no eval text tells the orders apart but by the message.
+- No function `all_private_identifiers_valid` exists in `early.rs`: the rule lives in
+  `Checker::private_reference` and the checker's private map, which `early::check` fills
+  from `EvalContext::private_names` before it walks the body.
+- The public surface: `swell_syntax::EvalContext` gains a lifetime and the field
+  `private_names`; `parse_eval` and `parse_eval_with` take `impl Into<EvalContext<'a>>`;
+  `swell_compiler::compile_eval_with` gains `private_names: &[(&str, u32, u32)]`. No
+  instruction was added. `SlotNames::text` is factored from `slot_name`, and
+  `chain_names_slot` is removed (`env/mod.rs`).
+- The shadow rule stands at three sites (the walk, the resolver's map, the parse's map),
+  the first two each with a test of its own.
+- 35 tests under `eval_private_names::`, one library test of the walk
+  (`dynamic_code::tests::the_walk_lists_a_text_once_at_its_innermost_record`) and one
+  compiler test. Six of the tests and the two sweeps over the walk's records came with the
+  adversary's second pass. Five sweeps of the step budget cover every budget from the
+  walk's first record to the answer, each named after what stops in its range (block
+  records, the class record, the compares, the parse's charge, the run); they read their
+  bounds from the run and step over the budgets of one charge. Three planted leaks are each
+  red in the sweep of that name. The sweeps return at once in the collect build.
+- Measured steps of one direct eval of `'#'` less an indirect one at the same place: 0
+  names 1 / 8 / 64 at 1 / 8 / 64 blocks; 1 name 2 / 9 / 65; 100 names 94 / 101 / 157. A
+  text without `#`: 3 steps less than an indirect one, as before the story.
+- The clause numbers of PerformEval in the engine's comments and tests (22 sites, most of
+  them older than the story) are corrected from the pinned text: the record of strict eval
+  code is made in step 17 and becomes the variableEnv in step 19.
+- A library test of the syntax crate that asserted a class with private fields is held
+  back, red since `story:private-fields-and-private-in` lifted the last hold, states what is
+  true now; it is this unit's commit because this unit found it.
+- test262: the story's list of 2,653 cases passes on the first build (`passed 2653 bound
+  2653 B 2641 F 12 R 0`); the 125 cases that hold an eval and a private name pass in all 225
+  runs on correction 1. No test262 run on the merged head: the conformance close runs all.

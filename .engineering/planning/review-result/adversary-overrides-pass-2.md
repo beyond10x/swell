@@ -6,7 +6,7 @@ status: active
 title: Adversary pass 2 on the unit overrides (impl/overrides at 08ad2f4)
 relations:
 - reviews: story:host-object-overrides
-revision: 1
+revision: 2
 ---
 Adversary pass 2 (the last) on the unit overrides of wave big-2, impl/overrides at 08ad2f4, 2026-11-27.
 Red: 5 failing cases, four warnings and five notes. The adversary's own report follows.
@@ -65,7 +65,7 @@ Other runs:
   - `diff` of path, mode and result: empty.
   - The only failure on both: `Proxy/preventExtensions/trap-is-undefined-target-is-proxy.js` module ("a module run is not made before slice 11").
   - Totals: Proxy 311 (310 passed), Reflect 153 (153 passed).
-- Item 6: each of the 36 tests run alone, CPU seconds (user + system), 3 runs per build, on node build-2d (32 cores, load 4.96 at the start, 1.41 during the runs):
+- Item 6: each of the 36 tests run alone, CPU seconds (user + system), 3 runs per build, on the build node (32 cores, load 4.96 at the start, 1.41 during the runs):
   - default build: highest is `the_facts_end_at_the_memory_budget_at_every_size_and_leave_no_byte` at 0.197–0.199.
   - collect build: highest is `a_key_held_by_a_walk_across_a_get_prototype_of_override_survives_a_collection` at 0.052.
   - No reading is near the unit's 0.603 bound, and none of the 3 runs differ.

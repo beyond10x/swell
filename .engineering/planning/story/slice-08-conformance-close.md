@@ -22,6 +22,7 @@ relations:
 - depends_on: story:host-ensure-can-add-private-element
 - depends_on: story:slice-04-conformance-close
 - depends_on: story:slice-09-conformance-close
+- depends_on: story:gate-test-steps-hold-the-budget-on-the-slower-runner
 scope:
 - confidence: cited
   path: conformance/test262/expected.digest

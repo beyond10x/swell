@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T10:41:00Z",
+  "actor": "human:operator",
+  "artifact": "story:private-names-in-eval-code",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/evalprivate at 0cbe31ed, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax 91 passed (library and main, also with full counts); swell-compiler 25 passed; swell main 1763 passed, 1 skipped (default build) and 1735 passed, 1 skipped (collect build); swell lib 289 passed; task test-stack-profiles 7 passed in each of the two profiles; task clippy exit 0; cargo fmt --all -- --check exit 0"
+  }
+}
