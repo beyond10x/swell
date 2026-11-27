@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-27T00:59:06Z",
+  "actor": "human:operator",
+  "artifact": "story:class-definition-evaluation",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:classes-correction-1-coordinator-read",
+    "review": "review-result:classes-correction-1-coordinator-read",
+    "outcome": "no-op"
+  }
+}
