@@ -515,6 +515,8 @@ impl<H: Host> Agent<H> {
         match self.place_state(place)? {
             SlotValue::Uninitialized => self.store_place(place, SlotValue::Value(value))?,
             SlotValue::Value(_) => return Err(self.this_bound_twice()),
+            // The `this` binding never holds a Private Name: a logic error.
+            SlotValue::PrivateName(_) => return Err(self.fault()),
         }
         Ok(Flow::Next)
     }
@@ -539,6 +541,8 @@ impl<H: Host> Agent<H> {
         match self.slot_state(Some(record), 0, slot)? {
             SlotValue::Uninitialized => self.set_slot(Some(record), 0, slot, value)?,
             SlotValue::Value(_) => return Err(self.this_bound_twice()),
+            // The `this` binding never holds a Private Name: a logic error.
+            SlotValue::PrivateName(_) => return Err(self.fault()),
         }
         Ok(Flow::Next)
     }
@@ -559,6 +563,7 @@ impl<H: Host> Agent<H> {
         let this = match self.place_state(place)? {
             SlotValue::Value(value) => value,
             SlotValue::Uninitialized => Value::Undefined,
+            SlotValue::PrivateName(_) => return Err(self.fault()),
         };
         self.top_frame()?.this = this;
         Ok(Flow::Next)

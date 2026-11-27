@@ -401,20 +401,28 @@ fn result_depth() -> usize {
     }
 }
 
+/// The memory budget under which the parse of [`DEPTH`] levels must end in a result: 72 MiB. The
+/// full parse needed less than the test limits' 64 MiB while the object record was 200 bytes; at
+/// 208 bytes (the record's [[PrivateElements]]) it needs between 64 and 66 MiB, measured in the
+/// default mode with `SWELL_FULL_COUNTS=1`.
+const RESULT_MEMORY_BYTES: u64 = 72 << 20;
+
 /// The epic's acceptance 6 (`docs/design/engine.md`, decision 3, "Depth bounds"): a text of
 /// 100,000 nested brackets ([`DEPTH`] in collect mode, [`result_depth`] in the default mode's
 /// gate), on a thread of seven eighths of `min_stack_bytes()` ([`nesting_stack`] of the
-/// nesting), ends in a result under the test limits, every level an Array, and in
-/// `Terminated(MemoryBudget)` under a memory budget that the setup fits with 1 MiB to spare
-/// ([`setup_charge`] plus [`PARSE_ROOM`]) and the parse does not (or a result, in collect mode,
-/// where the nesting is smaller), never in a Rust stack overflow.
+/// nesting), ends in a result under the test limits with [`RESULT_MEMORY_BYTES`], every level an
+/// Array, and in `Terminated(MemoryBudget)` under a memory budget that the setup fits with 1 MiB
+/// to spare ([`setup_charge`] plus [`PARSE_ROOM`]) and the parse does not (or a result, in
+/// collect mode, where the nesting is smaller), never in a Rust stack overflow.
 #[test]
 fn parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget() {
     on_bounded_stack(
         test_path!("parse_of_100000_nested_brackets_ends_in_a_result_or_the_memory_budget"),
         nesting_stack(result_depth()),
         || {
-            assert_eq!(parse_nested(limits(), result_depth(), None), Ok(()));
+            let mut roomy = limits();
+            roomy.memory_bytes = RESULT_MEMORY_BYTES;
+            assert_eq!(parse_nested(roomy, result_depth(), None), Ok(()));
             let mut small = limits();
             small.memory_bytes = setup_charge(DEPTH) + PARSE_ROOM;
             let outcome = parse_nested(small, DEPTH, None);

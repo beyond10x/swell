@@ -311,6 +311,11 @@ impl<H: Host> Agent<H> {
             I::PutNamed(index) => self.put_named(index, strict),
             I::GetIndex => self.get_index(),
             I::PutIndex => self.put_index(strict),
+            // ---- private names (`interp/private.rs`) ----
+            I::GetPrivate { .. }
+            | I::SetPrivate { .. }
+            | I::AddPrivateMethod { .. }
+            | I::NewPrivateName { .. } => self.private_instruction(),
             I::PropertyKey => self.property_key(),
             I::DeleteNamed(index) => self.delete_named(index, strict),
             I::DeleteIndex => self.delete_index(strict),
@@ -606,7 +611,7 @@ impl<H: Host> Agent<H> {
         let value = self.top_frame()?.locals.get(position).copied();
         match value {
             Some(SlotValue::Value(value)) => self.replace(0, value),
-            Some(SlotValue::Uninitialized) | None => Err(self.fault()),
+            Some(SlotValue::Uninitialized | SlotValue::PrivateName(_)) | None => Err(self.fault()),
         }
     }
 

@@ -6,22 +6,26 @@
 //! 1. The class scope ([`ScopeKey::Class`], `resolve.rs`, `class_scope`): the class's own name,
 //!    immutable and uninitialized, a record when a function of the class or a lookup by name
 //!    reaches it.
-//! 2. The prototype ([`Instruction::ClassPrototype`]) and F
+//! 2. The heritage, in the class scope; then, when the class declares a private name, the
+//!    private record ([`ScopeKey::Private`], [`Compiler::enter_private_record`]) with a new
+//!    Private Name per private identifier (`story:private-names-and-private-methods`), entered
+//!    after the heritage, which runs with the PrivateEnvironment around the class; then the
+//!    prototype ([`Instruction::ClassPrototype`], or [`Instruction::ClassHeritage`]) and F
 //!    ([`Instruction::MakeClassConstructor`]), with F's `prototype` and the prototype's
 //!    `constructor`.
 //! 3. The elements in source order, each through a function of its own: [`Compiler::compile_method`]
 //!    defines a method, a getter or a setter, static or not, with a literal or a computed key;
-//!    [`Compiler::compile_field`] keeps a field's computed key in its hidden binding of the class
-//!    scope (`story:public-class-fields`); [`Compiler::compile_static_block`] and
-//!    [`Compiler::compile_private_method`] answer [`CompileError::Tree`] here: a source with a
-//!    static block or a private method is held by the parser until the story that replaces the
-//!    function (`story:class-static-blocks`, `story:private-names-and-private-methods`).
+//!    [`Compiler::compile_private_method`] makes a private one's function and stores it in the
+//!    private record; [`Compiler::compile_field`] keeps a field's computed key in its hidden
+//!    binding of the class scope (`story:public-class-fields`); [`Compiler::compile_static_block`]
+//!    answers [`CompileError::Tree`] here: a source with a static block is held by the parser
+//!    until the story that replaces the function (`story:class-static-blocks`).
 //! 4. The class's own name initialized with F; the initializer of the instance elements stored
 //!    in F's box when the class has some ([`Instruction::StoreInitializer`]); the static private
 //!    methods added to F ([`Compiler::static_private_adds`]); then the static elements called in
 //!    source order ([`Compiler::static_calls`]).
-//! 5. The class scope left; F is the value. A throw in any step leaves the scope as a throw
-//!    leaves a block's.
+//! 5. The private record and the class scope left; F is the value. A throw in any step leaves
+//!    them as a throw leaves a block's.
 //!
 //! All parts of a class are strict mode code (`#sec-strict-mode-code`). Its computed keys run in
 //! the frame of the code around it, whose strictness the run loop reads at every instruction,
@@ -35,7 +39,7 @@
 //!
 //! The instance elements are one function, their initializer ("Classes", item 4), whose code
 //! [`instance_initializer`] emits in two passes, each a function of its own:
-//! [`initializer_private_methods`] (nothing here yet), then [`initializer_fields`]; the function
+//! [`initializer_private_methods`], then [`initializer_fields`]; the function
 //! of a run of static fields is the same kind of template, whose code defines the run's fields
 //! on F, and the class definition calls it in source order ([`Compiler::static_calls`]). A base class constructor
 //! whose class has instance elements begins with `This; InitInstance; Pop`
@@ -50,7 +54,7 @@ use crate::bytecode::Instruction;
 use crate::resolve::{
     Binding, LexicalPlace, ScopeKey, Site, anonymous_function, initializer_fields_of, property_key,
 };
-use crate::statement::leave_scope;
+use crate::statement::{leave_scope, slot_names};
 use crate::{CompileError, Compiler, Task, Tasks, ThisUse, malformed};
 
 /// The prologue of the template of the class constructor `id` (`#sec-ecmascript-function-objects-construct-argumentslist-newtarget`,
@@ -119,19 +123,32 @@ pub(crate) fn instance_initializer(
     id: FunctionId,
     f: &Function,
 ) -> Result<(), CompileError> {
-    initializer_private_methods(c, f)?;
+    initializer_private_methods(c, id, f)?;
     initializer_fields(c, id, f)?;
     c.emit(Instruction::Undefined, f.span)?;
     c.emit(Instruction::Return, f.span)
 }
 
-/// Pass 1 of [`instance_initializer`]: PrivateMethodOrAccessorAdd of each private method of the
-/// class (`#sec-privatemethodoraccessoradd`). Nothing here: `story:private-names-and-private-methods`
-/// fills it.
+/// Pass 1 of [`instance_initializer`] `id`: PrivateMethodOrAccessorAdd of each private method,
+/// getter and setter of the class that is not static, in source order
+/// (`#sec-initializeinstanceelements`, step 3; `#sec-privatemethodoraccessoradd`): `This;
+/// AddPrivateMethod; Pop` each, the Private Name and the function read from the private
+/// record, which is the initializer's [[Environment]].
 fn initializer_private_methods(
-    _c: &mut Compiler<'_, '_>,
-    _f: &Function,
+    c: &mut Compiler<'_, '_>,
+    id: FunctionId,
+    f: &Function,
 ) -> Result<(), CompileError> {
+    let Some(methods) = c.resolution.initializer_methods.get(&id) else {
+        return Ok(());
+    };
+    let room = c.resolution.private_rooms.get(&id).copied().unwrap_or(0);
+    for &method in methods {
+        let add = c.private_add(method, room)?;
+        c.emit(Instruction::This, f.span)?;
+        c.emit(add, f.span)?;
+        c.emit(Instruction::Pop, f.span)?;
+    }
     Ok(())
 }
 
@@ -235,12 +252,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
         }
         // Step 1, steps 1 to 6 of the clause: the class scope.
         let record = self.enter_scope(ScopeKey::Class(ctor), span, t)?;
-        // Step 2, steps 7 to 19: the prototype (after the heritage, evaluated in the class
-        // scope, inside the class's strict code), then F with `prototype` and `constructor`.
+        // Step 2, steps 7 to 19: the heritage, evaluated in the class scope with the
+        // PrivateEnvironment of the code around the class (step 8), inside the class's strict
+        // code; then the private record with a new Private Name per private identifier (step 1,
+        // the end: no code before it reads them); then the prototype, made by `ClassHeritage`
+        // with a heritage, and F with `prototype` and `constructor`.
         let derived = class.heritage.is_some();
-        match class.heritage {
-            Some(heritage) => self.class_heritage(heritage, span, t)?,
-            None => t.push(Task::Emit(Instruction::ClassPrototype, span))?,
+        if let Some(heritage) = class.heritage {
+            self.class_heritage(heritage, span, t)?;
+        }
+        let private = self.enter_private_record(ctor, span, t)?;
+        if !derived {
+            t.push(Task::Emit(Instruction::ClassPrototype, span))?;
         }
         t.push(Task::Emit(
             Instruction::MakeClassConstructor {
@@ -280,8 +303,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
         }
         self.static_private_adds(class, t)?;
         self.static_calls(class, span, t)?;
-        // Step 5: the scope left; F is the value. The code after the class has the strictness
-        // of the code around it.
+        // Step 5: the private record and the scope left; F is the value. The code after the
+        // class has the strictness of the code around it.
+        leave_scope(private, span, t)?;
         leave_scope(record, span, t)?;
         if !enclosing {
             t.push(Task::Strict(false, span))?;
@@ -416,16 +440,116 @@ impl<'a, 'm> Compiler<'a, 'm> {
         Err(malformed("a class static block"))
     }
 
-    /// A private method or accessor (`#sec-runtime-semantics-classelementevaluation`): its
-    /// function made and kept in its hidden binding of the private record.
-    /// `story:private-names-and-private-methods` replaces it; a source with a private name is
-    /// held until then.
+    /// The end of step 1 (`#sec-runtime-semantics-classdefinitionevaluation`, steps 6 and 7;
+    /// "Private names", item 3): the private record of the class with constructor `ctor`, when
+    /// it declares a private name, pushed inside the class scope: `PushEnv`, or `PushLexicalEnv`
+    /// with the names of its slots when a lookup by name may reach it (a direct `eval` in the
+    /// class body); then `NewPrivateName` into each slot of a private identifier, whose binding
+    /// is named with its `#`. Answers whether a record was pushed.
+    fn enter_private_record(
+        &mut self,
+        ctor: FunctionId,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<bool, CompileError> {
+        let resolution = self.resolution;
+        let Some(scope) = resolution.lexical_scopes.get(&ScopeKey::Private(ctor)) else {
+            return Ok(false);
+        };
+        if scope.env.is_empty() {
+            return Ok(false);
+        }
+        let push = if scope.named {
+            let table = slot_names(self.constants, &scope.env, self.m)?;
+            let index = u32::try_from(self.scopes.len())
+                .map_err(|_| CompileError::TooMany("environments"))?;
+            self.m.push(&mut self.scopes, table)?;
+            Instruction::PushLexicalEnv(index)
+        } else {
+            let slots = u32::try_from(scope.env.len())
+                .map_err(|_| CompileError::TooMany("environment slots"))?;
+            Instruction::PushEnv(slots)
+        };
+        t.push(Task::Emit(push, span))?;
+        t.push(Task::EnvsUp)?;
+        for (slot, (name, _)) in scope.env.iter().enumerate() {
+            if !name.starts_with('#') {
+                continue;
+            }
+            let slot =
+                u32::try_from(slot).map_err(|_| CompileError::TooMany("environment slots"))?;
+            let name = self.string(name)?;
+            t.push(Task::Emit(Instruction::NewPrivateName { slot, name }, span))?;
+        }
+        Ok(true)
+    }
+
+    /// A private method or accessor (`#sec-runtime-semantics-classelementevaluation`,
+    /// `#sec-runtime-semantics-methoddefinitionevaluation`, PrivateIdentifier): with `[p, F]`
+    /// on top, its function made with its home object (the prototype, or F when it is static)
+    /// and stored in its binding of the private record, which holds it for the adds; nothing
+    /// is defined on the home object.
     fn compile_private_method(
         &mut self,
-        _element: &ClassElement,
-        _t: &mut Tasks<'_, '_>,
+        element: &ClassElement,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
-        Err(malformed("a private method"))
+        let ClassElement::Method {
+            is_static,
+            function,
+            span,
+            ..
+        } = element
+        else {
+            return Err(malformed("a private method"));
+        };
+        let span = *span;
+        if *is_static {
+            t.push(Task::Emit(Instruction::Dup, span))?;
+        } else {
+            t.push(Task::Emit(Instruction::Dup2, span))?;
+            t.push(Task::Emit(Instruction::Pop, span))?;
+        }
+        let fspan = self.ast.function(*function).map_or(span, |x| x.span);
+        let store = match self.binding(Site::PrivateFunction(*function))? {
+            Binding::Env { hops, slot } => Instruction::SetEnv { hops, slot },
+            _ => return Err(malformed("a private method's binding")),
+        };
+        t.push(Task::Emit(Instruction::MakeMethod(function.0), fspan))?;
+        t.push(Task::Emit(store, span))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        t.push(Task::Emit(Instruction::Pop, span))?;
+        Ok(())
+    }
+
+    /// `AddPrivateMethod` of the private method, getter or setter `method`, its Private Name and
+    /// its function at the places its add sites resolve to, with `room` the elements its class
+    /// level adds ([`crate::resolve::Resolution::private_rooms`]).
+    pub(crate) fn private_add(
+        &self,
+        method: FunctionId,
+        room: u32,
+    ) -> Result<Instruction, CompileError> {
+        let (
+            Binding::Env { hops, slot },
+            Binding::Env {
+                hops: function_hops,
+                slot: function_slot,
+            },
+        ) = (
+            self.binding(Site::PrivateAddName(method))?,
+            self.binding(Site::PrivateAddFunction(method))?,
+        )
+        else {
+            return Err(malformed("a private method's binding"));
+        };
+        Ok(Instruction::AddPrivateMethod {
+            hops: narrow_hops(hops)?,
+            slot: narrow_private(slot)?,
+            function_hops: narrow_hops(function_hops)?,
+            function_slot: narrow_private(function_slot)?,
+            room: narrow_private(room)?,
+        })
     }
 
     /// The template of the initializer of the instance elements of `class` ("Classes", item 4),
@@ -436,14 +560,35 @@ impl<'a, 'm> Compiler<'a, 'm> {
             .ok_or_else(|| malformed("the initializer of instance elements"))
     }
 
-    /// Step 4: the static private methods added to F (PrivateMethodOrAccessorAdd), before the
-    /// first static element runs. Nothing here: `story:private-names-and-private-methods` fills
-    /// it.
+    /// Step 4: the static private methods, getters and setters added to F
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, step 31.b:
+    /// PrivateMethodOrAccessorAdd), in source order, with F on top, before the first static
+    /// element runs.
     fn static_private_adds(
         &mut self,
-        _class: &Class,
-        _t: &mut Tasks<'_, '_>,
+        class: &Class,
+        t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
+        let room = self
+            .resolution
+            .private_rooms
+            .get(&class.constructor)
+            .copied()
+            .unwrap_or(0);
+        for element in &class.elements {
+            let ClassElement::Method {
+                is_static: true,
+                key: ClassKey::Private(_),
+                function,
+                span,
+                ..
+            } = element
+            else {
+                continue;
+            };
+            let add = self.private_add(*function, room)?;
+            t.push(Task::Emit(add, *span))?;
+        }
         Ok(())
     }
 
@@ -502,5 +647,50 @@ impl<'a, 'm> Compiler<'a, 'm> {
             } => Ok(*function),
             _ => Err(malformed("a run of static fields")),
         }
+    }
+}
+
+/// A slot of the private record, or a room of private elements, as the 16-bit operand of
+/// [`Instruction::AddPrivateMethod`]: a class whose private record has more than 65,536 slots
+/// (numbered 0 to 65,535; one per private identifier and one per private method, getter or
+/// setter function, so 32,768 private methods with names of their own fill it) is refused,
+/// naming the class's record.
+fn narrow_private(n: u32) -> Result<u16, CompileError> {
+    u16::try_from(n).map_err(|_| CompileError::TooManyInClass("private record slots"))
+}
+
+/// The hops from an initializer or the class's code to its private record as the 16-bit
+/// operand of [`Instruction::AddPrivateMethod`]: more than 65,535 environments out is refused.
+fn narrow_hops(n: u32) -> Result<u16, CompileError> {
+    u16::try_from(n).map_err(|_| CompileError::TooMany("environments"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{narrow_hops, narrow_private};
+    use crate::CompileError;
+    use std::string::ToString;
+
+    /// The last slot of a private record that the operand numbers is 65,535, the slot of a
+    /// class's 32,768th private method's function; the next is refused with a text that names the
+    /// class, not a function. The instruction keeps its 12 bytes with the five operands.
+    #[test]
+    fn a_private_record_holds_65536_slots() {
+        assert_eq!(narrow_private(65_535), Ok(65_535));
+        let refused = narrow_private(65_536);
+        assert_eq!(
+            refused,
+            Err(CompileError::TooManyInClass("private record slots"))
+        );
+        assert_eq!(
+            refused.err().map(|e| e.to_string()).as_deref(),
+            Some("more private record slots in one class than the bytecode can number")
+        );
+        assert_eq!(narrow_hops(65_535), Ok(65_535));
+        assert_eq!(
+            narrow_hops(65_536),
+            Err(CompileError::TooMany("environments"))
+        );
+        assert_eq!(size_of::<crate::bytecode::Instruction>(), 12);
     }
 }

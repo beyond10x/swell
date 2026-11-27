@@ -75,6 +75,9 @@ pub enum CompileError {
     /// A bound of the format: one function would need more than `u32::MAX` instructions,
     /// constants, slots or another counted thing, named here.
     TooMany(&'static str),
+    /// A bound of the format for one class: the private record of a class would need more
+    /// slots than an instruction's 16-bit operand numbers (`Instruction::AddPrivateMethod`).
+    TooManyInClass(&'static str),
     /// The tree is not one that `swell_syntax::parse_script` returns: an index names no node, a
     /// literal's text is no literal, a `break` stands outside a loop. Never for a parsed script.
     Tree(String),
@@ -91,6 +94,9 @@ impl fmt::Display for CompileError {
                     f,
                     "more {what} in one function than the bytecode can number"
                 )
+            }
+            CompileError::TooManyInClass(what) => {
+                write!(f, "more {what} in one class than the bytecode can number")
             }
             CompileError::Tree(what) => write!(f, "not a tree the parser produces: {what}"),
             CompileError::Stopped(Stop::OverBudget) => {

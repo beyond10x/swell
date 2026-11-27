@@ -15,7 +15,7 @@
 //!   (`realm/mod.rs`), the slots of running builtins (`object/builtin_function.rs`) and the
 //!   frame stack (`interp/mod.rs`);
 //! - a trace function per kind of record, `fn trace(&self, mark: &mut Mark)`: strings
-//!   (`heap/string.rs`), symbols (`heap/mod.rs`), objects (`object/mod.rs`, which calls the trace
+//!   (`heap/string.rs`), symbols and Private Names (`heap/mod.rs`), objects (`object/mod.rs`, which calls the trace
 //!   of the object's kind in `object/*.rs` and `host/host_object.rs`), realm records (`realm/mod.rs`, with the global
 //!   environment of `env/global.rs`), environment records (`env/mod.rs`) and script records
 //!   (`script.rs`).
@@ -57,6 +57,8 @@ use alloc::vec::Vec;
 pub(crate) enum Item {
     String(Handle),
     Symbol(Handle),
+    /// A Private Name (`heap/mod.rs`, `PrivateNameRecord`).
+    PrivateName(Handle),
     Object(Handle),
     Realm(Handle),
     Environment(Handle),
@@ -73,6 +75,7 @@ pub(crate) struct Mark {
     key: u32,
     strings: Workspace,
     symbols: Workspace,
+    private_names: Workspace,
     objects: Workspace,
     realms: Workspace,
     environments: Workspace,
@@ -101,6 +104,7 @@ impl Mark {
             key: heap.key,
             strings: heap.strings.take_workspace(),
             symbols: heap.symbols.take_workspace(),
+            private_names: heap.private_names.take_workspace(),
             objects: heap.objects.take_workspace(),
             realms: heap.realms.take_workspace(),
             environments: heap.environments.take_workspace(),
@@ -121,6 +125,7 @@ impl Mark {
     fn give_back(self, heap: &mut Heap) {
         heap.strings.give_back_workspace(self.strings);
         heap.symbols.give_back_workspace(self.symbols);
+        heap.private_names.give_back_workspace(self.private_names);
         heap.objects.give_back_workspace(self.objects);
         heap.realms.give_back_workspace(self.realms);
         heap.environments.give_back_workspace(self.environments);
@@ -133,6 +138,7 @@ impl Mark {
         let (workspace, handle) = match item {
             Item::String(handle) => (&mut self.strings, handle),
             Item::Symbol(handle) => (&mut self.symbols, handle),
+            Item::PrivateName(handle) => (&mut self.private_names, handle),
             Item::Object(handle) => (&mut self.objects, handle),
             Item::Realm(handle) => (&mut self.realms, handle),
             Item::Environment(handle) => (&mut self.environments, handle),
@@ -161,6 +167,7 @@ impl Mark {
         {
             let held = self.strings.held()
                 + self.symbols.held()
+                + self.private_names.held()
                 + self.objects.held()
                 + self.realms.held()
                 + self.environments.held()
@@ -204,6 +211,7 @@ impl Mark {
         let (workspace, handle) = match item {
             Item::String(handle) => (&self.strings, handle),
             Item::Symbol(handle) => (&self.symbols, handle),
+            Item::PrivateName(handle) => (&self.private_names, handle),
             Item::Object(handle) => (&self.objects, handle),
             Item::Realm(handle) => (&self.realms, handle),
             Item::Environment(handle) => (&self.environments, handle),
@@ -279,6 +287,9 @@ impl Mark {
         if let Some(slot) = self.symbols.pop() {
             return Some(Item::Symbol(handle(slot)));
         }
+        if let Some(slot) = self.private_names.pop() {
+            return Some(Item::PrivateName(handle(slot)));
+        }
         if let Some(slot) = self.environments.pop() {
             return Some(Item::Environment(handle(slot)));
         }
@@ -316,6 +327,9 @@ pub(crate) fn mark_phase<H: Host>(agent: &Agent<H>, mark: &mut Mark) -> Result<(
         match item {
             Item::String(handle) => heap.strings.get(handle).map_err(stale)?.trace(mark),
             Item::Symbol(handle) => heap.symbols.get(handle).map_err(stale)?.trace(mark),
+            Item::PrivateName(handle) => {
+                heap.private_names.get(handle).map_err(stale)?.trace(mark);
+            }
             Item::Object(handle) => {
                 let record = heap.objects.get(handle).map_err(stale)?;
                 mark.tracing = handle.index.saturating_add(1);
@@ -394,6 +408,7 @@ pub(crate) fn collect<H: Host>(agent: &mut Agent<H>) -> Result<CollectReport, St
     let mut credited = heap.objects.sweep().saturating_add(released);
     credited = credited.saturating_add(heap.strings.sweep());
     credited = credited.saturating_add(heap.symbols.sweep());
+    credited = credited.saturating_add(heap.private_names.sweep());
     credited = credited.saturating_add(heap.realms.sweep());
     credited = credited.saturating_add(heap.environments.sweep());
     credited = credited.saturating_add(heap.scripts.sweep());
@@ -415,8 +430,8 @@ mod tests {
     use super::{Item, Mark, mark_phase};
     use crate::builtins::async_iteration::AsyncFromSyncIterator;
     use crate::env::EnvironmentRecord;
-    use crate::heap::SymbolRecord;
     use crate::heap::string::HeapString;
+    use crate::heap::{PrivateNameRecord, SymbolRecord};
     use crate::host::hooks::test_host;
     use crate::host::hooks::test_host::NoHooks;
     use crate::host::host_object::HostObject;
@@ -462,6 +477,7 @@ mod tests {
     const KIND_SITES: &[&str] = &[
         "heap/string.rs HeapString::trace",
         "heap/mod.rs SymbolRecord::trace",
+        "heap/mod.rs PrivateNameRecord::trace",
         "host/host_object.rs HostObject::trace",
         "object/ordinary.rs Ordinary::trace",
         "object/array.rs Array::trace",
@@ -516,6 +532,16 @@ mod tests {
         let dense = heap.strings.allocate(HeapString::for_test(), 0).unwrap();
         let sparse = heap.strings.allocate(HeapString::for_test(), 0).unwrap();
         let symbol = heap.symbols.allocate(SymbolRecord::for_test(), 0).unwrap();
+        // A Private Name, whose description is the String of the String object below.
+        let private_name = heap
+            .private_names
+            .allocate(
+                PrivateNameRecord {
+                    description: StringRef { handle: string },
+                },
+                0,
+            )
+            .unwrap();
         let kinds = [
             ObjectKind::Ordinary(Ordinary::for_test()),
             ObjectKind::Array(Array::for_test_with(vec![
@@ -613,6 +639,7 @@ mod tests {
         let mut mark = Mark::take(&mut agent.heap);
         mark.push(Item::String(string));
         mark.push(Item::Symbol(symbol));
+        mark.push(Item::PrivateName(private_name));
         for &object in &objects {
             mark.push(Item::Object(object));
         }
@@ -647,6 +674,7 @@ mod tests {
         assert!(mark.is_marked(Item::String(dense)), "the dense element");
         assert!(mark.is_marked(Item::String(sparse)), "the sparse element");
         assert!(mark.is_marked(Item::Symbol(symbol)));
+        assert!(mark.is_marked(Item::PrivateName(private_name)));
         for &object in &objects {
             assert!(mark.is_marked(Item::Object(object)));
         }
