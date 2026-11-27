@@ -21,6 +21,9 @@ use crate::object::string::across::Across;
 use crate::ops::iteration::IteratorRecord;
 use crate::value::Value;
 
+// The module is test code (`#[cfg(test)] mod loop_tests` in `interp/mod.rs`); the attribute
+// says so to the scan of `source_scan::host_2_no_ambient_authority_in_engine_crates`.
+#[cfg(test)]
 std::thread_local! {
     /// `heap_bytes()` at each call of `probe`.
     static READINGS: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
