@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:proxy-descriptor-prototype-and-extensibility-traps
 kind: story
-status: active
+status: implemented
 title: The Proxy traps getPrototypeOf, setPrototypeOf, isExtensible, preventExtensions, getOwnPropertyDescriptor, defineProperty and ownKeys
 summary: The seven traps with their invariants in object/invariants.rs (IsCompatiblePropertyDescriptor, ownKeys checks); order 3; 204 cases (1 incoming).
 relations:
@@ -20,10 +20,11 @@ scope:
   path: crates/swell/tests/main.rs
 - confidence: inferred
   path: crates/swell/tests/proxy_shape_traps.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:33Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

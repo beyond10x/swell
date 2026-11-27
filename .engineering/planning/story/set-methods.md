@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:set-methods
 kind: story
-status: active
+status: implemented
 title: Set.prototype union, intersection, difference, symmetricDifference, isSubsetOf, isSupersetOf, isDisjointFrom
 summary: builtins/set/methods.rs with GetSetRecord over set-likes; order 3; 129 cases.
 relations:
@@ -19,10 +19,11 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/main.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:19Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:32Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

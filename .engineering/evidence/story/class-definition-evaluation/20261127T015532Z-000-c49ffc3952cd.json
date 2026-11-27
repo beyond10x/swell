@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:55:32Z",
+  "actor": "human:operator",
+  "artifact": "story:class-definition-evaluation",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 8ab9456, exit 0, on the build node; the unit was merged by commit ed7f24b6, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/classes.rs (swell::classes::*) and the cases of docs/plan/slice-08/story-classes.cases.txt in conformance/test262/expected.txt"
+  }
+}

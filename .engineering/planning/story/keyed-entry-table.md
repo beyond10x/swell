@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:keyed-entry-table
 kind: story
-status: active
+status: implemented
 title: The ordered entry table of Map and Set, keyed by SameValueZero with cursors
 summary: 'object/keyed_entries.rs: insertion-ordered entries with an index map above SMALL, String keys atomized, -0 as +0, cursors moved by compaction and clear, charged and stepped; order 1; no case.'
 relations:
@@ -12,10 +12,11 @@ scope:
   path: crates/swell/src/object/keyed_entries.rs
 - confidence: cited
   path: crates/swell/src/object/mod.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:16Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:16Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:30Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
