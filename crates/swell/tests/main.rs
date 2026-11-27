@@ -87,6 +87,8 @@ mod builtins_uri;
 mod builtins_weak_collections;
 #[cfg(any(not(test_modules), test_modules = "calls"))]
 mod calls;
+#[cfg(any(not(test_modules), test_modules = "class_fields"))]
+mod class_fields;
 #[cfg(any(not(test_modules), test_modules = "classes"))]
 mod classes;
 #[cfg(any(not(test_modules), test_modules = "collect"))]
