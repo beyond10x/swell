@@ -66,3 +66,20 @@ fn in_ranges(ranges: &[(u32, u32)], c: u32) -> bool {
         })
         .is_ok()
 }
+
+/// [`in_ranges`] with the code points around `c` that answer the same: the range of `ranges`
+/// that holds `c`, or the gap between the two ranges beside it (from 0 before the first, to
+/// `u32::MAX` after the last). One binary search.
+fn in_ranges_around(ranges: &[(u32, u32)], c: u32) -> (bool, u32, u32) {
+    let at = ranges.partition_point(|&(_, last)| last < c);
+    let next = ranges.get(at);
+    if let Some(&(first, last)) = next.filter(|&&(first, _)| first <= c) {
+        return (true, first, last);
+    }
+    let first = at
+        .checked_sub(1)
+        .and_then(|before| ranges.get(before))
+        .map_or(0, |&(_, last)| last.saturating_add(1));
+    let last = next.map_or(u32::MAX, |&(first, _)| first.saturating_sub(1));
+    (false, first, last)
+}

@@ -31,8 +31,15 @@
 //! (`builtins/object/from_entries.rs`), charges a step per iteration before its work, and
 //! closes the iterator on an abrupt completion of its own steps (IfAbruptCloseIterator); a
 //! throw of `next` ends it with no close, and a termination closes nothing.
+//!
+//! `getOrInsert`, `getOrInsertComputed` and `Map.groupBy` (`story:map-upsert-and-group-by`) are
+//! the group `map/upsert.rs`: the variant [`MapBuiltin::Upsert`], the two methods in
+//! [`PROTOTYPE_METHODS`] in the order of the clauses, and `groupBy` on `%Map%`.
+
+pub(crate) mod upsert;
 
 use crate::builtins::Method;
+use crate::builtins::map::upsert::UpsertBuiltin;
 use crate::builtins::object::argument;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
@@ -74,6 +81,8 @@ pub(crate) enum MapBuiltin {
     Values,
     /// `%MapIteratorPrototype%.next ( )` (24.1.5.2.1).
     IteratorNext,
+    /// `Map.groupBy`, `Map.prototype.getOrInsert` and `getOrInsertComputed` (`map/upsert.rs`).
+    Upsert(UpsertBuiltin),
 }
 
 /// The methods of `%Map.prototype%` after `clear` and `constructor`, in the order of the
@@ -83,6 +92,16 @@ const PROTOTYPE_METHODS: &[Method<MapBuiltin>] = &[
     ("entries", 0, MapBuiltin::Entries),
     ("forEach", 1, MapBuiltin::ForEach),
     ("get", 1, MapBuiltin::Get),
+    (
+        "getOrInsert",
+        2,
+        MapBuiltin::Upsert(UpsertBuiltin::GetOrInsert),
+    ),
+    (
+        "getOrInsertComputed",
+        2,
+        MapBuiltin::Upsert(UpsertBuiltin::GetOrInsertComputed),
+    ),
     ("has", 1, MapBuiltin::Has),
     ("keys", 0, MapBuiltin::Keys),
     ("set", 2, MapBuiltin::Set),
@@ -155,6 +174,14 @@ impl<H: Host> Agent<H> {
             0,
             BuiltinId::Map(MapBuiltin::Constructor),
             prototype,
+        )?;
+        // 24.1.2.1 `Map.groupBy ( items, callback )`, "length" 2.
+        self.define_builtin_method(
+            making,
+            constructor,
+            "groupBy",
+            2,
+            BuiltinId::Map(MapBuiltin::Upsert(UpsertBuiltin::GroupBy)),
         )?;
         self.define_species_getter(making, constructor, BuiltinId::Map(MapBuiltin::Species))?;
         let mut entries = None;
@@ -299,6 +326,7 @@ impl<H: Host> Agent<H> {
                 self.collection_iterator_of(this, map, IterationKind::Value, "Map.prototype.values")
             }
             MapBuiltin::IteratorNext => self.collection_iterator_next(this, map),
+            MapBuiltin::Upsert(id) => self.run_upsert_builtin(id, this, args),
         }
     }
 

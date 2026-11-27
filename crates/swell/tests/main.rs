@@ -47,6 +47,8 @@ mod builtins_json;
 mod builtins_json_parse;
 #[cfg(any(not(test_modules), test_modules = "builtins_map_and_set"))]
 mod builtins_map_and_set;
+#[cfg(any(not(test_modules), test_modules = "builtins_map_upsert"))]
+mod builtins_map_upsert;
 #[cfg(any(not(test_modules), test_modules = "builtins_math"))]
 mod builtins_math;
 #[cfg(any(not(test_modules), test_modules = "builtins_number"))]

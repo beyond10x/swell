@@ -1,0 +1,164 @@
+#!/bin/sh
+# Planted defect of the task slow-tests (Taskfile.yml; story realm-size-lane-within-its-share):
+# the collect mode of slow-tests runs in two parts, the tests of swell::main that run on a
+# bounded stack (taskfiles/realm-room-tests.awk -v rule=stack prints them "stack") and the
+# library's unit tests in the test profile at opt-level 0, the others in the profile collect at
+# opt-level 1. A stack test proves the promised stack with frames whose size depends on the
+# optimization level, so a run that put it at opt-level 1 only would prove less, and say nothing.
+# No test runs: the script plants a tree of its own (.out/gate-tests/<name>/run-<case>) with the
+# repository's Taskfile.yml and taskfiles/, a crate swell whose library reads
+# SWELL_FULL_COUNTS, whose tests/deep.rs reads it and holds three tests (one of them under
+# #[cfg(not(feature = "collect-every-safe-point"))]) and whose tests/plain.rs holds one test and
+# reads neither SWELL_FULL_COUNTS nor stack_with_room, and a stub cargo first on PATH that logs
+# each run's profile, the value of SWELL_NO_STACK_TESTS, whether it ignores the default filter,
+# its -E filter and the names of the default-filter line of its --config-file, and answers with
+# a Starting and a Summary line and a JUnit file.
+# 1. deep::runs_on_the_promised_stack calls stack_with_room( from a function nested in it (its
+#    body passed by value, as the stack tests of swell do), deep::runs_on_any_stack does not:
+#    task slow-tests exits 0, prints "1 of the 2 tests ... that the collect build holds ... run
+#    at opt-level 0 with the unit tests of the library, the 1 others at opt-level 1; 1 test(s)
+#    of those modules are not in the collect build; 1 test(s) ... in other modules run in
+#    neither", the collect run at opt-level 0 takes -E "binary_id(swell) | <module deep>" and
+#    a default filter that leaves out the three tests printed "other", and the run with
+#    --cargo-profile collect and --test main takes -E "<module deep>" and a default filter of
+#    those three alone (a test the rule does not print, one a macro writes, may run on a
+#    bounded stack, so it runs at opt-level 0 only);
+#    neither run passes --ignore-default-filter; the run at opt-level 1 has
+#    SWELL_NO_STACK_TESTS=1 (the guard that fails a stack test the rule missed) and no other
+#    run has it.
+# 2. The planted defect: no test reaches stack_with_room (the module names it in a function no
+#    test calls), so the rule prints no test "stack" and every test of the module would run at
+#    opt-level 1 only: the task fails, saying it finds no test that runs on a bounded stack,
+#    and the stub ran no collect run.
+# Run from the repository root: sh tests/gate/slow-tests-runs-the-stack-tests-at-opt-level-0.sh
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS
+export NO_COLOR=1 CARGO_TERM_COLOR=never
+name=slow-tests-runs-the-stack-tests-at-opt-level-0
+dir=.out/gate-tests/$name
+rm -rf "$dir"
+mkdir -p "$dir/bin" || { echo "$name: FAIL cannot make $dir"; exit 1; }
+root=$(pwd)
+
+fail() {
+  echo "$name: FAIL $*"
+  exit 1
+}
+
+[ -f Taskfile.yml ] && [ -f taskfiles/realm-room-tests.awk ] || fail "run it from the repository root"
+
+printf '%s\n' '#!/bin/sh' \
+  'profile=test; prev=""; filter=""; cfg=""; ignore=no' \
+  'for a in "$@"; do' \
+  '  [ "$prev" = "--cargo-profile" ] && profile=$a' \
+  '  [ "$prev" = "-E" ] && filter=$a' \
+  '  [ "$prev" = "--config-file" ] && cfg=$a' \
+  '  [ "$a" = "--ignore-default-filter" ] && ignore=yes' \
+  '  prev=$a' \
+  'done' \
+  'case " $* " in *" --test main "*) target=main ;; *) target=all ;; esac' \
+  'case " $* " in *" collect-every-safe-point "*) mode=collect ;; *) mode=default ;; esac' \
+  'names=none; kind=none; [ -n "$cfg" ] && names=$(grep "^default-filter = " "$cfg" | grep -o "test(=[^)]*)" | tr "\n" " ")' \
+  'if [ -n "$cfg" ]; then if grep -q "^default-filter = .not (" "$cfg"; then kind=not; else kind=only; fi; fi' \
+  'printf "run %s profile %s target %s guard %s ignore-default-filter %s filter [%s] config-%s %s\n" "$mode" "$profile" "$target" "${SWELL_NO_STACK_TESTS:-unset}" "$ignore" "$filter" "$kind" "$names" >> "$STUB_LOG"' \
+  'mkdir -p target/nextest/default' \
+  'printf "<testsuites><testsuite><testcase name=\"deep::t\" classname=\"swell::main\" time=\"0.1\"/></testsuite></testsuites>\n" > target/nextest/default/junit.xml' \
+  'echo "    Starting 2 tests across 1 binary"' \
+  'echo "     Summary [   0.100s] 2 tests run: 2 passed, 0 skipped"' \
+  'exit 0' > "$dir/bin/cargo" || fail "cannot write the stub cargo"
+chmod +x "$dir/bin/cargo"
+
+plant() {
+  run="$dir/run-$1"
+  mkdir -p "$run/crates/swell/tests/support" "$run/crates/swell/src" "$run/.out" "$run/.config" || fail "cannot make $run"
+  cp "$root/Taskfile.yml" "$run/Taskfile.yml" || fail "cannot copy Taskfile.yml"
+  cp -R "$root/taskfiles" "$run/taskfiles" || fail "cannot copy taskfiles"
+  cp "$root/.config/nextest.toml" "$run/.config/" || fail "cannot copy .config/nextest.toml"
+  # Files the task files read when they load (taskfiles/spec.yml, taskfiles/test262*.yml).
+  mkdir -p "$run/spec" "$run/conformance/test262" || fail "cannot make $run/spec"
+  cp "$root/spec/ess-inputs.yaml" "$run/spec/" || fail "cannot copy spec/ess-inputs.yaml"
+  cp "$root/conformance/test262/PIN" "$run/conformance/test262/" || fail "cannot copy conformance/test262/PIN"
+  printf '[package]\nname = "swell"\n' > "$run/crates/swell/Cargo.toml"
+  printf '// a unit test reads SWELL_FULL_COUNTS\n' > "$run/crates/swell/src/lib.rs"
+  printf 'mod deep;\nmod plain;\nmod support;\n' > "$run/crates/swell/tests/main.rs"
+  printf 'pub fn stack_with_room(bytes: usize) -> usize {\n    bytes / 8 * 7\n}\n' > "$run/crates/swell/tests/support/host.rs"
+  printf '#[test]\nfn outside_the_filter() {\n    assert_eq!(1 + 1, 2);\n}\n' > "$run/crates/swell/tests/plain.rs"
+}
+
+# 1. The stack test calls stack_with_room( in a function nested in it.
+plant split
+printf '%s\n' \
+  'fn count() -> u32 {' \
+  '    if std::env::var("SWELL_FULL_COUNTS").is_ok() { 1000 } else { 10 }' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn runs_on_the_promised_stack() {' \
+  '    fn body() {' \
+  '        let _ = stack_with_room(1 << 20);' \
+  '    }' \
+  '    std::thread::spawn(body).join().unwrap();' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn runs_on_any_stack() {' \
+  '    assert!(count() > 0);' \
+  '}' \
+  '' \
+  '/// Not in the collect build.' \
+  '#[cfg(not(feature = "collect-every-safe-point"))]' \
+  '#[test]' \
+  'fn runs_in_the_default_mode_only() {' \
+  '    assert!(count() > 0);' \
+  '}' > "$dir/run-split/crates/swell/tests/deep.rs"
+: > "$dir/stub-split.log"
+STUB_LOG="$root/$dir/stub-split.log" PATH="$root/$dir/bin:$PATH" task -d "$dir/run-split" slow-tests > "$dir/split.out" 2>&1 ||
+  fail "task slow-tests exited non-zero on a module with one stack test and one other ($dir/split.out)"
+grep -qF "slow-tests collect-every-safe-point: 1 of the 2 tests of swell::main in the collect filter's modules that the collect build holds run on a bounded stack (taskfiles/realm-room-tests.awk -v rule=stack) and run at opt-level 0 with the unit tests of the library, the 1 others at opt-level 1; 1 test(s) of those modules are not in the collect build; 1 test(s) of swell::main in other modules run in neither" "$dir/split.out" ||
+  fail "slow-tests did not count 1 stack test at opt-level 0, 1 test at opt-level 1, 1 test compiled out of the collect build and 1 test outside the collect filter ($dir/split.out)"
+low=$(grep '^run collect profile test ' "$dir/stub-split.log")
+high=$(grep '^run collect profile collect ' "$dir/stub-split.log")
+[ "$(printf '%s\n' "$low" | grep -c .)" = 1 ] || fail "the stub saw not one collect run in the test profile ($dir/stub-split.log)"
+[ "$(printf '%s\n' "$high" | grep -c .)" = 1 ] || fail "the stub saw not one collect run in the profile collect ($dir/stub-split.log)"
+case "$low" in *"config-not test(=deep::runs_on_any_stack) test(=deep::runs_in_the_default_mode_only) test(=plain::outside_the_filter) ") ;; *) fail "the collect run at opt-level 0 does not leave out the tests printed other alone: $low" ;; esac
+case "$high" in *"target main "*"config-only test(=deep::runs_on_any_stack) test(=deep::runs_in_the_default_mode_only) test(=plain::outside_the_filter) ") ;; *) fail "the collect run at opt-level 1 does not run --test main on the tests printed other alone (a test the rule does not print, one a macro writes, may run on a bounded stack): $high" ;; esac
+# Each run's -E filter and its default filter: the default filter leaves a test out only when
+# nextest reads it, and the -E filter names what the run takes from.
+case "$low" in *" ignore-default-filter no filter [binary_id(swell) | (binary_id(swell::main) & test(/^deep::/))] "*) ;; *) fail "the collect run at opt-level 0 does not take the library's tests and the module deep, with its default filter read: $low" ;; esac
+case "$high" in *" ignore-default-filter no filter [(binary_id(swell::main) & test(/^deep::/))] "*) ;; *) fail "the collect run at opt-level 1 does not take the module deep alone, with its default filter read: $high" ;; esac
+# The guard: the run at opt-level 1 sets SWELL_NO_STACK_TESTS, so a stack test the rule missed
+# fails there; the runs at opt-level 0 do not set it.
+case "$high" in *" guard 1 "*) ;; *) fail "the collect run at opt-level 1 does not set SWELL_NO_STACK_TESTS=1: $high" ;; esac
+set0=$(grep '^run ' "$dir/stub-split.log" | grep -v '^run collect profile collect ' | grep -v ' guard unset ' | head -n 1)
+[ -z "$set0" ] || fail "a run at opt-level 0 sets SWELL_NO_STACK_TESTS: $set0"
+grep -q '^slow-tests collect-every-safe-point opt-level 1: 1 test binaries: 2 passed' "$dir/split.out" ||
+  fail "slow-tests printed no count of its run at opt-level 1 ($dir/split.out)"
+
+# 2. The planted defect: no test reaches stack_with_room.
+plant none
+printf '%s\n' \
+  'fn count() -> u32 {' \
+  '    if std::env::var("SWELL_FULL_COUNTS").is_ok() { 1000 } else { 10 }' \
+  '}' \
+  '' \
+  'fn unused() -> usize {' \
+  '    stack_with_room(1 << 20)' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn runs_on_the_promised_stack() {' \
+  '    assert!(count() > 1);' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn runs_on_any_stack() {' \
+  '    assert!(count() > 0);' \
+  '}' > "$dir/run-none/crates/swell/tests/deep.rs"
+: > "$dir/stub-none.log"
+if STUB_LOG="$root/$dir/stub-none.log" PATH="$root/$dir/bin:$PATH" task -d "$dir/run-none" slow-tests > "$dir/none.out" 2>&1; then
+  fail "task slow-tests exited 0 when no test of swell::main runs on a bounded stack ($dir/none.out)"
+fi
+grep -qF 'slow-tests: taskfiles/realm-room-tests.awk -v rule=stack finds no test of swell::main that runs on a bounded stack' "$dir/none.out" ||
+  fail "slow-tests did not say it finds no test on a bounded stack ($dir/none.out)"
+! grep -q '^run collect ' "$dir/stub-none.log" || fail "the stub ran a collect run although no test runs on a bounded stack ($dir/stub-none.log)"
+
+echo "$name: ok"

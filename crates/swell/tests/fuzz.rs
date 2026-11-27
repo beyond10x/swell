@@ -2194,8 +2194,7 @@ const ONE_SEED: &str = "SWELL_FUZZ_SEED";
 fn run_twice(seed: u64) {
     let limits = random_limits(&mut Rng(seed));
     let stack = limits.min_stack_bytes().saturating_add(HARNESS_STACK);
-    let joined = std::thread::Builder::new()
-        .stack_size(stack)
+    let joined = crate::support::host::stack_thread(stack)
         .spawn(move || {
             let first = run_sequence(seed);
             let second = run_sequence(seed);

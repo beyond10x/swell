@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T07:21:04Z",
+  "actor": "human:operator",
+  "artifact": "story:map-upsert-and-group-by",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/upsert at 52337317, build node, before the merge into wave/big-2",
+    "reference": "swell main 1692 passed, 1 skipped (default) and 1664 passed, 1 skipped (collect); swell lib 283 passed; task test-stack-profiles 7 passed in each profile; task clippy exit 0; cargo fmt --check exit 0"
+  }
+}
