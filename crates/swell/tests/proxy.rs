@@ -1731,13 +1731,12 @@ fn an_accessor_behind_a_trapless_proxy_parent_gets_the_receiver() {
 }
 
 /// The walks of the chain: a Proxy as the prototype at depth 1, 2 and 100 receives the
-/// receiver; `set` through a Proxy prototype with an Array and a String wrapper as receiver;
-/// `__proto__`, `instanceof`, `for`-`in` and `isPrototypeOf` over a Proxy.
+/// receiver. The other walks are in `walks_of_the_chain_through_a_proxy_with_other_receivers`
+/// (one test in two, each within the CPU bound of the lane's collect build).
 #[test]
 fn walks_of_the_chain_through_a_proxy() {
     answers(
         "var r = [];\n\
-         function attempt(f) { try { return String(f()); } catch (e) { return e.name; } }\n\
          var seen = [];\n\
          var P = new Proxy({ inherited: 1 }, {\n\
            get: function (t, k, rc) { seen.push(\"get:\" + String(k) + \":\" + (rc === o)); return Reflect.get(t, k, rc); },\n\
@@ -1750,6 +1749,19 @@ fn walks_of_the_chain_through_a_proxy() {
            r.push(o.inherited, \"inherited\" in o, (o.added = depth, Object.getOwnPropertyDescriptor(o, \"added\").value));\n\
          });\n\
          r.push(seen.join(\" \"));\n\
+         r.join();",
+        "1,true,1,1,true,2,1,true,100,\
+         get:inherited:true has:inherited set:added:true get:inherited:true has:inherited set:added:true \
+         get:inherited:true has:inherited set:added:true",
+    );
+}
+
+/// The other walks of the chain: `set` through a Proxy prototype with an Array and a String
+/// wrapper as receiver; `__proto__`, `instanceof`, `for`-`in` and `isPrototypeOf` over a Proxy.
+#[test]
+fn walks_of_the_chain_through_a_proxy_with_other_receivers() {
+    answers(
+        "var r = [];\n\
          var T = new Proxy({}, {});\n\
          var arr = [1, 2, 3]; Object.setPrototypeOf(arr, T);\n\
          arr[5] = 6;\n\
@@ -1768,10 +1780,7 @@ fn walks_of_the_chain_through_a_proxy() {
          for (var k in enumerated) keys.push(k);\n\
          r.push(keys.join(\"\"));\n\
          r.join();",
-        "1,true,1,1,true,2,1,true,100,\
-         get:inherited:true has:inherited set:added:true get:inherited:true has:inherited set:added:true \
-         get:inherited:true has:inherited set:added:true,\
-         6,true,0,q,false,a,true,n,true,true,true,false,true,true,cab",
+        "6,true,0,q,false,a,true,n,true,true,true,false,true,true,cab",
     );
 }
 
