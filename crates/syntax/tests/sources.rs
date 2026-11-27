@@ -3020,7 +3020,7 @@ fn class_elements_scale_linearly() {
             let fields: String = (0..n).map(|i| format!("f{i} = {i};")).collect();
             format!("class C {{ {fields} }}")
         }),
-        ("static blocks", "class static block", |n| {
+        ("static blocks", "", |n| {
             format!("class C {{ {} }}", "static { var v = 1; }".repeat(n))
         }),
         ("private names in nested classes", "private field", |n| {

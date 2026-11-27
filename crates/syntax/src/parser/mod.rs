@@ -67,7 +67,6 @@ pub(crate) struct Parsed {
 pub const HOLDS: &[(&str, u32)] = &[
     ("private field", 8),
     ("private name in", 8),
-    ("class static block", 8),
 ];
 
 pub(crate) struct Parser<'a, 'm> {
