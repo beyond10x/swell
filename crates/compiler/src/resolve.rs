@@ -179,6 +179,84 @@ pub(crate) enum Site {
     /// The class's own name in its class scope, by the class's constructor, which step 4 of
     /// ClassDefinitionEvaluation initializes with F (`class.rs`).
     ClassName(FunctionId),
+    /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
+    /// item 6), from the top of the function: the constructor itself, or an arrow function whose
+    /// nearest function that is not an arrow function is one (or eval code whose context has
+    /// inDerivedConstructor). Every access is checked; the compiler adds the environments the
+    /// function's code pushed to its hops (`Compiler::this_instruction`).
+    This(FunctionId),
+    /// The hidden binding of the computed key `e` of a field in its class scope, from the class
+    /// definition, which stores the key there (`docs/design/engine.md`, "Classes", item 2,
+    /// steps 1 and 3; [`Resolver::field_key_bindings`]).
+    FieldKey(ExprId),
+    /// The same binding, from the code of the field's initializer function, which reads the key
+    /// there for `DefineComputedField` ("Classes", item 4).
+    FieldKeyRead(ExprId),
+}
+
+/// Where a class record lies in the tree: the class declaration or the class expression.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ClassAt {
+    Stmt(StmtId),
+    Expr(ExprId),
+}
+
+impl HeapBytes for ClassAt {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
+impl ClassAt {
+    /// The class record at this place of `ast`.
+    pub(crate) fn class(self, ast: &Ast) -> Result<&swell_syntax::ast::Class, CompileError> {
+        match self {
+            ClassAt::Stmt(id) => match ast.stmt(id).map(|n| &n.stmt) {
+                Some(Stmt::Class(class)) => Ok(class),
+                _ => Err(malformed("a class declaration")),
+            },
+            ClassAt::Expr(id) => match ast.expr(id).map(|n| &n.expr) {
+                Some(Expr::Class(class)) => Ok(class),
+                _ => Err(malformed("a class expression")),
+            },
+        }
+    }
+}
+
+/// The fields whose initializer is code of the `FieldInitializer` function `id` of `class`, from
+/// its element `first` on, where the first of them stands ([`Resolution::field_classes`]): a run
+/// of static fields ends at the first element that is not one of its fields, and the instance
+/// elements' fields are the later fields that are not static. So the fields of every function of
+/// a class are found in one pass over its elements in all, however many runs it has.
+pub(crate) fn initializer_fields_of(
+    class: &swell_syntax::ast::Class,
+    id: FunctionId,
+    first: usize,
+) -> impl Iterator<Item = &ClassElement> {
+    let of = move |e: &&ClassElement| matches!(e, ClassElement::Field { function, .. } if *function == id);
+    let run = matches!(
+        class.elements.get(first),
+        Some(ClassElement::Field {
+            is_static: true,
+            ..
+        })
+    );
+    class
+        .elements
+        .iter()
+        .skip(first)
+        .take_while(move |e| !run || of(e))
+        .filter(of)
+}
+
+/// The name of the hidden binding of the computed field key `e` in its class scope: no
+/// identifier and no private name has a space, so no name of the source finds it.
+fn field_key_name(e: ExprId, m: &Meter<'_>) -> Result<String, Stop> {
+    // "#key " and the ten digits of a `u32` at most: the text fits the room charged, so the
+    // write grows nothing.
+    let mut name = m.string_with_capacity(16)?;
+    let _ = core::fmt::Write::write_fmt(&mut name, format_args!("#key {}", e.0));
+    Ok(name)
 }
 
 /// Where a name resolves to, from one site.
@@ -263,6 +341,20 @@ pub(crate) struct Resolution {
     /// a computed key of an object literal. Their class code names F right after it is made
     /// ([`crate::bytecode::Instruction::SetClassName`]).
     pub named_by_key: BTreeSet<FunctionId>,
+    /// The constructors of the classes with a heritage: each has the hidden binding `this`
+    /// ([`Site::This`]) and returns by the derived rule (`class.rs`).
+    pub derived_constructors: BTreeSet<FunctionId>,
+    /// Those of [`Resolution::derived_constructors`] that are the default one the parser made:
+    /// their template is `default_derived_constructor` (`class.rs`).
+    pub default_derived_constructors: BTreeSet<FunctionId>,
+    /// Of eval code whose context has inDerivedConstructor: `this` at its top is the binding
+    /// `this` looked up by name, as in its arrow functions.
+    pub this_by_name: bool,
+    /// Each `FieldInitializer` function (the instance elements' initializer and each run of
+    /// static fields) with the place of its class, whose fields its code defines (`class.rs`),
+    /// and the index of the element its first field is (the number of elements when it has none),
+    /// from which [`initializer_fields_of`] reads them.
+    pub field_classes: BTreeMap<FunctionId, (ClassAt, usize)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -341,6 +433,9 @@ enum Walk {
     /// Leaves the lexical scope of the node, if it was entered.
     LeaveLexical(ScopeKey),
     Leave,
+    /// The store of the computed field key `e` into its hidden binding ([`Site::FieldKey`]),
+    /// right after the key, in the scope the key is walked in.
+    FieldKey(ExprId),
 }
 
 impl HeapBytes for Walk {
@@ -380,16 +475,30 @@ struct Resolver<'a, 'm> {
     instance_elements: BTreeSet<FunctionId>,
     /// [`Resolution::named_by_key`].
     named_by_key: BTreeSet<FunctionId>,
+    /// [`Resolution::derived_constructors`].
+    derived_constructors: BTreeSet<FunctionId>,
+    /// [`Resolution::default_derived_constructors`].
+    default_derived_constructors: BTreeSet<FunctionId>,
+    /// [`Resolution::this_by_name`].
+    this_by_name: bool,
+    /// The arrow functions whose `this` is the binding `this` of a derived constructor or of
+    /// eval code with inDerivedConstructor, each found from the function around it, so no walk
+    /// over the scopes is made per arrow.
+    this_arrows: BTreeSet<FunctionId>,
+    /// [`Resolution::field_classes`].
+    field_classes: BTreeMap<FunctionId, (ClassAt, usize)>,
 }
 
 fn malformed(what: &str) -> CompileError {
     CompileError::Tree(what.to_string())
 }
 
-/// Resolves every name of `script`; of eval code when `eval_code` is true.
+/// Resolves every name of `script`; of eval code when `eval_code` is true, whose context has
+/// inDerivedConstructor when `this_by_name` is ([`Resolution::this_by_name`]).
 pub(crate) fn resolve(
     script: &Script,
     eval_code: bool,
+    this_by_name: bool,
     m: &Meter<'_>,
 ) -> Result<Resolution, CompileError> {
     let mut scopes = m.with_capacity(1)?;
@@ -422,6 +531,11 @@ pub(crate) fn resolve(
         checked_locals: BTreeSet::new(),
         instance_elements: BTreeSet::new(),
         named_by_key: BTreeSet::new(),
+        derived_constructors: BTreeSet::new(),
+        default_derived_constructors: BTreeSet::new(),
+        this_by_name: eval_code && this_by_name,
+        this_arrows: BTreeSet::new(),
+        field_classes: BTreeMap::new(),
     };
     let resolution = resolve_with(&mut r, script, eval_code);
     // The resolver's own structures are dropped with it; on a stop the compile step credits
@@ -506,6 +620,10 @@ fn resolve_with(
         eval_env,
         instance_elements: core::mem::take(&mut r.instance_elements),
         named_by_key: core::mem::take(&mut r.named_by_key),
+        derived_constructors: core::mem::take(&mut r.derived_constructors),
+        default_derived_constructors: core::mem::take(&mut r.default_derived_constructors),
+        this_by_name: r.this_by_name,
+        field_classes: core::mem::take(&mut r.field_classes),
     })
 }
 
@@ -595,7 +713,12 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .bindings
             .len()
             .saturating_mul(map_entry_bytes::<usize, ()>());
+        let this_arrows = self
+            .this_arrows
+            .len()
+            .saturating_mul(map_entry_bytes::<FunctionId, ()>());
         capacity(&self.work)
+            .saturating_add(this_arrows)
             .saturating_add(occurrences)
             .saturating_add(bindings)
             .saturating_add(scopes)
@@ -880,6 +1003,12 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.current = parent;
                 Ok(())
             }
+            Walk::FieldKey(e) => {
+                let name = field_key_name(e, self.m)?;
+                self.occur(Site::FieldKey(e), &name);
+                self.m.release(name);
+                Ok(())
+            }
         }
     }
 
@@ -1076,7 +1205,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 if let Some(name) = &class.name {
                     self.occur(Site::VarDecl(id, 0), &name.name);
                 }
-                self.class_scope(class)?;
+                self.class_scope(class, ClassAt::Stmt(id))?;
             }
             // The object is evaluated outside the scope of the body.
             Stmt::With { object, body } => {
@@ -1097,8 +1226,16 @@ impl<'a, 'm> Resolver<'a, 'm> {
     /// computed key and function, in source order, walked in it, after the heritage in the
     /// private record ([`Resolver::private_record`]); the scope left after them. The constructor
     /// is named by the class's name, a method by its literal key (a getter `get <key>`, a setter
-    /// `set <key>`); a computed key names its method when the class is evaluated.
-    fn class_scope(&mut self, class: &swell_syntax::ast::Class) -> Result<(), CompileError> {
+    /// `set <key>`); a computed key names its method when the class is evaluated. A field's
+    /// computed key is followed by the store into its hidden binding ([`Walk::FieldKey`]); its
+    /// initializer is code of its run's function, walked once, at the run's first field, as
+    /// [`swell_syntax::ast::Class`] numbers it; an anonymous function there is named by the
+    /// field ([`Resolver::field_name`]). `at` is where the class lies in the tree.
+    fn class_scope(
+        &mut self,
+        class: &swell_syntax::ast::Class,
+        at: ClassAt,
+    ) -> Result<(), CompileError> {
         let ctor = class.constructor;
         let key = ScopeKey::Class(ctor);
         let owner = self.scopes.get(self.current).and_then(|s| s.owner);
@@ -1116,7 +1253,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
             let units = self.m.utf16(&name.name)?;
             self.give_name(ctor, units)?;
         }
-        self.field_key_bindings(scope, class)?;
+        self.field_key_bindings(scope, class, at)?;
         let instance = class.elements.iter().any(|e| match e {
             ClassElement::Field { is_static, .. } => !is_static,
             ClassElement::Method { is_static, key, .. } => {
@@ -1127,10 +1264,19 @@ impl<'a, 'm> Resolver<'a, 'm> {
         if instance {
             self.m.insert(&mut self.instance_elements, ctor)?;
         }
-        // The children, pushed last first: the scope is left after them.
+        if class.heritage.is_some() {
+            self.m.insert(&mut self.derived_constructors, ctor)?;
+            if class.default_constructor {
+                self.m
+                    .insert(&mut self.default_derived_constructors, ctor)?;
+            }
+        }
+        // The children, pushed last first: the scope is left after them. At most three per
+        // element (a field's key, its store and its run's function).
         let mut children: Vec<Walk> = self
             .m
-            .with_capacity(class.elements.len().saturating_mul(2).saturating_add(3))?;
+            .with_capacity(class.elements.len().saturating_mul(3).saturating_add(3))?;
+        let (mut first_instance, mut run) = (class.instance_elements, None);
         children.extend(class.heritage.map(Walk::Expr));
         children.push(Walk::Function(ctor));
         for element in &class.elements {
@@ -1161,17 +1307,38 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     children.push(Walk::Function(*function));
                 }
                 ClassElement::Field {
-                    key, initializer, ..
+                    is_static,
+                    key,
+                    initializer,
+                    function,
+                    ..
                 } => {
                     if let ClassKey::Computed(e) = key {
                         children.push(Walk::Expr(*e));
+                        children.push(Walk::FieldKey(*e));
                     }
-                    children.extend(initializer.map(Walk::Expr));
+                    self.field_name(key, *initializer)?;
+                    let first = if *is_static {
+                        run != Some(*function)
+                    } else {
+                        first_instance.take().is_some()
+                    };
+                    if first {
+                        children.push(Walk::Function(*function));
+                    }
                 }
                 ClassElement::StaticBlock { function, .. } => {
                     children.push(Walk::Function(*function));
                 }
             }
+            run = match element {
+                ClassElement::Field {
+                    is_static: true,
+                    function,
+                    ..
+                } => Some(*function),
+                _ => None,
+            };
         }
         children.push(Walk::LeaveLexical(key));
         self.private_record(class)?;
@@ -1182,12 +1349,93 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// One hidden binding per computed field key of `class` in its class scope `scope`
-    /// ("Classes", item 2, step 1). None here: `story:public-class-fields` fills it.
+    /// ("Classes", item 2, step 1): stored by the class definition ([`Site::FieldKey`]) and read
+    /// by the initializer function of the field ([`Site::FieldKeyRead`]), so it lives in the
+    /// scope's record. Each `FieldInitializer` function of the class is mapped to the class's
+    /// place `at` and the index of its first field ([`Resolution::field_classes`]).
     fn field_key_bindings(
         &mut self,
-        _scope: usize,
-        _class: &swell_syntax::ast::Class,
+        scope: usize,
+        class: &swell_syntax::ast::Class,
+        at: ClassAt,
     ) -> Result<(), CompileError> {
+        for (i, element) in class.elements.iter().enumerate() {
+            let ClassElement::Field { key, function, .. } = element else {
+                continue;
+            };
+            if !self.field_classes.contains_key(function) {
+                self.m
+                    .insert_entry(&mut self.field_classes, *function, (at, i))?;
+            }
+            if let ClassKey::Computed(e) = key {
+                let name = field_key_name(*e, self.m)?;
+                self.declare(scope, &name);
+                self.m.release(name);
+            }
+        }
+        // The instance elements of a class without a field that is not static.
+        if let Some(f) = class.instance_elements
+            && !self.field_classes.contains_key(&f)
+        {
+            self.m
+                .insert_entry(&mut self.field_classes, f, (at, class.elements.len()))?;
+        }
+        Ok(())
+    }
+
+    /// The reads of the hidden bindings of the computed keys of the fields that the
+    /// `FieldInitializer` function `id` defines, from the current scope, its own.
+    fn field_key_reads(&mut self, id: FunctionId) -> Result<(), CompileError> {
+        let (at, first) = self
+            .field_classes
+            .get(&id)
+            .copied()
+            .ok_or_else(|| malformed("a field initializer outside a class"))?;
+        let ast = self.ast;
+        for element in initializer_fields_of(at.class(ast)?, id, first) {
+            if let ClassElement::Field {
+                key: ClassKey::Computed(e),
+                ..
+            } = element
+            {
+                let name = field_key_name(*e, self.m)?;
+                self.occur(Site::FieldKeyRead(*e), &name);
+                self.m.release(name);
+            }
+        }
+        Ok(())
+    }
+
+    /// NamedEvaluation of a field's initializer (`#sec-runtime-semantics-classfielddefinitionevaluation`,
+    /// step 3, with IsAnonymousFunctionDefinition): an anonymous function or class under the
+    /// literal key `key` takes the key as its name at compile time; an anonymous class under a
+    /// computed key takes it at run time before its elements ([`Resolution::named_by_key`]), and a
+    /// function there takes it by `SetFunctionName` (`class.rs`).
+    fn field_name(
+        &mut self,
+        key: &ClassKey,
+        initializer: Option<ExprId>,
+    ) -> Result<(), CompileError> {
+        let Some(e) = initializer else {
+            return Ok(());
+        };
+        let Some(f) = self.anonymous_function(e) else {
+            return Ok(());
+        };
+        match key {
+            ClassKey::Literal(k) => {
+                let units = property_key(k, self.m)?;
+                self.give_name(f, units)?;
+            }
+            ClassKey::Computed(_) => {
+                if let Some(Expr::Class(_)) = self.ast.expr(e).map(|n| &n.expr) {
+                    self.m.insert(&mut self.named_by_key, f)?;
+                }
+            }
+            // A private name names its function at compile time:
+            // `story:private-fields-and-private-in`.
+            ClassKey::Private(_) => {}
+        }
         Ok(())
     }
 
@@ -1403,7 +1651,7 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 children.extend(argument.iter().map(|e| Walk::Expr(*e)))
             }
             Expr::Function(f) => children.push(Walk::Function(*f)),
-            Expr::Class(class) => self.class_scope(class)?,
+            Expr::Class(class) => self.class_scope(class, ClassAt::Expr(id))?,
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => {
                 children.push(Walk::Expr(*operand));
             }
@@ -1510,8 +1758,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
             self.m.insert_entry(&mut self.self_scopes, id, scope)?;
             self.work.push(Walk::Leave);
         }
+        let outer = self.scopes.get(self.current).and_then(|s| s.owner);
         let scope = self.new_scope(Kind::Function, Some(id));
         self.m.insert_entry(&mut self.function_scopes, id, scope)?;
+        self.this_binding(id, f.kind, outer, scope)?;
         let simple = f.is_simple();
         for (i, p) in f.params.iter().enumerate() {
             // A parameter of a list that is not simple is initialized in order: an access
@@ -1561,6 +1811,47 @@ impl<'a, 'm> Resolver<'a, 'm> {
         Ok(())
     }
 
+    /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
+    /// item 6), in the function scope `scope` of `id`, whose kind is `kind` and which stands in
+    /// the code of the function `outer` (`None` for the top): declared in the scope of a derived
+    /// constructor, a `let`-like binding every access checks, and its site [`Site::This`] in
+    /// that scope; an arrow function whose `outer` is a derived constructor, or another such
+    /// arrow, or the top of eval code with inDerivedConstructor, gets only the site, which
+    /// reaches the binding through its environments, or by name from eval code. A binding an
+    /// arrow or a direct `eval` reaches lives in the function environment by the rules that
+    /// place every binding.
+    fn this_binding(
+        &mut self,
+        id: FunctionId,
+        kind: FunctionKind,
+        outer: Option<FunctionId>,
+        scope: usize,
+    ) -> Result<(), CompileError> {
+        if self.derived_constructors.contains(&id) {
+            let data = LexicalData {
+                constant: false,
+                end: u32::MAX,
+            };
+            self.declare_as(scope, "this", Some(data));
+            self.occur(Site::This(id), "this");
+            return Ok(());
+        }
+        if kind != FunctionKind::Arrow {
+            return Ok(());
+        }
+        let derived = match outer {
+            None => self.this_by_name,
+            Some(outer) => {
+                self.derived_constructors.contains(&outer) || self.this_arrows.contains(&outer)
+            }
+        };
+        if derived {
+            self.m.insert(&mut self.this_arrows, id)?;
+            self.occur(Site::This(id), "this");
+        }
+        Ok(())
+    }
+
     /// Enters the body of function `id`, in the scope of its parameters: when a parameter has
     /// an initializer, a scope of its own for its `var` names first
     /// (`#sec-functiondeclarationinstantiation`, step 28), each name a parameter or `arguments`
@@ -1596,6 +1887,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 .and_then(|x| x.name.as_ref())
                 .ok_or_else(|| malformed("a function declaration without a name"))?;
             self.occur(Site::Declaration(*d), &name.name);
+        }
+        // The code of the fields of a run reads their computed keys ("Classes", item 4).
+        if f.kind == FunctionKind::FieldInitializer {
+            self.field_key_reads(id)?;
         }
         self.push_list(&f.body);
         Ok(())

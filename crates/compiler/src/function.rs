@@ -68,6 +68,9 @@ pub(crate) fn compile_script_body(
     m: &Meter<'_>,
 ) -> Result<Body, CompileError> {
     let mut c = Compiler::new(&script.ast, resolution, constants, true, script.strict, m);
+    if resolution.this_by_name {
+        c.this_binding = Some(Binding::Dynamic(m.string("this")?));
+    }
     c.run(&script.body)?;
     let end = Span::default();
     c.emit(Instruction::LoadCompletion, end)?;
@@ -104,6 +107,9 @@ pub(crate) fn compile_function(
     let params = m.copy(&info.params)?;
 
     let mut c = Compiler::new(ast, resolution, constants, false, f.strict, m);
+    c.this_binding = resolution.sites.get(&Site::This(id)).cloned();
+    c.derived = resolution.derived_constructors.contains(&id);
+    let default_derived = resolution.default_derived_constructors.contains(&id);
     let region = match (info.async_slot, info.generator_slot) {
         (Some(slot), None) => Some((slot, async_start(&mut c, f, slot)?)),
         (Some(_), Some(_)) | (None, _) => None,
@@ -129,12 +135,15 @@ pub(crate) fn compile_function(
         (Some(slot), None, _) => generator_body(&mut c, f, slot)?,
         (None, _, Some((slot, start))) => async_body(&mut c, f, slot, start)?,
         (None, _, None) if f.kind == FunctionKind::FieldInitializer => {
-            crate::class::instance_initializer(&mut c, f)?;
+            crate::class::instance_initializer(&mut c, id, f)?;
+        }
+        (None, _, None) if default_derived => {
+            crate::class::default_derived_constructor(&mut c, info.locals, f.span)?;
         }
         (None, _, None) => {
             c.run(&f.body)?;
             c.emit(Instruction::Undefined, f.span)?;
-            c.emit(Instruction::Return, f.span)?;
+            c.emit_return(f.span)?;
         }
     }
     let body = c.finish()?;
@@ -146,7 +155,7 @@ pub(crate) fn compile_function(
         generator: info.generator_slot.is_some(),
         asynchronous: info.async_slot.is_some(),
         params,
-        binds_parameters: !f.is_simple(),
+        binds_parameters: !f.is_simple() || default_derived,
         parameter_environment: !f.strict && f.scope.parameters_contain_direct_eval,
         locals: info.locals,
         captured,
@@ -426,7 +435,7 @@ fn parameter_site(f: &Function, id: FunctionId, name: &str) -> Result<Option<Sit
 /// The value of the expression `e` onto the operand stack: its tasks run as
 /// [`Compiler::run`] runs a statement's, of the kinds an expression expands to
 /// (`expression.rs`), each expansion charged as it is made.
-fn expression_value(c: &mut Compiler<'_, '_>, e: ExprId) -> Result<(), CompileError> {
+pub(crate) fn expression_value(c: &mut Compiler<'_, '_>, e: ExprId) -> Result<(), CompileError> {
     let base = c.tasks.len();
     c.m.push(&mut c.tasks, Task::Expr(e))?;
     while c.tasks.len() > base {

@@ -316,31 +316,24 @@ fn held_sources_answer_their_first_construct_still_held() {
     );
 }
 
-/// The hold `class heritage` is answered at its `extends`, the first one of the source, as
-/// long as it is a line of `HOLDS`.
+/// A ClassHeritage parses wherever its `extends` stands, in a declaration and in an
+/// expression, and a heritage is no line of `HOLDS` (`story:derived-classes-and-super-call`).
 #[test]
-fn the_heritage_hold_stands_at_extends() {
-    if !swell_syntax::HOLDS
-        .iter()
-        .any(|(c, _)| *c == "class heritage")
-    {
-        return;
-    }
-    for (text, at) in [
-        ("class A\n  extends B {}", (2, 3)),
-        ("x = class\n  extends B {};", (2, 3)),
-        ("class A {}\nclass B extends C {}", (2, 9)),
-        ("x = class extends (class {}) {};", (1, 11)),
+fn the_heritage_parses_at_extends() {
+    assert!(
+        !swell_syntax::HOLDS
+            .iter()
+            .any(|(c, _)| *c == "class heritage")
+    );
+    for text in [
+        "class A\n  extends B {}",
+        "x = class\n  extends B {};",
+        "class A {}\nclass B extends C {}",
+        "x = class extends (class {}) {};",
     ] {
-        let errors = parse(text)
-            .err()
-            .unwrap_or_else(|| panic!("{text:?}: parsed"));
-        assert_eq!(
-            messages(&errors),
-            vec!["class heritage is not supported before slice 8".to_string()],
-            "{text:?}"
-        );
-        assert_eq!((errors[0].line, errors[0].column), at, "{text:?}");
+        if let Err(errors) = parse(text) {
+            panic!("{text:?}: {:?}", messages(&errors));
+        }
     }
 }
 
@@ -363,11 +356,12 @@ fn class_answer(text: &str) -> Result<String, String> {
 /// a `;`: before a token on a new line that its initializer or its name cannot take
 /// (`language/statements/class/elements/fields-asi-*.js`). `static`, `get`, `set` and `async`
 /// are field names where no element follows them on their line, and a name with an escape is
-/// never the word (`escaped-*-field-*.js`). Each source of the first list parses to the hold of
-/// its first field (a class is not held); each of the second is a grammar error.
+/// never the word (`escaped-*-field-*.js`). Each source of the first list parses, or answers the
+/// hold of its first private field (a class and a public field are not held); each of the second
+/// is a grammar error.
 #[test]
 fn fields_end_where_a_semicolon_is_inserted() {
-    let field = "class field is not supported before slice 8";
+    let field = "parses";
     let private = "private field is not supported before slice 8";
     for (text, held) in [
         ("class C { x\n y }", field),
@@ -758,8 +752,8 @@ fn message_kind_tells_refusals_from_early_errors() {
 /// Every source under `eval/` is eval code: parsed through `parse_eval` as the code of a
 /// non-strict caller with no flag set (`#sec-performeval`, step 9), it answers its header:
 /// `parses`, `SyntaxError "<message>"` (the first error) or `refused "<message>"` (the one
-/// error). The tests of scripts do not read these sources: `super.x` at the top of a script is
-/// an early error, at the top of eval code a refusal (`story:super-property-and-super-syntax`).
+/// error). The tests of scripts do not read these sources: what they show is the answer of eval
+/// code, whose flags (`EvalContext`) decide what a script cannot state.
 #[test]
 fn eval_sources_answer_their_header() {
     let options = ParseOptions { max_nesting: LIMIT };
@@ -790,27 +784,67 @@ fn eval_sources_answer_their_header() {
     println!("eval: {} file(s)", files.len());
 }
 
-/// `parse_script` parses a script, never eval code of a caller with every flag false: at the top
-/// of a script `super.x` is the early error of `#sec-scripts-static-semantics-early-errors`,
-/// while at the top of such eval code it is the refusal of slice 8; `new.target` is the early
-/// error of its own rule through both entries, and admitted in eval code only with
-/// `in_function`.
+/// `parse_script` parses a script, never eval code under one of PerformEval's flags (steps 7 to
+/// 11): each source that eval code admits under one flag (`new.target` with `in_function`,
+/// `super.x` with `in_method`, `super()` with `in_derived_constructor`) is an early error of a
+/// script (`#sec-scripts-static-semantics-early-errors`), so a `parse_script` that parsed as
+/// eval code with any of the three flags set answers one of them wrong. Eval code with every flag
+/// false is the language of a script: `parser::parse` and `parser::parse_eval` of that context
+/// set up the same parser, so no source tells the two apart, and the test compares them only by
+/// the errors they share (`super.x`, `super()`, `new.target`). With `in_method` eval code admits
+/// a SuperProperty and not a SuperCall, with `in_derived_constructor` both, and a method or
+/// function inside it has its own `super` state.
 #[test]
-fn a_script_is_not_parsed_as_eval_code() {
+fn a_script_refuses_what_each_eval_flag_admits() {
     let options = ParseOptions { max_nesting: LIMIT };
     let eval = |text: &str, context: EvalContext| {
         parse_eval(&units(text), context, options).map_err(|errors| messages(&errors))
     };
     let script = |text: &str| parse(text).map(|_| ()).map_err(|errors| messages(&errors));
     let super_property = vec!["super property outside a method".to_string()];
+    let super_call = vec!["super call outside a derived class constructor".to_string()];
     let new_target = vec!["new.target outside a function".to_string()];
-    assert_eq!(script("super.x;"), Err(super_property.clone()));
+    let only = |flag: fn(&mut EvalContext)| {
+        let mut context = EvalContext::from(false);
+        flag(&mut context);
+        context
+    };
+    assert!(eval("new.target;", only(|c| c.in_function = true)).is_ok());
+    assert!(eval("super.x;", only(|c| c.in_method = true)).is_ok());
+    assert!(eval("super();", only(|c| c.in_derived_constructor = true)).is_ok());
     assert_eq!(script("new.target;"), Err(new_target.clone()));
+    assert_eq!(script("super.x;"), Err(super_property.clone()));
+    assert_eq!(script("super();"), Err(super_call.clone()));
     assert_eq!(
         eval("super.x;", EvalContext::from(false)).map(|_| ()),
-        Err(vec![
-            "super in eval code is not supported before slice 8".to_string()
-        ])
+        Err(super_property.clone())
+    );
+    let in_method = EvalContext {
+        in_function: true,
+        in_method: true,
+        ..EvalContext::from(false)
+    };
+    let in_derived_constructor = EvalContext {
+        in_derived_constructor: true,
+        ..in_method
+    };
+    assert!(eval("super.x; () => super.y;", in_method).is_ok());
+    assert_eq!(
+        eval("super();", in_method).map(|_| ()),
+        Err(super_call.clone())
+    );
+    assert!(eval("super(); super.x; () => super();", in_derived_constructor).is_ok());
+    assert_eq!(
+        eval("super();", EvalContext::from(false)).map(|_| ()),
+        Err(super_call)
+    );
+    assert_eq!(
+        eval(
+            "({ m() { super.x; } }); function f() { super.x; }",
+            in_derived_constructor
+        )
+        .map(|_| ()),
+        Err(super_property.clone())
     );
     assert_eq!(
         eval("new.target;", EvalContext::from(false)).map(|_| ()),
@@ -2858,7 +2892,7 @@ fn field_ends_answer_the_standard() {
 #[test]
 fn dynamic_function_entries_read_class_elements() {
     let options = ParseOptions { max_nesting: LIMIT };
-    let held = vec!["class field is not supported before slice 8".to_string()];
+    let parses: Vec<String> = Vec::new();
     let undeclared = vec!["private name #x is not declared in an enclosing class".to_string()];
     let mut wrong = Vec::new();
     let mut check =
@@ -2869,7 +2903,8 @@ fn dynamic_function_entries_read_class_elements() {
                 (Err(m), None) => m
                     .iter()
                     .all(|m| !m.contains("is not supported before slice")),
-                (Ok(()), _) => false,
+                (Ok(()), Some(e)) => e.is_empty(),
+                (Ok(()), None) => false,
             };
             if !ok {
                 wrong.push(format!("{what}: expected {expected:?}, got {got:?}"));
@@ -2893,12 +2928,12 @@ fn dynamic_function_entries_read_class_elements() {
     check(
         "AsyncFunction(\"\", \"class C { [await 1] = 1; }\")",
         parse_dynamic_async_function(&units(""), &units("class C { [await 1] = 1; }"), options),
-        Some(&held),
+        Some(&parses),
     );
     check(
         "AsyncFunction(\"\", \"class C { x = () => await; }\")",
         parse_dynamic_async_function(&units(""), &units("class C { x = () => await; }"), options),
-        Some(&held),
+        Some(&parses),
     );
     check(
         "GeneratorFunction(\"\", \"class C { x = yield; }\")",
@@ -2908,7 +2943,7 @@ fn dynamic_function_entries_read_class_elements() {
     check(
         "GeneratorFunction(\"\", \"class C { [yield] = 1; }\")",
         parse_dynamic_generator_function(&units(""), &units("class C { [yield] = 1; }"), options),
-        Some(&held),
+        Some(&parses),
     );
     assert!(
         wrong.is_empty(),
@@ -2960,8 +2995,8 @@ fn parse_cost(text: &str) -> (Vec<String>, usize, usize, std::time::Duration) {
     (errors, ledger.charged, ledger.peak, time)
 }
 
-/// A named shape of a class source, the construct its first element holds, and the source of it
-/// with n elements.
+/// A named shape of a class source, the construct its first element holds (empty for a source
+/// that parses), and the source of it with n elements.
 type Shape = (&'static str, &'static str, fn(usize) -> String);
 
 /// Hostile sizes of class elements: a class of n private fields each used once, one private
@@ -2980,7 +3015,7 @@ fn class_elements_scale_linearly() {
         ("one private name used n times", "private field", |n| {
             format!("class C {{ #x; m() {{ {} }} }}", "this.#x;".repeat(n))
         }),
-        ("public fields with initializers", "class field", |n| {
+        ("public fields with initializers", "", |n| {
             let fields: String = (0..n).map(|i| format!("f{i} = {i};")).collect();
             format!("class C {{ {fields} }}")
         }),
@@ -2996,7 +3031,11 @@ fn class_elements_scale_linearly() {
     ];
     let mut wrong = Vec::new();
     for (name, construct, make) in shapes {
-        let held = vec![format!("{construct} is not supported before slice 8")];
+        let held: Vec<String> = if construct.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("{construct} is not supported before slice 8")]
+        };
         let n = 2_500;
         let (small, small_charged, small_peak, small_time) = parse_cost(&make(n));
         let (large, large_charged, large_peak, large_time) = parse_cost(&make(4 * n));

@@ -71,7 +71,7 @@ scope:
   path: crates/syntax/tests/sources/refused/super-in-arrow.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/super-in-arrow.js
-revision: 15
+revision: 16
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 14, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 15, executor: "agent:coordinator"}
@@ -129,3 +129,65 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Fields, private names and static blocks in derived classes (the element stories; the cases where the parts meet on the lists of `story:class-static-blocks` and `story:private-fields-and-private-in`); eval in field initializers (`story:eval-in-class-field-initializers`); subclasses of `Map`, `Set`, `WeakMap` and `WeakSet` (`close-slice-9.cases.txt`, checked by `story:slice-08-conformance-close`) and of binary data (slice 13, `close-later.tsv`); `Reflect.construct` and `Proxy` (slice 9); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `derived` of wave big-2 delivered the story on `impl/derived` (one correction after
+the adversary's pass, tests only), merged into `wave/big-2`. Where the delivery differs from
+the text above:
+
+- The instructions. `BindThis` and `KeepThis` are one instruction per form of the binding:
+  `BindThis(slot)`, `BindThisEnv { hops, slot }`, `BindThisName(name)` (eval code);
+  `KeepThis(slot)`, `KeepThisEnv { hops, slot }` (eval code never returns from a constructor).
+  The record form of `Uninitialize` is `UninitializeEnv { hops, slot }`. The heritage has an
+  instruction of its own, `ClassHeritage`, `[h] -> [constructorParent, protoParent]`. The
+  default derived constructor runs `SuperCallKept(1)`, not `0`: the hidden `this` takes local
+  slot 0, and the kept arguments start at slot 1. The step per argument is charged at once for
+  their count.
+- The parser's flag for a SuperCall is a third value of its `SuperProperty` state (`Outside`,
+  `Method`, `DerivedConstructor`), since a SuperCall stands only where a SuperProperty does.
+  `ast::Class` gains `default_constructor`.
+- The errors of the derived return rule for a [[Construct]] from Rust are made in `construct`
+  (`crates/swell/src/object/ecmascript_function.rs`) after `leave_code`, not in
+  `construct_function`: `run_frame` restores the realm of the callee's own activation, so an
+  error made there was of the callee's realm.
+- Every arrow function inside a derived constructor captures the constructor's hidden `this`
+  binding, whether or not its code reads `this`, so one arrow anywhere in the constructor moves
+  the binding from a local slot into the constructor's function environment. The adversary
+  measured 184 live bytes more per kept construction (1,101 against 917 bytes per instance over
+  100 kept instances, the same arrow in a base constructor) and no extra step (4,818 steps per
+  100 constructions with or without the arrow).
+- The tests are 26, not 19. After the adversary's pass, whose 24 cases were green
+  (`review-result:adversary-derived-pass-1`): its five cases under names that say what they
+  hold (`this_before_super_throws_in_every_position_that_reads_it`,
+  `return_errors_by_every_route_of_construct_are_of_the_current_realm`,
+  `super_reads_a_parent_changed_after_the_definition`,
+  `builtin_parents_fall_back_to_the_realm_of_new_target`,
+  `values_of_a_super_call_survive_garbage`, red when a SuperCall reads the parent after its
+  arguments), and two tests for mutants no test held:
+  `the_default_derived_constructor_charges_a_step_per_argument_per_level` (100 arguments cost
+  200 steps more into the base class and 500 through three default constructors) and
+  `a_return_from_an_inner_environment_keeps_the_bound_this`.
+- `nested_super_calls_stop_at_frame_depth` runs at a frame depth of 10 with a collection at
+  every safe point (0.66 CPU s; depth 50 took 4.88 s there, over the 2 s of a test) and at 50
+  otherwise. The plant without the depth check is red at 10.
+- The syntax test `a_script_is_not_parsed_as_eval_code` is
+  `a_script_refuses_what_each_eval_flag_admits`: eval code with every flag of PerformEval
+  false is parsed like a script, so the test holds, per flag, one source that eval code admits
+  and a script refuses. `the_heritage_hold_stands_at_extends` is
+  `the_heritage_parses_at_extends`.
+- The fixtures `held/class-heritage.js` and `held/class-expression-heritage.js` of the syntax
+  suite stay in `held/` (no held source moves) and now parse;
+  `early-errors/super-call-in-derived-class-constructor.js` moved to `valid/`.
+- Files changed outside the Writes line: `crates/syntax/src/ast.rs` (`default_constructor`),
+  `crates/swell/src/interp/spread.rs` (`spread_arguments` made `pub(super)`),
+  `crates/swell/tests/super_property.rs` (one test renamed, one expectation changed) and
+  `crates/syntax/tests/sources.rs` (the two tests above).
+- Fields of a derived class, after the merge with the unit `fields`: no test of this story
+  holds them. A probe on the merged head gave what the clauses give: the fields are defined
+  when `super()` returns, also with the default derived constructor and with `super()` from an
+  arrow; a second `super()` throws a `ReferenceError` and does not run the initializers again;
+  `super.v` in a field reads the parent's prototype and a static field's `super.name` the
+  parent class's name. The test comes with the unit `privatemethods`.
+- The part run of the story's list: 296 cases that failed on the base pass, none regressed
+  (`passed 2877 bound 2877 B 2581 F 296 R 0`).

@@ -63,7 +63,7 @@ use crate::host::agent::Agent;
 use crate::host::host_object::{Brand, HostData, HostObject, Tracer};
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, Host, HostDefined, InterruptHandle, Source};
-use crate::interp::frame::{Frame, SlotValue, frame_bytes};
+use crate::interp::frame::{Constructed, Frame, SlotValue, frame_bytes};
 use crate::object::property::{Key, array_index};
 use crate::value::{ObjectRef, StringRef, Value};
 
@@ -637,7 +637,7 @@ impl<H: Host> Agent<H> {
             script,
             strict,
             completion: Value::Undefined,
-            constructed: None,
+            constructed: Constructed::None,
             charged,
         };
         self.run_frame(frame, |agent| {

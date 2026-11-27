@@ -32,7 +32,7 @@ use swell_syntax::ast::{
 
 use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_RETURN};
 use crate::resolve::{Binding, LexicalPlace, Site, anonymous_function, property_key};
-use crate::{CompileError, Compiler, Short, Task, Tasks, malformed};
+use crate::{CompileError, Compiler, Short, Task, Tasks, ThisUse, malformed};
 
 /// The reference an assignment, an update, a `delete` or a for-in head works on.
 pub(crate) enum Target {
@@ -654,9 +654,27 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     }
                 }
             }
-            // A SuperCall is an early error of every source the parser admits before
-            // `story:derived-classes-and-super-call`.
-            Expr::SuperCall(_) => return Err(malformed("a SuperCall")),
+            // `#sec-super-keyword-runtime-semantics-evaluation`, SuperCall (`docs/design/engine.md`,
+            // "Classes", item 7): GetSuperConstructor before the arguments, the construction
+            // with the running frame's NewTarget, BindThisValue, then InitializeInstanceElements
+            // with F the constructor GetThisEnvironment answers; the value is `this`.
+            Expr::SuperCall(arguments) => {
+                t.push(emit(Instruction::GetSuperConstructor))?;
+                if self.has_spread(arguments.iter()) {
+                    self.argument_array(arguments, span, &mut t)?;
+                    t.push(emit(Instruction::SuperCallSpread))?;
+                } else {
+                    t.extend(arguments.iter().map(|e| Task::Expr(*e)))?;
+                    let n = u32::try_from(arguments.len())
+                        .map_err(|_| CompileError::TooMany("arguments"))?;
+                    t.push(emit(Instruction::SuperCall(n)))?;
+                }
+                let bind = self.this_instruction(ThisUse::Bind)?;
+                t.push(emit(bind))?;
+                t.push(emit(Instruction::Dup))?;
+                t.push(emit(Instruction::InitInstance))?;
+                t.push(emit(Instruction::Pop))?;
+            }
             // No source with a private name reaches the compiler while its element is held:
             // `story:private-names-and-private-methods` replaces this arm.
             Expr::PrivateMember { .. } => return Err(malformed("a private member")),
