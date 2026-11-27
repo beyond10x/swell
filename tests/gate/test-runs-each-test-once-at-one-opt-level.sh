@@ -26,8 +26,12 @@
 # 2. The planted defect: the stub's list of the run at opt-level 1 drops
 #    plain::outside_the_stack and adds deep::on_the_promised_stack, so one test is in neither
 #    run and one is in both: task test fails, naming each, and the stub ran no test.
+# 3. A failing test in the run at opt-level 1 (STUB_OPT1=fail): task test fails, both runs
+#    ran, and the summed line reads "2 test binaries: 3 passed, 1 failed, 1 ignored".
+# 4. A Compiling line in the log of the list at opt-level 1 (STUB_LIST_COMPILE=1): task test
+#    fails naming .out/test-list-opt1.txt.log, and the stub ran no test.
 # Run from the repository root: sh tests/gate/test-runs-each-test-once-at-one-opt-level.sh
-unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS STUB_DEFECT
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS STUB_DEFECT STUB_OPT1 STUB_LIST_COMPILE
 export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=test-runs-each-test-once-at-one-opt-level
 dir=.out/gate-tests/$name
@@ -57,6 +61,7 @@ printf '%s\n' '#!/bin/sh' \
   'fi' \
   'all="swell::main deep::on_any_stack|swell::main deep::on_the_promised_stack|swell::main plain::outside_the_stack|swell::main realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on|swell-num::main num::adds"' \
   'if [ "$2" = list ]; then' \
+  '  if [ "${STUB_LIST_COMPILE:-}" = 1 ] && [ "$profile" = collect ]; then echo "   Compiling swell v0.1.0 (/src/crates/swell)" >&2; fi' \
   '  printf "%s\n" "$all" | tr "|" "\n" | while read -r bin test; do' \
   '    case " $names " in *" $test "*) named=yes ;; *) named=no ;; esac' \
   '    [ "$bin" = swell::main ] || named=no' \
@@ -74,6 +79,7 @@ printf '%s\n' '#!/bin/sh' \
   'if [ "$profile" = collect ]; then' \
   '  printf "<testsuites><testsuite><testcase name=\"deep::on_any_stack\" classname=\"swell::main\" time=\"0.300\"/></testsuite></testsuites>\n" > target/nextest/default/junit.xml' \
   '  echo "    Starting 2 tests across 1 binary (1 test skipped)"' \
+  '  if [ "${STUB_OPT1:-}" = fail ]; then echo "     Summary [   0.300s] 2 tests run: 1 passed, 1 failed, 1 skipped"; exit 100; fi' \
   '  echo "     Summary [   0.300s] 2 tests run: 2 passed, 1 skipped"' \
   'else' \
   '  printf "<testsuites><testsuite><testcase name=\"deep::on_the_promised_stack\" classname=\"swell::main\" time=\"0.200\"/><testcase name=\"num::adds\" classname=\"swell-num::main\" time=\"0.100\"/></testsuite></testsuites>\n" > target/nextest/default/junit.xml' \
@@ -136,5 +142,22 @@ grep -qF 'test: swell::main plain::outside_the_stack is in neither run' "$dir/de
 grep -qF 'test: swell::main deep::on_the_promised_stack is in both runs' "$dir/defect.out" ||
   fail "task test did not name the test in both runs ($dir/defect.out)"
 [ ! -s "$dir/stub-defect.log" ] || fail "task test ran tests although a test is in not exactly one run ($dir/stub-defect.log)"
+
+# 3. A test of the run at opt-level 1 fails: the stub's run there prints "2 tests run: 1
+#    passed, 1 failed" and exits 100.
+: > "$dir/stub-fail.log"
+STUB_OPT1=fail STUB_LOG="$root/$dir/stub-fail.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/fail.out" 2>&1 &&
+  fail "task test exited 0 with a failed test in the run at opt-level 1 ($dir/fail.out)"
+grep -qxF '2 test binaries: 3 passed, 1 failed, 1 ignored' "$dir/fail.out" ||
+  fail "task test did not print the summed line with the failed test, 3 passed, 1 failed, 1 ignored (the ignored less the run's failed one too) ($dir/fail.out)"
+[ "$(grep -c '^run ' "$dir/stub-fail.log")" = 2 ] || fail "the run at opt-level 0 did not run after a failed run at opt-level 1 ($dir/stub-fail.log)"
+
+# 4. The list of the run at opt-level 1 compiles: its log has a cargo Compiling line.
+: > "$dir/stub-compile.log"
+STUB_LIST_COMPILE=1 STUB_LOG="$root/$dir/stub-compile.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/compile.out" 2>&1 &&
+  fail "task test exited 0 with a Compiling line in the log of the list at opt-level 1 ($dir/compile.out)"
+grep -qF 'test: compiled 1 crate(s) inside the timed step, which the task build-tests builds before gate-time-start: swell (.out/test-list-opt1.txt.log)' "$dir/compile.out" ||
+  fail "task test did not name the Compiling line of .out/test-list-opt1.txt.log ($dir/compile.out)"
+[ ! -s "$dir/stub-compile.log" ] || fail "task test ran tests although its list at opt-level 1 compiled ($dir/stub-compile.log)"
 
 echo "$name: ok"
