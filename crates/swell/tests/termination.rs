@@ -311,8 +311,9 @@ fn next_object_doubling(agent: &mut Agent<TestHost>, realm: &Realm) -> (u64, u64
 /// ([`next_object_doubling`]), until the arena of objects grows; the reading before that growth
 /// is `doubles_at` and the growth is
 /// `doubling`. The agent under test has `memory_bytes` `doubles_at + doubling` plus `room` (64
-/// KiB; 4 KiB in the gate with the collector at every safe point, where each safe point walks
-/// the whole heap; the lane `slow`, `SWELL_FULL_COUNTS=1`, gives 64 KiB there too) plus
+/// KiB; 4 KiB with the collector at every safe point, in the gate and in the lane `slow` alike,
+/// where each safe point walks the whole heap: with 64 KiB and the pins the test took 4.4 s
+/// alone in the lane's collect build on 2026-11-27, over its bound of 2.5) plus
 /// [`AFTER_FILL_ROOM`], which its host holds charged (`charge_host_bytes`) during the fill. So
 /// the fill below, which keeps every object it makes, passes that growth of the arena whatever
 /// the realm holds, and ends by memory about `room` further on (each iteration adds an element
@@ -363,7 +364,11 @@ fn an_agent_that_ended_in_memory_budget_runs_again_after_a_collection() {
         pin_objects(&mut probe, &realm, &pins, kept);
         next_object_doubling(&mut probe, &realm)
     };
-    let room = if in_the_collect_gate() { 4 } else { 64 } * 1024;
+    let room = if cfg!(feature = "collect-every-safe-point") {
+        4
+    } else {
+        64
+    } * 1024;
     let mut limits = limits();
     limits.memory_bytes = doubles_at + doubling + room + AFTER_FILL_ROOM;
     let budget = limits.memory_bytes;
