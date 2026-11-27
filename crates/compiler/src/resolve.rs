@@ -282,6 +282,12 @@ pub(crate) struct Resolution {
     /// are not static, with the function of each such method, getter or setter in source order:
     /// pass 1 of the initializer adds them (`class.rs`, `initializer_private_methods`).
     pub initializer_methods: BTreeMap<FunctionId, Vec<FunctionId>>,
+    /// The number of private elements the adds of one class level make, keyed by the
+    /// initializer of the instance elements for the methods, getters and setters that are not
+    /// static, and by the constructor for the static ones: the private names among them, a
+    /// getter and a setter of one name counted once. Each add carries it as its `room`
+    /// (`crate::bytecode::Instruction::AddPrivateMethod`).
+    pub private_rooms: BTreeMap<FunctionId, u32>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -404,6 +410,8 @@ struct Resolver<'a, 'm> {
     named_by_key: BTreeSet<FunctionId>,
     /// [`Resolution::initializer_methods`].
     initializer_methods: BTreeMap<FunctionId, Vec<FunctionId>>,
+    /// [`Resolution::private_rooms`].
+    private_rooms: BTreeMap<FunctionId, u32>,
     /// The Private Name (its text, with its `#`) of each private method, getter or setter, by
     /// its function.
     private_keys: BTreeMap<FunctionId, String>,
@@ -450,6 +458,7 @@ pub(crate) fn resolve(
         instance_elements: BTreeSet::new(),
         named_by_key: BTreeSet::new(),
         initializer_methods: BTreeMap::new(),
+        private_rooms: BTreeMap::new(),
         private_keys: BTreeMap::new(),
     };
     let resolution = resolve_with(&mut r, script, eval_code);
@@ -536,6 +545,7 @@ fn resolve_with(
         instance_elements: core::mem::take(&mut r.instance_elements),
         named_by_key: core::mem::take(&mut r.named_by_key),
         initializer_methods: core::mem::take(&mut r.initializer_methods),
+        private_rooms: core::mem::take(&mut r.private_rooms),
     })
 }
 
@@ -1287,6 +1297,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
         if let Some(s) = self.scopes.get_mut(scope) {
             s.key = Some(ScopeKey::Private(class.constructor));
         }
+        // The elements the adds of the instance and of F make (`Resolution::private_rooms`).
+        let mut rooms = (0u32, 0u32);
         for element in &class.elements {
             let (is_static, name, kind, function) = match element {
                 ClassElement::Method {
@@ -1305,6 +1317,18 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 }
                 _ => continue,
             };
+            let new_name = !self
+                .scopes
+                .get(scope)
+                .is_some_and(|s| s.names.contains_key(name.name.as_str()));
+            if new_name {
+                let room = if is_static {
+                    &mut rooms.1
+                } else {
+                    &mut rooms.0
+                };
+                *room = room.saturating_add(1);
+            }
             self.declare(scope, &name.name);
             let binding = private_function_name(kind, &name.name, self.m)?;
             self.declare(scope, &binding);
@@ -1336,6 +1360,14 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.m.insert_entry(&mut self.private_keys, function, key)?;
             }
             self.m.release(binding);
+        }
+        if let (Some(initializer), true) = (class.instance_elements, rooms.0 > 0) {
+            self.m
+                .insert_entry(&mut self.private_rooms, initializer, rooms.0)?;
+        }
+        if rooms.1 > 0 {
+            self.m
+                .insert_entry(&mut self.private_rooms, class.constructor, rooms.1)?;
         }
         // Every binding of the record lives in it.
         let order = self

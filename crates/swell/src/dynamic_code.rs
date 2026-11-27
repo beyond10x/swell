@@ -304,7 +304,8 @@ impl<H: Host> Agent<H> {
         )?;
         // Steps 7 to 11: the flags; then the parse of steps 12 to 15.
         let context = self.eval_context(strict_caller, function)?;
-        let (script, copy) = self.parse_eval_code(realm, string, context)?;
+        let direct = matches!(kind, CompilationType::DirectEval);
+        let (script, copy) = self.parse_eval_code(realm, string, context, direct)?;
         // Step 11: a source with no statement.
         if script.body.is_empty() {
             self.drop_tree(script);
@@ -365,13 +366,15 @@ impl<H: Host> Agent<H> {
     /// the script with the charged copy of its source, or the throw of its first `SyntaxError` in
     /// `realm`, the copy credited. A step per code unit of the String is charged before the copy
     /// (`Agent::charge_steps`, which reads the interrupt flag first). Not inlined into the run
-    /// loop, whose frame stays as small as it was.
+    /// loop, whose frame stays as small as it was. For a `direct` eval an error of an undeclared
+    /// private name is the refusal of [`refuse_private_names_in_direct_eval`].
     #[inline(never)]
     fn parse_eval_code(
         &mut self,
         realm: Handle,
         string: StringRef,
         context: EvalContext,
+        direct: bool,
     ) -> Completion<(swell_syntax::Script, SourceCopy)> {
         let options = ParseOptions {
             max_nesting: self.limits.parser_nesting,
@@ -383,7 +386,12 @@ impl<H: Host> Agent<H> {
             swell_syntax::parse_eval_with(&copy.units, context, options, &mut self.ledger());
         match self.parsed_tree(parsed, copy)? {
             ParsedTree::Tree(script, copy) => Ok((script, copy)),
-            ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
+            ParsedTree::Errors(mut errors) => {
+                if direct {
+                    refuse_private_names_in_direct_eval(&mut errors);
+                }
+                Err(self.throw_parse_errors(realm, errors))
+            }
         }
     }
 
@@ -999,6 +1007,34 @@ impl<H: Host> Agent<H> {
         match self.parsed_tree(parsed, copy)? {
             ParsedTree::Tree(script, copy) => Ok((script, copy)),
             ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
+        }
+    }
+}
+
+/// The text of the early error AllPrivateIdentifiersValid gives for `#x` in eval code
+/// (`swell_syntax`, `early.rs`): `private name #x is not declared in an enclosing class`.
+const UNDECLARED_PRIVATE_NAME: (&str, &str) =
+    ("private name ", " is not declared in an enclosing class");
+
+/// Direct eval code is parsed with the private names of the classes around the call
+/// (`#sec-performeval`, step 12: privateIdentifiers, the names of the running PrivateEnvironment
+/// and its outer ones), which `story:private-names-in-eval-code` brings. Until then the parse
+/// knows none of them, so an undeclared private name in direct eval code may be one the standard
+/// lets it read: that error is the refusal `private name #x in direct eval code is not
+/// supported before slice 8`, a `Refusal` by `swell_syntax::message_kind`. An indirect `eval`,
+/// `Function` and a script keep the `SyntaxError`, which the standard gives them.
+fn refuse_private_names_in_direct_eval(errors: &mut [swell_syntax::SyntaxError]) {
+    let (head, tail) = UNDECLARED_PRIVATE_NAME;
+    for error in errors {
+        let name = error
+            .message
+            .strip_prefix(head)
+            .and_then(|rest| rest.strip_suffix(tail))
+            .map(alloc::string::ToString::to_string);
+        if let Some(name) = name {
+            error.message = alloc::format!(
+                "private name {name} in direct eval code is not supported before slice 8"
+            );
         }
     }
 }

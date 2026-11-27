@@ -8,9 +8,12 @@
 //! first add, so an object without one pays the box's 8 bytes only. Each entry is a Private Name
 //! (`heap/mod.rs`, `PrivateNameRef`) with a method (its function) or an accessor (an optional
 //! getter and an optional setter); `story:private-fields-and-private-in` adds fields through the
-//! same add. The box and every growth of its list are charged to the memory budget before they
-//! are made and recorded with the object (`Agent::record_grown`), so the sweep that frees it
-//! credits them; the list never shrinks. Elements are no properties: no internal method, no
+//! same add. The list grows only when it is full, by exactly the elements of the class level
+//! whose add found it full (the `room` of `AddPrivateMethod`, fixed when the class is compiled),
+//! so a construction reserves once per level and an instance holds no spare entry. The box and
+//! every growth of its list are charged to the memory budget before they are made and recorded
+//! with the object (`Agent::record_grown`), so the sweep that frees it credits them; the list
+//! never shrinks. Elements are no properties: no internal method, no
 //! trap of a `Proxy` and no listing of a host reads them.
 //!
 //! PrivateElementFind compares the entries in order and spends a step per comparison past
@@ -91,10 +94,13 @@ impl PrivateElements {
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
-}
 
-/// The fewest entries a list grows to.
-const MIN_ENTRIES: usize = 4;
+    /// The number of elements the list has room for.
+    #[cfg(test)]
+    pub(crate) fn capacity(&self) -> usize {
+        self.entries.capacity()
+    }
+}
 
 /// What a function added by `AddPrivateMethod` is, by the kind of its template.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -219,11 +225,13 @@ impl<H: Host> Agent<H> {
     /// lacks that half: the class's code adds the two halves of an accessor pair one after the
     /// other, which together are the one element ClassDefinitionEvaluation combines (step
     /// 27.e); an element of `key` that has that half already is there, and is a `TypeError`.
+    /// `room` is the number of elements the adds of this class level make.
     pub(crate) fn private_method_or_accessor_add(
         &mut self,
         object: ObjectRef,
         key: PrivateNameRef,
         function: ObjectRef,
+        room: usize,
     ) -> Completion<()> {
         let value = match self.method_kind(function)? {
             MethodKind::Method => PrivateValue::Method(function),
@@ -236,7 +244,7 @@ impl<H: Host> Agent<H> {
                 set: Some(function),
             },
         };
-        self.add_private_element(object, PrivateElement { key, value })
+        self.add_private_element(object, PrivateElement { key, value }, room)
     }
 
     /// The kind of the template of the ECMAScript function `function`.
@@ -264,6 +272,7 @@ impl<H: Host> Agent<H> {
         &mut self,
         object: ObjectRef,
         element: PrivateElement,
+        room: usize,
     ) -> Completion<()> {
         if let Some(position) = self.private_element_find(object, element.key)? {
             let existing = self.private_element(object, position)?;
@@ -307,7 +316,7 @@ impl<H: Host> Agent<H> {
                 None => Err(self.fault()),
             };
         }
-        self.private_room(object)?;
+        self.private_room(object, room)?;
         let pushed = self
             .engine_object_mut(object)?
             .private_elements
@@ -319,10 +328,12 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// Room for one more element of `object`: the box at the first add, and the list doubled
-    /// (at least [`MIN_ENTRIES`]) when it is full, each charged before it is made and recorded
-    /// with the object; over the budget the run ends in `Terminated(MemoryBudget)`.
-    fn private_room(&mut self, object: ObjectRef) -> Completion<()> {
+    /// Room for one more element of `object`: when its list is full (or there is none), the box
+    /// at the first add and room for exactly `room` more elements (at least one), the elements
+    /// of the class level whose add runs, so each level of a construction reserves once and the
+    /// list holds no spare entry; charged before it is made and recorded with the object, over
+    /// the budget the run ends in `Terminated(MemoryBudget)`.
+    fn private_room(&mut self, object: ObjectRef, room: usize) -> Completion<()> {
         let (boxed, length, capacity) = match &self.engine_object(object)?.private_elements {
             Some(elements) => (true, elements.entries.len(), elements.entries.capacity()),
             None => (false, 0, 0),
@@ -330,14 +341,13 @@ impl<H: Host> Agent<H> {
         if boxed && length < capacity {
             return Ok(());
         }
-        let wanted = capacity.saturating_mul(2).max(MIN_ENTRIES);
+        let more = room.max(1);
         let box_bytes = if boxed {
             0
         } else {
             size_of::<PrivateElements>()
         };
-        let bytes = wanted
-            .saturating_sub(capacity)
+        let bytes = more
             .saturating_mul(size_of::<PrivateElement>())
             .saturating_add(box_bytes);
         let bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
@@ -350,9 +360,7 @@ impl<H: Host> Agent<H> {
             clippy::disallowed_methods,
             reason = "the list's growth, charged by `charge_bytes` as `bytes` before it is reserved and recorded with the object by `record_grown`"
         )]
-        let reserved = elements
-            .entries
-            .try_reserve_exact(wanted.saturating_sub(length));
+        let reserved = elements.entries.try_reserve_exact(more);
         if reserved.is_err() {
             self.heap.accounting.credit(bytes);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -369,9 +377,9 @@ mod tests {
     use crate::object::ObjectKind;
     use crate::object::ordinary::Ordinary;
 
-    /// A list that grows past its room keeps every element, in the order they were added, and
-    /// each find answers the position of its element: no growth drops or reorders an entry; a key
-    /// never added is not found.
+    /// A list that grows past its room (four levels of ten) keeps every element, in the order
+    /// they were added, and each find answers the position of its element: no growth drops or
+    /// reorders an entry; a key never added is not found.
     #[test]
     fn every_element_added_is_found_at_its_position() {
         let mut agent = test_host::agent_with(test_host::limits());
@@ -390,7 +398,7 @@ mod tests {
                 key,
                 value: PrivateValue::Method(function),
             };
-            agent.add_private_element(object, element).unwrap();
+            agent.add_private_element(object, element, 10).unwrap();
         }
         for (i, &key) in keys.iter().enumerate() {
             assert_eq!(agent.private_element_find(object, key).unwrap(), Some(i));
@@ -399,5 +407,127 @@ mod tests {
         assert_eq!(record.private_elements.as_ref().unwrap().len(), keys.len());
         let other = agent.heap.new_private_name(description).unwrap();
         assert_eq!(agent.private_element_find(object, other).unwrap(), None);
+    }
+
+    /// The room of a list is reserved once per class level and charged exactly: the first add
+    /// of a level of three makes the box and room for three entries, charged as that many bytes;
+    /// the next two adds charge nothing; the first add of a level of two, on the full list,
+    /// reserves and charges two entries more; a getter and a setter of one name are one entry, the
+    /// setter's add joins it and charges nothing. The list never has a spare entry.
+    #[test]
+    fn the_room_is_reserved_once_per_level_and_charged_exactly() {
+        use super::PrivateElements;
+        let mut agent = test_host::agent_with(test_host::limits());
+        let object = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let function = agent
+            .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+            .unwrap();
+        let description = agent.heap.new_string_from_str("#m").unwrap();
+        let keys: alloc::vec::Vec<PrivateNameRef> = (0..6)
+            .map(|_| agent.heap.new_private_name(description).unwrap())
+            .collect();
+        let entry = size_of::<PrivateElement>() as u64;
+        let list = |agent: &crate::host::agent::Agent<test_host::NoHooks>| {
+            let record = agent.heap.objects.get(object.handle).unwrap();
+            let elements = record.private_elements.as_ref().unwrap();
+            (elements.len(), elements.capacity())
+        };
+        let add = |agent: &mut crate::host::agent::Agent<test_host::NoHooks>,
+                   key: PrivateNameRef,
+                   value: PrivateValue,
+                   room: usize| {
+            let before = agent.heap.bytes();
+            agent
+                .add_private_element(object, PrivateElement { key, value }, room)
+                .unwrap();
+            agent.heap.bytes() - before
+        };
+        let method = PrivateValue::Method(function);
+        let first = add(&mut agent, keys[0], method, 3);
+        assert_eq!(first, size_of::<PrivateElements>() as u64 + 3 * entry);
+        assert_eq!(list(&agent), (1, 3));
+        assert_eq!(add(&mut agent, keys[1], method, 3), 0);
+        assert_eq!(add(&mut agent, keys[2], method, 3), 0);
+        assert_eq!(list(&agent), (3, 3));
+        assert_eq!(add(&mut agent, keys[3], method, 2), 2 * entry);
+        assert_eq!(add(&mut agent, keys[4], method, 2), 0);
+        assert_eq!(list(&agent), (5, 5));
+        let getter = PrivateValue::Accessor {
+            get: Some(function),
+            set: None,
+        };
+        let setter = PrivateValue::Accessor {
+            get: None,
+            set: Some(function),
+        };
+        assert_eq!(add(&mut agent, keys[5], getter, 1), entry);
+        assert_eq!(add(&mut agent, keys[5], setter, 1), 0);
+        assert_eq!(list(&agent), (6, 6));
+    }
+
+    /// The collector reaches an object's private elements from the object alone
+    /// (`ObjectRecord::trace`, [`super::PrivateElements::trace`]): with nothing else holding
+    /// them, a mark that starts at the object marks each element's Private Name, the method's
+    /// function and both halves of an accessor, and not an object no element names. Script
+    /// cannot see this while the class's private record holds the same names and functions, so
+    /// no test of `tests/private_methods.rs` goes red when the list is not traced; this one does.
+    #[test]
+    fn a_mark_from_the_object_reaches_every_element() {
+        use crate::heap::collect::{Item, Mark, mark_phase};
+        let mut agent = test_host::agent_with(test_host::limits());
+        let mut new_object = || {
+            agent
+                .allocate_object(None, ObjectKind::Ordinary(Ordinary::for_test()))
+                .unwrap()
+        };
+        let (object, method, getter, setter, other) = (
+            new_object(),
+            new_object(),
+            new_object(),
+            new_object(),
+            new_object(),
+        );
+        let description = agent.heap.new_string_from_str("#m").unwrap();
+        let m = agent.heap.new_private_name(description).unwrap();
+        let a = agent.heap.new_private_name(description).unwrap();
+        let unused = agent.heap.new_private_name(description).unwrap();
+        let elements = [
+            PrivateElement {
+                key: m,
+                value: PrivateValue::Method(method),
+            },
+            PrivateElement {
+                key: a,
+                value: PrivateValue::Accessor {
+                    get: Some(getter),
+                    set: Some(setter),
+                },
+            },
+        ];
+        for element in elements {
+            agent.add_private_element(object, element, 2).unwrap();
+        }
+        let mut mark = Mark::take(&mut agent.heap);
+        mark.push(Item::Object(object.handle));
+        mark_phase(&agent, &mut mark).unwrap();
+        for item in [
+            Item::PrivateName(m.handle),
+            Item::PrivateName(a.handle),
+            Item::Object(method.handle),
+            Item::Object(getter.handle),
+            Item::Object(setter.handle),
+        ] {
+            assert!(mark.is_marked(item), "{item:?} is not marked");
+        }
+        assert!(
+            !mark.is_marked(Item::Object(other.handle)),
+            "an unrelated object"
+        );
+        assert!(
+            !mark.is_marked(Item::PrivateName(unused.handle)),
+            "an unused name"
+        );
     }
 }

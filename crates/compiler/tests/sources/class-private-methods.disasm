@@ -43,7 +43,7 @@ script locals 0
   0040 2:1 SetEnv 1 0
   0041 2:1 Nip 1
   0042 2:1 StoreInitializer 1
-  0043 2:72 AddPrivateMethod 0 5 0 6
+  0043 2:72 AddPrivateMethod 0 5 0 6 room 1
   0044 2:1 PopEnv
   0045 2:1 PopEnv
   0046 2:1 SetStrict false
@@ -61,13 +61,13 @@ function 0 class constructor "C" length 0 locals 0 strict
 
 function 1 field initializer "" length 0 locals 0 strict
   0000 2:11 This
-  0001 2:11 AddPrivateMethod 0 0 0 1
+  0001 2:11 AddPrivateMethod 0 0 0 1 room 2
   0002 2:11 Pop
   0003 2:11 This
-  0004 2:11 AddPrivateMethod 0 2 0 3
+  0004 2:11 AddPrivateMethod 0 2 0 3 room 2
   0005 2:11 Pop
   0006 2:11 This
-  0007 2:11 AddPrivateMethod 0 2 0 4
+  0007 2:11 AddPrivateMethod 0 2 0 4 room 2
   0008 2:11 Pop
   0009 2:11 Undefined
   0010 2:11 Return

@@ -371,18 +371,19 @@ fn private_names_are_freed_when_nothing_holds_them() {
 }
 
 /// How many classes each round of [`an_instance_keeps_its_private_elements_across_collections`]
-/// makes and drops: 50, and 5 with a collection at every safe point (for the time). A collection
-/// that frees the instance's Private Names lets the classes made after it reuse their records,
-/// which one class already does.
+/// makes and drops: 50, and 5 with a collection at every safe point (for the time): garbage
+/// whose records a collection that freed what the instance holds would hand out again.
 const GARBAGE: u32 = if cfg!(feature = "collect-every-safe-point") {
     5
 } else {
     50
 };
 
-/// The collector marks an object's private elements at the object record's site: an instance
-/// held by a global keeps its Private Names, its methods and its accessors' functions across
-/// collections while the class itself is no longer reachable by name.
+/// An instance held by a global keeps working across collections while its class is no longer
+/// reachable by name. Its methods hold the class's private record, which holds the same Private
+/// Names and functions as the instance's elements, so this test stays green when the object
+/// record does not trace its elements; the mark from the object alone is held by the library
+/// test `object::private_names::tests::a_mark_from_the_object_reaches_every_element`.
 #[test]
 fn an_instance_keeps_its_private_elements_across_collections() {
     let mut agent = agent().unwrap();
@@ -484,8 +485,8 @@ const ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
 /// "Every allocation is charged before it exists" (decision 4, "Memory budget"): an instance with
 /// private methods holds its element list, charged with the object, so [`instances`] instances
 /// with two private methods take at least 16 bytes each more than as many instances of a class
-/// without; a loop that keeps such instances under a small budget ends in
-/// `Terminated(MemoryBudget)`, and leaks nothing.
+/// without (the list's charge: without it the two readings are equal); a loop that keeps such
+/// instances under a small budget ends in `Terminated(MemoryBudget)`, and leaks nothing.
 #[test]
 fn instances_are_charged_to_the_memory_budget() {
     let count = instances();
@@ -524,9 +525,12 @@ fn instances_are_charged_to_the_memory_budget() {
         bytes
     };
     // A first pass grows the arenas to what either script holds: the instances are as many.
+    // The plain instances are read first: were the lists not charged, the sweep of the first
+    // pass would credit bytes that were never charged, and the two readings after it would be
+    // equal, which the assertion below refuses.
     held(&mut agent, &private);
-    let with_private = held(&mut agent, &private);
     let with_plain = held(&mut agent, &plain);
+    let with_private = held(&mut agent, &private);
     println!(
         "heap_bytes: {with_private} with {count} instances with private methods, {with_plain} without"
     );
@@ -733,4 +737,483 @@ fn every_assignment_form_on_a_private_accessor_and_a_private_method() {
     } else {
         both_list_nothing(source);
     }
+}
+
+/// GetValue and PutValue of a private reference (`#sec-getvalue`,
+/// `#sec-putvalue`, step 3) on every kind of base, with the order of the side effects: `o.#s = v`
+/// evaluates `v` before ToObject or PrivateSet throws; `o.#g += v` and `o.#m(arg)` throw at
+/// GetValue, before `v` or `arg`; `o?.a.#m` short-circuits only on `o`; a static element is on F
+/// alone, not on a function whose prototype is F, a `Proxy` of F (no trap runs), the prototype
+/// or an instance. The script answers the indexes of the checks that failed.
+#[test]
+fn brand_check_order_on_every_base() {
+    both_list_nothing(
+        r#"var log = [];
+class C {
+  #m() { return this; }
+  get #g() { return 1; }
+  set #s(v) { log.push("set"); }
+  static #st() { return "st"; }
+  static put(o) { try { o.#s = (log.push("rhs"), 1); } catch (e) { log.push(e.constructor.name); } }
+  static add(o) { try { o.#g += (log.push("rhs"), 1); } catch (e) { log.push(e.constructor.name); } }
+  static call(o) { try { o.#m(log.push("arg")); } catch (e) { log.push(e.constructor.name); } }
+  static chain(o) { try { return o?.a.#m; } catch (e) { return e.constructor.name; } }
+  static has(o) { try { o.#st; return true; } catch (e) { return false; } }
+}
+var bases = [null, undefined, 1, "s", {}];
+function each(f) { log = []; bases.forEach(f); return log.join(); }
+var put = each(function (b) { C.put(b); });
+var add = each(function (b) { C.add(b); });
+var call = each(function (b) { C.call(b); });
+log = []; C.call(new C()); var branded = log.join();
+var traps = [];
+var p = new Proxy(C, { get() { traps.push("get"); }, getPrototypeOf() { traps.push("proto"); return null; } });
+function D() {}
+Object.setPrototypeOf(D, C);
+var checks = [
+  put === "rhs,TypeError,rhs,TypeError,rhs,TypeError,rhs,TypeError,rhs,TypeError",
+  add === "TypeError,TypeError,TypeError,TypeError,TypeError",
+  call === "TypeError,TypeError,TypeError,TypeError,TypeError",
+  branded === "arg",
+  C.chain(null) === undefined, C.chain({ a: {} }) === "TypeError",
+  typeof C.chain({ a: new C() }) === "function",
+  C.has(C), !C.has(D), !C.has(p), !C.has(C.prototype), !C.has(new C()), traps.length === 0
+];
+checks.reduce(function (a, c, i) { return c === true ? a : a + i + " "; }, "");"#,
+    );
+}
+
+/// `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`, step 6:
+/// a base class's [[Construct]] runs InitializeInstanceElements before the parameters are
+/// bound, so a default parameter reads a private method; the object made from a NewTarget that
+/// is another constructor is branded by the class whose constructor ran; an object the
+/// constructor returns in place of `this` is not branded, and an instance returned again is not
+/// initialized twice.
+#[test]
+fn the_brand_lands_before_the_parameters_and_on_the_object_made() {
+    both_list_nothing(
+        r#"class A {
+  #m() { return 7; }
+  constructor(a = this.#m(), ret) { this.a = a; if (ret) return ret; }
+  static has(o) { try { o.#m; return true; } catch (e) { return false; } }
+}
+function B() {}
+var made = Reflect.construct(A, [], B);
+var plain = {};
+var first = new A();
+var again = new A(undefined, first);
+var other = new A(undefined, plain);
+var checks = [
+  first.a === 7,
+  A.has(made), Object.getPrototypeOf(made) === B.prototype, made.a === 7,
+  again === first, A.has(first),
+  other === plain, !A.has(plain), plain.a === undefined
+];
+checks.reduce(function (a, c, i) { return c === true ? a : a + i + " "; }, "");"#,
+    );
+}
+
+/// The early errors of private names
+/// (`#sec-static-semantics-allprivateidentifiersvalid`, `#sec-class-definitions-static-semantics-early-errors`,
+/// `#sec-delete-operator-static-semantics-early-errors`) and the sources next to them that are
+/// legal: a getter and a setter of one name, `.#m` after a line break, Unicode escapes in a
+/// private name; `Function` and indirect `eval` throw the `SyntaxError` at run time.
+#[test]
+fn early_errors_of_private_names() {
+    let errors: &[(&str, &str)] = &[
+        ("class C { f() { this.#x; } }", "#x is not declared"),
+        (
+            "class C { #m() {} f() { function g() { return this.#n; } } }",
+            "#n is not declared",
+        ),
+        ("this.#x;", "#x is not declared"),
+        (
+            "class O { #x() {} static t() { class I { #y() {} f(o) { return o.#z; } } } }",
+            "#z is not declared",
+        ),
+        ("class C { #m() {} #m() {} }", "duplicate private name #m"),
+        (
+            "class C { get #m() {} get #m() {} }",
+            "duplicate private name #m",
+        ),
+        (
+            "class C { static get #m() {} set #m(v) {} }",
+            "duplicate private name #m",
+        ),
+        (
+            "class C { static #m() {} #m() {} }",
+            "duplicate private name #m",
+        ),
+        (
+            "class C { #m() {} get #m() {} }",
+            "duplicate private name #m",
+        ),
+        ("class C { #constructor() {} }", "#constructor"),
+        ("class C { static #constructor() {} }", "#constructor"),
+        ("class C { # m() {} }", "unexpected character #"),
+        (
+            "class C { #m() {} f() { delete this.#m; } }",
+            "delete of a private reference",
+        ),
+        (
+            "class C { #m() {} f() { delete (this.#m); } }",
+            "delete of a private reference",
+        ),
+        (
+            "class C { #m() {} f() { delete this?.#m; } }",
+            "delete of a private reference",
+        ),
+        (
+            "class C { #m() {} f() { return super.#m; } }",
+            "unexpected private name #m",
+        ),
+    ];
+    for (source, message) in errors {
+        for text in [source.to_string(), format!("\"use strict\";\n{source}")] {
+            match run(limits(), &text) {
+                Outcome::Errors(found) => assert!(
+                    found.len() == 1 && found[0].contains(message),
+                    "{text}: {found:?}"
+                ),
+                other => panic!("{text}: {other:?}"),
+            }
+        }
+    }
+    both_pass(
+        r#"class C {
+  get #p() { return this.v; } set #p(v) { this.v = v; }
+  #\u{6d}() { return 1; }
+  f() { this.#p = 2; return this
+    .#m() + this.#m() + this.#p; }
+}
+function syntax(f) { try { f(); } catch (e) { return e instanceof SyntaxError; } return false; }
+new C().f() === 4 && syntax(function () { Function("o", "return o.#x;"); })
+  && syntax(function () { (0, eval)("o.#x"); });"#,
+    );
+}
+
+/// What a direct `eval` with a private name gives until `story:private-names-in-eval-code`
+/// passes the class's names to the parse (`#sec-performeval`, step 12): the stated refusal
+/// `private name #x in direct eval code is not supported before slice 8`, a `Refusal` by
+/// `swell_syntax::message_kind`, in a method, a private method, a static method and an arrow in
+/// a method, for a name the class declares and for one it does not. An indirect `eval`,
+/// `Function` and a script keep the early `SyntaxError` the standard gives them.
+#[test]
+fn a_direct_eval_naming_a_private_name_is_refused() {
+    let script = r#"function said(e) { return (e instanceof SyntaxError ? "SyntaxError: " : "other: ") + e.message; }
+class C {
+  #p() { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; }
+  method() { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; }
+  declared() { try { return eval("this.#p()"); } catch (e) { return said(e); } }
+  static s() { try { eval("C.#y"); } catch (e) { return said(e); } return "none"; }
+  arrow() { return (() => { try { eval("this.#z"); } catch (e) { return said(e); } return "none"; })(); }
+  private() { return this.#p(); }
+}
+var c = new C();
+[c.method(), c.private(), c.declared(), C.s(), c.arrow(),
+ (function () { try { (0, eval)("this.#x"); } catch (e) { return said(e); } return "none"; })(),
+ (function () { try { Function("return this.#x;"); } catch (e) { return said(e); } return "none"; })()].join("|");"#;
+    // Each message, then the position the thrown error's message ends with.
+    let refused = |name: &str| {
+        format!("private name {name} in direct eval code is not supported before slice 8")
+    };
+    let early = "private name #x is not declared in an enclosing class".to_string();
+    let answers = [
+        (refused("#x"), "1:6"),
+        (refused("#x"), "1:6"),
+        (refused("#p"), "1:6"),
+        (refused("#y"), "1:3"),
+        (refused("#z"), "1:6"),
+        (early.clone(), "1:6"),
+        (early, "3:13"),
+    ];
+    let thrown: Vec<String> = answers
+        .iter()
+        .map(|(message, at)| format!("SyntaxError: {message} ({at})"))
+        .collect();
+    let expected = Outcome::Normal(format!("\"{}\"", thrown.join("|")));
+    assert_eq!(run_both(script), (expected.clone(), expected));
+    for (message, _) in &answers[..5] {
+        assert_eq!(
+            swell_syntax::message_kind(message),
+            swell_syntax::MessageKind::Refusal { slice: 8 },
+            "{message}"
+        );
+    }
+    for (text, at) in [("this.#x;", "1:6"), ("\"use strict\";\nthis.#x;", "2:6")] {
+        assert_eq!(
+            run(limits(), text),
+            Outcome::Errors(vec![format!(
+                "private name #x is not declared in an enclosing class ({at})"
+            )]),
+            "{text}"
+        );
+    }
+}
+
+/// A private method's [[HomeObject]] is the prototype, a static one's is F
+/// (`#sec-runtime-semantics-classelementevaluation`, MethodDefinitionEvaluation with `object`),
+/// so `super.x` inside an instance private method, getter or setter reads the prototype's
+/// prototype and inside a static one F's prototype.
+#[test]
+fn super_in_a_private_method_reads_its_home_object() {
+    both_pass(
+        r#"class C {
+  #m() { return super.x; }
+  get #g() { return super.x; }
+  set #s(v) { this.seen = super.x + v; }
+  static #t() { return super.y; }
+  f() { this.#s = "!"; return this.#m() + this.#g + this.seen; }
+  static g() { return C.#t(); }
+}
+Object.setPrototypeOf(C.prototype, { x: "p" });
+Object.setPrototypeOf(C, { y: "s" });
+new C().f() === "ppp!" && C.g() === "s";"#,
+    );
+}
+
+/// A private generator method suspended across collections, and a private async
+/// method and async generator method across collections and a checkpoint, each call
+/// `this.#o()` after the resume, while the class that made them is reachable only through
+/// their frames.
+#[test]
+fn suspended_private_methods_across_collections() {
+    let mut agent = support::host::agent().unwrap();
+    let r = realm(&mut agent);
+    let garbage = "var g = []; for (var j = 0; j < 5; j++) g.push(class { #x() {} }); g = null; 0;";
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &r,
+            "var it = (function () { class C { *#g() { var x = yield 1; yield this.#o() + x; } #o() { return 2; }\n\
+               static make() { return new C().#g(); } } return C.make(); })(); it.next().value;"
+        ),
+        Outcome::Normal("1".to_string())
+    );
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &r,
+            "var r = 'pending', r2 = 'pending'; (function () { class C { async #a() { await null; return this.#o(); }\n\
+               async *#ag() { await null; yield this.#o() + 1; } #o() { return 3; }\n\
+               static go() { var c = new C(); c.#a().then(function (v) { r = v; });\n\
+                 c.#ag().next().then(function (v) { r2 = v.value; }); } } C.go(); })(); 0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    for _ in 0..2 {
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+        assert_eq!(
+            eval_text(&mut agent, &r, garbage),
+            Outcome::Normal("0".to_string())
+        );
+    }
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    assert!(matches!(
+        agent.perform_microtask_checkpoint(),
+        Ok(HostOutcome::Normal(_))
+    ));
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    assert_eq!(
+        eval_text(&mut agent, &r, "it.next(5).value + ',' + [r, r2].join();"),
+        Outcome::Normal("\"7,3,4\"".to_string())
+    );
+}
+
+/// The class of [`budgets_never_leave_a_half_branded_instance`]: three private methods
+/// and an accessor pair, and a check that reads all of them.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const HALF_BRANDED_SWEEP: &str = "class C { #a(){ return 1 } #b(){ return 2 } #c(){ return 3 }\n\
+   get #p(){ return this.v } set #p(x){ this.v = x }\n\
+   static check(o){ try { o.#p = 4; return o.#a() + o.#b() + o.#c() + o.#p === 10 } catch (e) { return 'partial ' + e } } }\n\
+ var o = new C(); C.check(o)";
+
+/// The answers of [`HALF_BRANDED_SWEEP`] in a fresh agent with `limits`, and of a second script
+/// that checks `o` if the first one stored it.
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn half_branded_outcome(limits: swell::Limits) -> (Outcome, Outcome) {
+    let mut agent = agent_with(limits).unwrap();
+    let realm = realm(&mut agent);
+    let first = eval_text(&mut agent, &realm, HALF_BRANDED_SWEEP);
+    assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    let second = eval_text(
+        &mut agent,
+        &realm,
+        "typeof o === 'undefined' ? 'none' : C.check(o)",
+    );
+    (first, second)
+}
+
+/// The memory budget 64 bytes at a time over the last 4 KiB below what
+/// [`HALF_BRANDED_SWEEP`] needs, and the step budget one step at a time over all its steps: each
+/// run ends in the completed object or in the termination, and a later script finds no
+/// instance or a whole one, never one that lacks an element. Default mode only (a fresh agent
+/// per budget; in the collect mode a realm alone takes about 0.1 s).
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn budgets_never_leave_a_half_branded_instance() {
+    let done = Outcome::Normal("true".to_string());
+    let none = Outcome::Normal("\"none\"".to_string());
+    let fresh = {
+        let mut agent = support::host::agent().unwrap();
+        let _realm = realm(&mut agent);
+        agent.heap_bytes().unwrap()
+    };
+    let (mut lo, mut hi) = (fresh, fresh + (1 << 20));
+    while hi - lo > 64 {
+        let mid = lo + (hi - lo) / 2;
+        let mut l = limits();
+        l.memory_bytes = mid;
+        if half_branded_outcome(l).0 == done {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    for budget in (hi.saturating_sub(4096)..hi).step_by(64) {
+        let mut l = limits();
+        l.memory_bytes = budget;
+        let (first, second) = half_branded_outcome(l);
+        assert!(
+            first == done || first == Outcome::Terminated(Termination::MemoryBudget),
+            "{budget}: {first:?}"
+        );
+        assert!(
+            second == done
+                || second == none
+                || second == Outcome::Terminated(Termination::MemoryBudget),
+            "{budget}: {second:?}"
+        );
+    }
+    let mut agent = support::host::agent().unwrap();
+    let r = realm(&mut agent);
+    let outcome = eval(&mut agent, &r, HALF_BRANDED_SWEEP);
+    assert!(matches!(outcome, HostOutcome::Normal(_)));
+    let steps = agent.last_entry_steps().unwrap();
+    for budget in 1..=steps {
+        let mut l = limits();
+        l.steps_per_entry = budget;
+        let (first, second) = half_branded_outcome(l);
+        assert!(
+            first == done || first == Outcome::Terminated(Termination::StepBudget),
+            "{budget}: {first:?}"
+        );
+        assert!(
+            second == done
+                || second == none
+                || second == Outcome::Terminated(Termination::StepBudget),
+            "{budget}: {second:?}"
+        );
+    }
+}
+
+/// How many instances [`an_instance_pays_for_the_room_of_its_list`] holds: 200, and 10 with a
+/// collection at every safe point (for the time).
+const ROOM_INSTANCES: u64 = if cfg!(feature = "collect-every-safe-point") {
+    10
+} else {
+    200
+};
+
+/// The list of an instance holds the room of its class's elements and no more
+/// (`object/private_names.rs`): the first add of a construction reserves room for exactly the
+/// class's private methods and accessors, a getter and a setter of one name counted once, and
+/// charges it with the box. Per instance, over a plain one, a class with `k` private methods
+/// costs the box and `k` entries: the bytes of `k` = 1, 4, 5, 9 and 17 lie on one line whose
+/// step is an entry (at least 16 bytes) and whose start is the box, and an accessor pair costs
+/// what one method does. Each reading is the rise of `heap_bytes()` from the agent without the
+/// instances to the agent holding them, both after a collection, so the class's own functions
+/// and the array that holds the instances cancel out.
+#[test]
+fn an_instance_pays_for_the_room_of_its_list() {
+    let n = ROOM_INSTANCES;
+    let mut agent = support::host::agent().unwrap();
+    let r = realm(&mut agent);
+    let methods = |k: u32| (0..k).map(|i| format!(" #m{i}() {{}}")).collect::<String>();
+    let classes: Vec<(&str, String)> = vec![
+        ("0", String::new()),
+        ("1", methods(1)),
+        ("pair", " get #a() { return 1; } set #a(v) {}".to_string()),
+        ("4", methods(4)),
+        ("5", methods(5)),
+        ("9", methods(9)),
+        ("17", methods(17)),
+    ];
+    let mut rises = Vec::new();
+    for (_, body) in &classes {
+        assert_eq!(
+            eval_text(
+                &mut agent,
+                &r,
+                &format!("var K = class {{{body} }}; var keep = null; 0;")
+            ),
+            Outcome::Normal("0".to_string())
+        );
+        let fill = format!("keep = []; for (var i = 0; i < {n}; i++) keep.push(new K()); 0;");
+        let mut rise = 0;
+        // The first round grows the arenas.
+        for _ in 0..2 {
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            let empty = agent.heap_bytes().unwrap();
+            assert_eq!(
+                eval_text(&mut agent, &r, &fill),
+                Outcome::Normal("0".to_string())
+            );
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            rise = agent.heap_bytes().unwrap() - empty;
+            assert_eq!(
+                eval_text(&mut agent, &r, "keep = null; 0;"),
+                Outcome::Normal("0".to_string())
+            );
+        }
+        rises.push(rise);
+    }
+    let per: Vec<u64> = rises
+        .iter()
+        .map(|&rise| {
+            let over = rise - rises[0];
+            assert_eq!(over % n, 0, "{rises:?}");
+            over / n
+        })
+        .collect();
+    let table: Vec<String> = classes
+        .iter()
+        .zip(&per)
+        .map(|((name, _), bytes)| format!("{name}: {bytes}"))
+        .collect();
+    println!("bytes per instance over a plain one, by private methods: {table:?}");
+    let entry = per[4] - per[3];
+    let start = per[1] - entry;
+    assert!(entry >= 16 && start > 0, "{table:?}");
+    for (k, bytes) in [
+        (1u64, per[1]),
+        (4, per[3]),
+        (5, per[4]),
+        (9, per[5]),
+        (17, per[6]),
+    ] {
+        assert_eq!(bytes, start + k * entry, "{k} methods: {table:?}");
+    }
+    assert_eq!(per[2], per[1], "an accessor pair is one entry: {table:?}");
+}
+
+/// A lookup by name that passes the private record: a class inside a `with`
+/// body (non-strict code) whose private method reads, writes and `typeof`s a name the `with`
+/// object holds, and a direct `eval` in a private method that reads the class's own name and a
+/// name of the `with` object, while a property named `#m` on the `with` object is no private
+/// name. The private record is named only when a direct `eval` stands in the class body.
+#[test]
+fn a_lookup_by_name_passes_the_private_record() {
+    let source = r##"var scope = { x: 1, "#m": "property" }, r;
+with (scope) {
+  class C {
+    #m() { x = x + 1; return typeof x + x; }
+    #e() { return eval("C === K && x"); }
+    f() { return this.#m() + "," + this.#e(); }
+  }
+  var K = C;
+  r = new C().f();
+}
+r === "number2,2" && scope.x === 2;"##;
+    assert_eq!(run(limits(), source), passed(), "{source}");
 }

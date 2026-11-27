@@ -216,14 +216,24 @@ pub enum Instruction {
     /// `hops` outward (both the private record), to `o`: a getter or a setter joins the
     /// accessor of the name that lacks that half, which its partner added just before (the
     /// combined element of ClassDefinitionEvaluation, step 27.e); otherwise an element of the
-    /// name already on `o` is a `TypeError`. The fields are 16 bits wide so the instruction
-    /// keeps the size of the others: a class with more private slots than that, or a record
-    /// that far out, is refused by the compiler.
+    /// name already on `o` is a `TypeError`. `room` is the number of elements the adds of this
+    /// class level make (its private methods and accessors that are not static, or those that
+    /// are, a getter and a setter of one name counted once): an add that finds the list of `o`
+    /// full reserves room for exactly `room` elements, so each level of a construction reserves
+    /// once and an instance pays for its elements alone.
+    ///
+    /// The fields are 16 bits wide so the instruction keeps the size of the others. The private
+    /// record of a class holds one slot per private identifier and one per private method,
+    /// getter or setter function, so its slots are numbered 0 to 65,535 at most: 32,768 private
+    /// methods with names of their own fill it. A class with a larger private record, or a
+    /// record more than 65,535 environments out, is refused by the compiler
+    /// (`CompileError::TooManyInClass`).
     AddPrivateMethod {
         hops: u16,
         slot: u16,
         function_hops: u16,
         function_slot: u16,
+        room: u16,
     },
     /// A new Private Name whose [[Description]] is `strings[name]` into slot `slot` of the
     /// LexicalEnvironment, the private record the class's code just pushed: one per private

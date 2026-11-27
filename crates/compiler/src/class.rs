@@ -93,8 +93,9 @@ fn initializer_private_methods(
     let Some(methods) = c.resolution.initializer_methods.get(&id) else {
         return Ok(());
     };
+    let room = c.resolution.private_rooms.get(&id).copied().unwrap_or(0);
     for &method in methods {
-        let add = c.private_add(method)?;
+        let add = c.private_add(method, room)?;
         c.emit(Instruction::This, f.span)?;
         c.emit(add, f.span)?;
         c.emit(Instruction::Pop, f.span)?;
@@ -361,10 +362,13 @@ impl<'a, 'm> Compiler<'a, 'm> {
     }
 
     /// `AddPrivateMethod` of the private method, getter or setter `method`, its Private Name and
-    /// its function at the places its add sites resolve to.
-    pub(crate) fn private_add(&self, method: FunctionId) -> Result<Instruction, CompileError> {
-        let narrow =
-            |n: u32| u16::try_from(n).map_err(|_| CompileError::TooMany("private record slots"));
+    /// its function at the places its add sites resolve to, with `room` the elements its class
+    /// level adds ([`crate::resolve::Resolution::private_rooms`]).
+    pub(crate) fn private_add(
+        &self,
+        method: FunctionId,
+        room: u32,
+    ) -> Result<Instruction, CompileError> {
         let (
             Binding::Env { hops, slot },
             Binding::Env {
@@ -379,10 +383,11 @@ impl<'a, 'm> Compiler<'a, 'm> {
             return Err(malformed("a private method's binding"));
         };
         Ok(Instruction::AddPrivateMethod {
-            hops: narrow(hops)?,
-            slot: narrow(slot)?,
-            function_hops: narrow(function_hops)?,
-            function_slot: narrow(function_slot)?,
+            hops: narrow_hops(hops)?,
+            slot: narrow_private(slot)?,
+            function_hops: narrow_hops(function_hops)?,
+            function_slot: narrow_private(function_slot)?,
+            room: narrow_private(room)?,
         })
     }
 
@@ -403,6 +408,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
         class: &Class,
         t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
+        let room = self
+            .resolution
+            .private_rooms
+            .get(&class.constructor)
+            .copied()
+            .unwrap_or(0);
         for element in &class.elements {
             let ClassElement::Method {
                 is_static: true,
@@ -414,7 +425,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
             else {
                 continue;
             };
-            let add = self.private_add(*function)?;
+            let add = self.private_add(*function, room)?;
             t.push(Task::Emit(add, *span))?;
         }
         Ok(())
@@ -468,5 +479,50 @@ impl<'a, 'm> Compiler<'a, 'm> {
         _first: &ClassElement,
     ) -> Result<FunctionId, CompileError> {
         Err(malformed("a run of static fields"))
+    }
+}
+
+/// A slot of the private record, or a room of private elements, as the 16-bit operand of
+/// [`Instruction::AddPrivateMethod`]: a class whose private record has more than 65,536 slots
+/// (numbered 0 to 65,535; one per private identifier and one per private method, getter or
+/// setter function, so 32,768 private methods with names of their own fill it) is refused,
+/// naming the class's record.
+fn narrow_private(n: u32) -> Result<u16, CompileError> {
+    u16::try_from(n).map_err(|_| CompileError::TooManyInClass("private record slots"))
+}
+
+/// The hops from an initializer or the class's code to its private record as the 16-bit
+/// operand of [`Instruction::AddPrivateMethod`]: more than 65,535 environments out is refused.
+fn narrow_hops(n: u32) -> Result<u16, CompileError> {
+    u16::try_from(n).map_err(|_| CompileError::TooMany("environments"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{narrow_hops, narrow_private};
+    use crate::CompileError;
+    use std::string::ToString;
+
+    /// The last slot of a private record that the operand numbers is 65,535, the slot of a
+    /// class's 32,768th private method's function; the next is refused with a text that names the
+    /// class, not a function. The instruction keeps its 12 bytes with the five operands.
+    #[test]
+    fn a_private_record_holds_65536_slots() {
+        assert_eq!(narrow_private(65_535), Ok(65_535));
+        let refused = narrow_private(65_536);
+        assert_eq!(
+            refused,
+            Err(CompileError::TooManyInClass("private record slots"))
+        );
+        assert_eq!(
+            refused.err().map(|e| e.to_string()).as_deref(),
+            Some("more private record slots in one class than the bytecode can number")
+        );
+        assert_eq!(narrow_hops(65_535), Ok(65_535));
+        assert_eq!(
+            narrow_hops(65_536),
+            Err(CompileError::TooMany("environments"))
+        );
+        assert_eq!(size_of::<crate::bytecode::Instruction>(), 12);
     }
 }

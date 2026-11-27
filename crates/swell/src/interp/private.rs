@@ -51,11 +51,11 @@ impl<H: Host> Agent<H> {
                 slot,
                 function_hops,
                 function_slot,
+                room,
             }) => self.add_private_method(
-                u32::from(hops),
-                u32::from(slot),
-                u32::from(function_hops),
-                u32::from(function_slot),
+                (u32::from(hops), u32::from(slot)),
+                (u32::from(function_hops), u32::from(function_slot)),
+                usize::from(room),
             ),
             Some(I::NewPrivateName { slot, name }) => self.new_private_name_instruction(slot, name),
             _ => Err(self.fault()),
@@ -119,14 +119,14 @@ impl<H: Host> Agent<H> {
     /// `AddPrivateMethod`: `[o] -> [o]`, PrivateMethodOrAccessorAdd of the function in slot
     /// `function_slot` of the environment `function_hops` outward, keyed by the Private Name in
     /// slot `slot` of the environment `hops` outward. `o` is `this` of the initializer of the
-    /// instance elements or F, always an object.
+    /// instance elements or F, always an object. A list of `o` that is full gets room for
+    /// `room` elements, the elements of this class level.
     #[inline(never)]
     fn add_private_method(
         &mut self,
-        hops: u32,
-        slot: u32,
-        function_hops: u32,
-        function_slot: u32,
+        (hops, slot): (u32, u32),
+        (function_hops, function_slot): (u32, u32),
+        room: usize,
     ) -> Completion<Flow> {
         let key = self.private_name_at(hops, slot)?;
         let env = self.top_frame()?.env;
@@ -134,7 +134,7 @@ impl<H: Host> Agent<H> {
         let function = self.expect_object(function)?;
         let object = self.peek_value(0)?;
         let object = self.expect_object(object)?;
-        self.private_method_or_accessor_add(object, key, function)?;
+        self.private_method_or_accessor_add(object, key, function, room)?;
         Ok(Flow::Next)
     }
 

@@ -436,7 +436,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Result<Code, Value>> {
         match compiled {
             Ok(code) => Ok(Ok(code)),
-            Err(error @ CompileError::TooMany(_)) => {
+            Err(error @ (CompileError::TooMany(_) | CompileError::TooManyInClass(_))) => {
                 let message = error.to_string();
                 let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
                 Ok(Err(Value::Object(object)))
