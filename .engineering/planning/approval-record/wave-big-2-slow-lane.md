@@ -11,7 +11,7 @@ revision: 1
 The operator's order of 2026-11-26, after pull request 19 was merged: the lane `slow` took
 22 min 50 s on the forge; the story for it is ordered before the next feature of wave big-2.
 
-The operator's decision on its bound the same day (D53, option A): 15 minutes for the lane on
+The operator's decision on its bound the same day (option A): 15 minutes for the lane on
 the forge, 10 minutes per part, the two profile builds shared; feature units may start beside
 it, and none merges before it.
 

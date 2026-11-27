@@ -179,6 +179,8 @@ mod promises;
 mod property_index;
 #[cfg(any(not(test_modules), test_modules = "proxy"))]
 mod proxy;
+#[cfg(any(not(test_modules), test_modules = "proxy_shape_traps"))]
+mod proxy_shape_traps;
 #[cfg(any(not(test_modules), test_modules = "realm_padding"))]
 mod realm_padding;
 #[cfg(any(not(test_modules), test_modules = "realms"))]

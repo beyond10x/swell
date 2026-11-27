@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:new-target-meta-property
 kind: story
-status: active
+status: implemented
 title: new.target in functions, arrows, generators and eval, and the eval context with PerformEval's four flags
 summary: '36 cases (72 runs): grammar and early errors of new.target, the frame''s NewTarget, arrows that keep it, and the eval context passed to parse_eval_with.'
 relations:
@@ -48,10 +48,11 @@ scope:
   path: crates/syntax/tests/sources/refused/new-target.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/new-target.js
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:44Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:44Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:31Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

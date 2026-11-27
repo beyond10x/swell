@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:27:54Z",
+  "actor": "human:operator",
+  "artifact": "story:proxy-descriptor-prototype-and-extensibility-traps",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/proxytraps at 14a6133f, build node, before the merge into wave/big-2",
+    "reference": "swell main 1506 passed, 1 skipped in the default mode and 1485 passed, 1 skipped with a collection at every safe point; swell lib 277 passed; test-stack-profiles 4 passed in the profile release and 4 in stack-debug; task clippy exit 0; cargo fmt --all --check exit 0"
+  }
+}

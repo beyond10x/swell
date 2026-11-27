@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:55:30Z",
+  "actor": "human:operator",
+  "artifact": "story:keyed-entry-table",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 8ab9456, exit 0, on the build node; the unit was merged by commit 050a70ff, an ancestor of that head",
+    "reference": "the library tests of crates/swell/src/object/keyed_entries.rs (object::keyed_entries::tests::*)"
+  }
+}
