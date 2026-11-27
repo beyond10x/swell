@@ -335,12 +335,11 @@ impl<H: Host> Agent<H> {
     /// caller's strictness is `strict_caller` and whose GetThisEnvironment's [[FunctionObject]]
     /// is `function` (decision 3, item 5): inFunc when there is one, inMethod when it has a
     /// [[HomeObject]] (HasSuperBinding), inDerivedCtor when it is a class constructor whose box
-    /// says derived ([[ConstructorKind]], `object/class_constructor.rs`).
-    /// inClassFieldInitializer stays false until `story:eval-in-class-field-initializers` reads
-    /// it from the template kind `FieldInitializer`; until then a direct eval whose function is
-    /// a field initializer (an arrow in one too, whose GetThisEnvironment is the initializer's)
-    /// is refused with a `SyntaxError`, `eval in a class field initializer is not supported
-    /// before slice 8`, so that ContainsArguments is not skipped.
+    /// says derived ([[ConstructorKind]], `object/class_constructor.rs`), and
+    /// inClassFieldInitializer when its template is of kind `FieldInitializer` (its
+    /// [[ClassFieldInitializerName]]; an arrow in an initializer too, whose GetThisEnvironment
+    /// is the initializer's), which makes ContainsArguments of the eval code a `SyntaxError`
+    /// (`swell_syntax::parse_eval_with`).
     fn eval_context(
         &mut self,
         strict_caller: bool,
@@ -366,18 +365,12 @@ impl<H: Host> Agent<H> {
             },
             None => (false, false, false),
         };
-        if in_initializer {
-            return Err(self.throw_error(
-                crate::host::ErrorKind::SyntaxError,
-                "eval in a class field initializer is not supported before slice 8",
-            ));
-        }
         Ok(EvalContext {
             strict_caller,
             in_function: function.is_some(),
             in_method,
             in_derived_constructor,
-            in_class_field_initializer: false,
+            in_class_field_initializer: in_initializer,
         })
     }
 

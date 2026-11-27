@@ -221,9 +221,12 @@ impl From<bool> for EvalContext {
 /// [`EvalContext::in_derived_constructor`] is set: the parse starts with those flags as the
 /// code of such a method or constructor starts (an arrow function in the eval code keeps them,
 /// any other function sets its own), so where they are not set `super` answers the early errors
-/// a script answers (`story:derived-classes-and-super-call`).
-/// [`EvalContext::in_class_field_initializer`] (ContainsArguments) is read by the rules
-/// `story:eval-in-class-field-initializers` adds; until then this entry does not read it.
+/// a script answers (`story:derived-classes-and-super-call`). When
+/// [`EvalContext::in_class_field_initializer`] is set, ContainsArguments of the body
+/// (`#sec-static-semantics-containsarguments`: an IdentifierReference `arguments` outside every
+/// function that is not an arrow function; a class's computed keys, field initializers and
+/// static blocks are looked into, its methods are not) is a SyntaxError at the first such
+/// `arguments`, the one error of the parse (`story:eval-in-class-field-initializers`).
 pub fn parse_eval(
     source: &[u16],
     context: impl Into<EvalContext>,
@@ -239,8 +242,20 @@ pub fn parse_eval_with(
     options: ParseOptions,
     ledger: &mut dyn Ledger,
 ) -> Result<Script, Failure> {
+    let context = context.into();
     let meter = Meter::new(ledger);
-    let parsed = parser::parse_eval(source, options.max_nesting, context.into(), &meter);
+    let parsed = parser::parse_eval(source, options.max_nesting, context, &meter);
+    // PerformEval, step 12.h (`#sec-performeval`): with inClassFieldInitializer,
+    // ContainsArguments of the body is a SyntaxError.
+    let parsed = match parsed {
+        Ok(parsed) if context.in_class_field_initializer => {
+            match early::contains_arguments(&parsed.ast, &parsed.body, &meter) {
+                Some(error) => Err(error),
+                None => Ok(parsed),
+            }
+        }
+        parsed => parsed,
+    };
     analysed(parsed, options.max_nesting, &meter)
 }
 
