@@ -446,7 +446,9 @@ fn many_sites(n: u32) -> String {
 ///
 /// The count ([`mode_count`]): 1,000 sites in the default mode, gate and lane alike (0.35 to
 /// 0.69 CPU seconds alone; the reading of none 191,253 bytes, the 1,000 add 1,737,682, the
-/// room 868,841); 40 with the feature `collect-every-safe-point`, gate and lane alike. 1,000
+/// room 868,841); 40 with the feature `collect-every-safe-point`, gate and lane `slow`
+/// (`SWELL_FULL_COUNTS=1`) alike: 100 took 2.65 to 3.36 CPU seconds alone there in the test
+/// profile, opt-level 0, on 2026-11-27, over the lane's bound of 2.5. 1,000
 /// took 30.9 to 43.4 CPU seconds alone in that mode at the full count, where every instruction
 /// marks a heap that grows with the kept objects, and the lane's collect half killed the test
 /// at 60 s at a load of 155; 100 took 0.94 to 1.44 (measured on 2026-11-23, this unit's runs

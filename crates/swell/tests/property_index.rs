@@ -177,10 +177,11 @@ fn slot_names_past_the_small_size_charge_a_step_per_comparison() {
 /// story's 10,000), with deletions and an Array of n elements, spends the same steps and holds
 /// the same heap bytes in two agents of the same seeds, and in one of another `hash_key`: no
 /// order or charge comes from the map's iteration or its hash. With the feature
-/// `collect-every-safe-point` the script has 20 of each, 13 properties left after the deletions,
-/// still past the small size of 8: that mode collects at every safe point, and every iteration
-/// of a loop is one (10,000 ran over 60 s there, 1,000 took 56.4 s, and 50 took 2.2 s alone in
-/// the test profile, opt-level 0, on 2026-11-27). In the default mode's gate it has 2,000 of each
+/// `collect-every-safe-point` the script has 20 of each in the gate, 13 properties left after
+/// the deletions, still past the small size of 8, and 50 of each in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`): that mode collects at every safe point, and every iteration of a
+/// loop is one (10,000 ran over 60 s there, 1,000 took 56.4 s, and 50 took 2.2 s alone in the
+/// test profile, opt-level 0, on 2026-11-27). In the default mode's gate it has 2,000 of each
 /// (10,000 took 26.5 s there at a load of 100 to 110 on 17 cores, cargo-nextest): the map still
 /// grows from the small size through several sizes, with every third property deleted; the
 /// lane `slow` (`SWELL_FULL_COUNTS=1`) runs 5,000, two and a half times the gate's (10,000
@@ -189,7 +190,11 @@ fn slot_names_past_the_small_size_charge_a_step_per_comparison() {
 fn the_same_seeds_give_the_same_steps_and_heap_bytes() {
     let full = std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1");
     let (n, expected) = if cfg!(feature = "collect-every-safe-point") {
-        (20, "\"13,p1,p19,19\"")
+        if full {
+            (50, "\"33,p1,p49,49\"")
+        } else {
+            (20, "\"13,p1,p19,19\"")
+        }
     } else if full {
         (5_000, "\"3333,p1,p4999,4999\"")
     } else {

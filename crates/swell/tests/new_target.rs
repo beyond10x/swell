@@ -846,14 +846,19 @@ fn arrows_bytes(kind: &str, n: u32) -> (u64, u64) {
 
 /// Decision 4, "Memory budget": arrows (with and without a kept NewTarget) and methods, kept and
 /// then dropped, leave the same reading after a collection in two rounds: every box is charged
-/// and credited. The loop makes 4,000 of each; 20 with the feature `collect-every-safe-point`,
-/// where every instruction marks the heap (40 took 2.0 s alone there in the test profile,
-/// opt-level 0, on 2026-11-27): a box that is not credited moves the reading after the drop
-/// by its bytes, whatever the count.
+/// and credited. The loop makes 4,000 of each; with the feature `collect-every-safe-point`,
+/// where every instruction marks the heap, 20 in the gate and 40 in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`; 40 took 2.0 s alone there in the test profile, opt-level 0, on
+/// 2026-11-27): a box that is not credited moves the reading after the drop by its bytes,
+/// whatever the count.
 #[test]
 fn arrow_boxes_are_charged_and_credited() {
     let n: u32 = if cfg!(feature = "collect-every-safe-point") {
-        20
+        if std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1") {
+            40
+        } else {
+            20
+        }
     } else {
         4_000
     };
