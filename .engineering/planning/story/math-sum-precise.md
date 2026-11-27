@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:math-sum-precise
 kind: story
-status: active
+status: implemented
 title: 'Math.sumPrecise: the exact accumulator and the builtin'
 summary: Two 34-limb superaccumulators in swell-num, the builtin with its iterator and charges, and the lift of 8 test262 cases.
 relations:
@@ -25,10 +25,11 @@ scope:
   path: crates/swell/tests/math_sum_precise.rs
 - confidence: cited
   path: website/data/status.json
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 10}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 11}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:47Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:46Z",
+  "actor": "human:operator",
+  "artifact": "story:math-constants-and-exact-functions",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit dd1b1c414065, an ancestor of that head",
+    "reference": "crates/swell/tests/builtins_math.rs:245 the_constants_are_the_numbers_of_the_standard_and_read_only"
+  }
+}

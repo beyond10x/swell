@@ -7,7 +7,7 @@
 //! [`FREE_CODE_UNITS`], IsLessThan a step per code unit of the shorter String, each before a
 //! unit is read (`docs/design/engine.md`, "The step budget").
 
-use std::cmp::Ordering;
+use core::cmp::Ordering;
 
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
@@ -125,7 +125,7 @@ impl<H: Host> Agent<H> {
     pub(crate) fn is_loosely_equal(&mut self, x: Value, y: Value) -> Completion<bool> {
         let (mut x, mut y) = (x, y);
         loop {
-            let same_type = std::mem::discriminant(&x) == std::mem::discriminant(&y);
+            let same_type = core::mem::discriminant(&x) == core::mem::discriminant(&y);
             if same_type {
                 return self.is_strictly_equal(x, y);
             }
@@ -213,6 +213,7 @@ mod tests {
     use crate::host::outcome::{Abrupt, Termination};
     use crate::object::string::copies;
     use crate::value::Value;
+    use alloc::vec;
 
     /// SameValue, SameValueZero and IsStrictlyEqual differ on NaN and the signed zeros
     /// (`#sec-samevalue`, `#sec-samevaluezero`, `#sec-isstrictlyequal`); two Strings of the

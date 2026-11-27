@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:44:37Z",
+  "actor": "human:operator",
+  "artifact": "story:math-random",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "grep -c 'pending slice 4$' conformance/host/requirements.txt on wave/big-1 at 0f2c83c6 and on impl/math-random at 96fe0ca3; task host-requirements-check and the math_random:: tests in both collection modes, run by adversary pass 2 on 96fe0ca3",
+    "reference": "VERIFIED: 6 requirements pending for slice 4 on the base, 0 on the unit, HOST-26, 27, 144, 147, 212 and 213 each name a test swell::math_random::host_*; host-requirements-check exit 0 (165 test, 56 pending); 15 math_random tests pass in each mode; review-result:adversary-random-pass-2"
+  }
+}

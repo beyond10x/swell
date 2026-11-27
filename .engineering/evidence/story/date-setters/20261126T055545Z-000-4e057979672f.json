@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:45Z",
+  "actor": "human:operator",
+  "artifact": "story:date-setters",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 323ac0d0e61a, an ancestor of that head",
+    "reference": "crates/swell/tests/date_setters.rs:374 fourteen_setters_over_a_table_at_three_offsets"
+  }
+}

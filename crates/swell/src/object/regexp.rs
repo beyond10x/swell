@@ -16,6 +16,7 @@
 //! The kind takes every internal method by its ordinary arm (`object/mod.rs`). Its kind site of
 //! the collector traces the two Strings; the program holds no handle.
 
+use alloc::boxed::Box;
 use swell_regexp::Program;
 
 use crate::heap::collect::Mark;

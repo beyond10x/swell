@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:number-format
 kind: story
-status: active
+status: implemented
 title: Number toFixed, toExponential, toPrecision and toLocaleString over an exact Nat
 summary: The Nat move out of to_string.rs, exact decimal formatting in swell-num, the four Number prototype builtins, and the lift of 48 test262 cases.
 relations:
@@ -24,10 +24,11 @@ scope:
   path: crates/swell/src/builtins/number.rs
 - confidence: inferred
   path: crates/swell/tests/builtins_number_format.rs
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:25Z", actor: "human:operator", revision: 7}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:25Z", actor: "human:operator", revision: 8}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:47Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

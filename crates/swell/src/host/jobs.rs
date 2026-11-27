@@ -60,6 +60,7 @@ use crate::heap::collect::{Item, Mark};
 use crate::object::promise::HOST_DEFINED_BYTES;
 use crate::ops::promise::PromiseJob;
 use crate::value::RealmRef;
+use alloc::boxed::Box;
 
 /// A host microtask (decision 11): the host's code, run once by a checkpoint with a `Cx` whose
 /// current realm is the realm it was queued with. What it needs of the engine it holds in
@@ -161,6 +162,10 @@ impl<H: Host> Agent<H> {
             {
                 return Err(NoRoom::Budget);
             }
+            #[expect(
+                clippy::disallowed_methods,
+                reason = "charged to `queue_charge` by `Charge::grow` before it grows"
+            )]
             if self.microtasks.try_reserve_exact(more).is_err() {
                 self.queue_charge.release(growth);
                 self.fault();
@@ -261,7 +266,7 @@ impl<H: Host> Agent<H> {
     /// script, calls no hook and spends no step; a host microtask has no entry charge, so
     /// nothing more is credited for it.
     pub(crate) fn drop_microtasks(&mut self) -> usize {
-        let dropped = std::mem::take(&mut self.microtasks);
+        let dropped = core::mem::take(&mut self.microtasks);
         self.release_queue_room();
         let count = dropped.len();
         for entry in dropped {
@@ -417,6 +422,7 @@ mod tests {
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm};
     use crate::value::{Realm, Root};
     use crate::{Cx, HostError};
+    use alloc::boxed::Box;
 
     /// HOST-192's released realm, which the interface cannot make (a `Realm` is released only
     /// by its drop): a `Realm` whose root names its slot with a later generation, as a slot
@@ -429,7 +435,7 @@ mod tests {
             key: realm.0.key,
             index: realm.0.index,
             generation: realm.0.generation.wrapping_add(1),
-            released: std::rc::Rc::clone(&realm.0.released),
+            released: alloc::rc::Rc::clone(&realm.0.released),
         });
         let answer = agent.queue_microtask(&released, Box::new(|_cx: &mut Cx<'_, NoHooks>| {}));
         assert_eq!(answer, Err(HostError::StaleHandle));

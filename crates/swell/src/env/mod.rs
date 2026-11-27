@@ -50,13 +50,19 @@
 //! Kind site of the collector: [`EnvironmentRecord::trace`] (the outer record, the slots, the
 //! bindings eval code added, the binding object and the script whose code names the slots).
 
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::String;
+use alloc::string::ToString;
+use alloc::vec::Vec;
+
 pub(crate) mod declarative;
 pub(crate) mod function;
 pub(crate) mod global;
 pub(crate) mod object;
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::rc::Rc;
+use core::cell::Cell;
 
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
@@ -351,6 +357,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut values = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "checked against the budget as `owned` before it is reserved, charged with the record by `store_environment`"
+        )]
         if values.try_reserve_exact(count).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -816,6 +826,7 @@ mod tests {
     use crate::host::outcome::{Abrupt, Termination};
     use crate::object::property::{Key, SMALL};
     use crate::value::Value;
+    use std::println;
 
     fn number(i: u32) -> Value {
         Value::Number(f64::from(i))

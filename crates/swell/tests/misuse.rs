@@ -1032,8 +1032,20 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
     assert_eq!(agent.state(), AgentState::Faulted);
 }
 
-/// What the reads of HOST-102 answer, as text.
-fn reads(agent: &mut Agent<Recorder>, realm: &Realm, script: &Script, root: &Root) -> String {
+/// What the reads of HOST-102 answer, as text. `name` roots the String the reads of a String
+/// read, made by the test before its first reading of `heap_bytes()`: the reads make no record
+/// on the heap, so that a String of the test's own cannot grow the arena of Strings between two
+/// readings. Measured on 2026-11-26 with `Math.random` in the realm: at
+/// `SWELL_TEST_REALM_FUNCTIONS` 200 the padded realm leaves that arena two free slots after a
+/// collection, the third String grows it by 53,248 bytes, and a String made here moved
+/// `heap_bytes()` from 550,495 to 603,743.
+fn reads(
+    agent: &mut Agent<Recorder>,
+    realm: &Realm,
+    script: &Script,
+    root: &Root,
+    name: &Root,
+) -> String {
     let global = agent.global_object(realm).unwrap();
     let duplicate = agent.duplicate(root).unwrap();
     let scoped = agent
@@ -1045,7 +1057,9 @@ fn reads(agent: &mut Agent<Recorder>, realm: &Realm, script: &Script, root: &Roo
             let Value::Object(global) = cx.get(&global).unwrap() else {
                 panic!("the global");
             };
-            let name = cx.new_string("name").unwrap();
+            let Value::String(name) = cx.get(name).unwrap() else {
+                panic!("the root of \"name\" holds no String");
+            };
             (
                 value == cx.get(root).unwrap(),
                 cx.brand(object),
@@ -1090,7 +1104,7 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
         agent.evaluate_script(&script),
         Ok(Outcome::Normal(_))
     ));
-    let root = agent
+    let (root, name) = agent
         .with_cx(&realm, |cx| {
             let object = cx
                 .new_host_object(HostObjectSpec {
@@ -1101,7 +1115,11 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
                 })
                 .unwrap()
                 .unwrap();
-            cx.root(Value::Object(object)).unwrap()
+            let name = cx.new_string("name").unwrap();
+            (
+                cx.root(Value::Object(object)).unwrap(),
+                cx.root(Value::String(name)).unwrap(),
+            )
         })
         .unwrap();
     assert!(matches!(
@@ -1118,11 +1136,11 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
     let bytes = agent.heap_bytes().unwrap();
     let live = agent.live_bytes().unwrap();
 
-    let first = reads(&mut agent, &realm, &script, &root);
+    let first = reads(&mut agent, &realm, &script, &root, &name);
     assert!(first.contains(" Ok(1) "), "{first}");
     for _ in 0..3 {
         assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
-        assert_eq!(reads(&mut agent, &realm, &script, &root), first);
+        assert_eq!(reads(&mut agent, &realm, &script, &root, &name), first);
     }
     assert_eq!(agent.last_entry_steps(), Ok(steps));
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));

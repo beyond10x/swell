@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:46Z",
+  "actor": "human:operator",
+  "artifact": "story:math-functions",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 57a22e333d88, an ancestor of that head",
+    "reference": "crates/swell/tests/math_platform.rs:268 host_135_a_script_prints_the_same_bytes_on_every_platform (HOST-135 test line)"
+  }
+}

@@ -24,8 +24,12 @@
 //! the collector, [`Promise::trace`], traces the result and every value of every reaction, and the
 //! [[HostDefined]] of each JobCallback through `HostData::trace`.
 
-use std::cell::Cell;
-use std::rc::Rc;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+#[cfg(test)]
+use alloc::vec;
+use alloc::vec::Vec;
+use core::cell::Cell;
 
 use crate::heap::arena::Handle;
 use crate::heap::collect::Mark;
@@ -147,7 +151,7 @@ impl JobCallback {
 
     /// The [[HostDefined]], shared.
     pub(crate) fn host_defined(&self) -> Option<HostDefined> {
-        let data: &dyn std::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
+        let data: &dyn core::any::Any = self.host_defined.as_ref()?.data.as_deref()?;
         data.downcast_ref::<JobHostDefined>()
             .map(|held| HostDefined::clone(&held.0))
     }
@@ -318,6 +322,10 @@ impl<H: Host> Agent<H> {
                 queue,
             })
         });
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "both lists of reactions, charged by `charge_bytes` as `growth` before they grow"
+        )]
         let reserved = reactions
             .fulfill
             .try_reserve_exact(fulfill_wanted.saturating_sub(reactions.fulfill.len()))
@@ -349,11 +357,11 @@ impl<H: Host> Agent<H> {
             return Ok(Vec::new());
         };
         // Credited here, so the drop of the box queues nothing.
-        let charged = std::mem::take(&mut reactions.charged);
+        let charged = core::mem::take(&mut reactions.charged);
         self.heap.accounting.credit(charged);
         Ok(match kind {
-            ReactionType::Fulfill => std::mem::take(&mut reactions.fulfill),
-            ReactionType::Reject => std::mem::take(&mut reactions.reject),
+            ReactionType::Fulfill => core::mem::take(&mut reactions.fulfill),
+            ReactionType::Reject => core::mem::take(&mut reactions.reject),
         })
     }
 

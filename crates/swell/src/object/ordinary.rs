@@ -505,6 +505,9 @@ mod tests {
     use crate::object::ordinary::OrdinaryData;
     use crate::object::property::{Descriptor, Key};
     use crate::value::Value;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
 
     /// OrdinaryOwnPropertyKeys (`#sec-ordinaryownpropertykeys`): the array indices ascending,
     /// then the String keys in creation order, then the Symbol keys in creation order. A

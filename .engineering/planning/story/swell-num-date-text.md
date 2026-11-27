@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:swell-num-date-text
 kind: story
-status: active
+status: implemented
 title: swell-num reads the three forms of Date.parse and writes the strings of toString, toUTCString and toISOString, tested without an engine
 summary: parse_date_text and the five writers in crates/num, from the design sentence of Date.parse; lifts no case.
 relations:
@@ -17,10 +17,11 @@ scope:
   path: crates/num/tests/date_text.rs
 - confidence: cited
   path: crates/num/tests/main.rs
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 7}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:49Z", actor: "human:operator", revision: 8, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

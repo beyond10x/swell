@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:46Z",
+  "actor": "human:operator",
+  "artifact": "story:job-queue-and-microtask-checkpoint",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 2757246fc503, an ancestor of that head",
+    "reference": "crates/swell/tests/jobs.rs:321 host_77_a_termination_leaves_the_jobs_behind_it_queued"
+  }
+}

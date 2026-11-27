@@ -87,6 +87,7 @@ fn normalized(magnitude: u64) -> (u64, i32) {
 /// pinned compiler (1.99.1: calling them is unsafe even where SSE2 is in the target's
 /// baseline), and `libm-check` refuses `core::arch`. About 4 times faster than the bit-by-bit
 /// root of `e_sqrt.c`, which the lib tests keep as the oracle of this one.
+#[inline]
 pub fn sqrt(x: f64) -> f64 {
     let bits = x.to_bits();
     if x.is_nan() || x == 0.0 || bits == f64::INFINITY.to_bits() {
@@ -189,6 +190,7 @@ fn sqrt_bit_by_bit(x: f64) -> f64 {
 
 /// The greatest integer at or below `x` (`roundToIntegralTowardNegative`; `f64::floor`). A NaN,
 /// an infinity, a zero and every |x| ≥ 2^52 answer x; -1 for -1 < x < 0, +0 for 0 < x < 1.
+#[inline]
 pub fn floor(x: f64) -> f64 {
     let bits = x.to_bits();
     let j0 = exponent(bits);
@@ -216,6 +218,7 @@ pub fn floor(x: f64) -> f64 {
 
 /// The least integer at or above `x` (`roundToIntegralTowardPositive`; `f64::ceil`). A NaN, an
 /// infinity, a zero and every |x| ≥ 2^52 answer x; -0 for -1 < x < 0, +1 for 0 < x < 1.
+#[inline]
 pub fn ceil(x: f64) -> f64 {
     let bits = x.to_bits();
     let j0 = exponent(bits);
@@ -241,6 +244,7 @@ pub fn ceil(x: f64) -> f64 {
 
 /// The integer toward zero from `x` (`roundToIntegralTowardZero`; `f64::trunc`), with the sign
 /// of x: ±0 for -1 < x < 1. A NaN, an infinity and every |x| ≥ 2^52 answer x.
+#[inline]
 pub fn trunc(x: f64) -> f64 {
     let bits = x.to_bits();
     let j0 = exponent(bits);
@@ -266,6 +270,7 @@ pub fn trunc(x: f64) -> f64 {
 /// Before it, the common case of a script: x and y integers of magnitude below 2^53 and y not
 /// zero. Both are exact as `i64`, and the `i64` remainder, which has the sign of the dividend,
 /// is the result, exact as `f64`; a zero remainder is +0 or -0 with the sign of x.
+#[inline]
 pub fn fmod(x: f64, y: f64) -> f64 {
     if x.abs() < TWO_53 && y.abs() < TWO_53 && y != 0.0 {
         let (a, b) = (x as i64, y as i64);
@@ -335,6 +340,7 @@ fn shift_and_subtract(x: f64, y: f64) -> f64 {
 /// The least non-negative remainder of `x` modulo |`y`| as `f64::rem_euclid` computes it:
 /// `r = fmod(x, y)`, and `r + |y|` when r < 0 (that sum is rounded, so a tiny negative r gives
 /// |y|). NaN as [`fmod`].
+#[inline]
 pub fn rem_euclid(x: f64, y: f64) -> f64 {
     let r = fmod(x, y);
     if r < 0.0 { r + y.abs() } else { r }

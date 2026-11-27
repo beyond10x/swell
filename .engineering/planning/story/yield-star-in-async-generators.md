@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:yield-star-in-async-generators
 kind: story
-status: active
+status: implemented
 title: yield* in an async generator delegates through the async iterator protocol
 summary: The async kind of the delegation loop of slice 7, inline through %AsyncGeneratorPrototype%.next of an async generator with no re-entry per level; throw and return passed on; the last held refusal of slice 10 leaves; 595 cases.
 relations:
@@ -40,10 +40,11 @@ scope:
   path: crates/syntax/tests/sources/refused/async-generator-yield-star.js
 - confidence: inferred
   path: crates/syntax/tests/sources/valid/async-generator-yield-star.js
-revision: 21
+revision: 22
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-23T19:58:15Z", actor: "human:operator", revision: 20, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-23T19:58:15Z", actor: "human:operator", revision: 21, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:50Z", actor: "human:operator", revision: 22, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

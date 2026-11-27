@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-04-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 4 passes: the cases that need a later slice move by rule lines, and passing cases of later slices come in'
 summary: About 3 known cases (6 runs) move to slices 9 and 12 with evidence in moves.tsv, cases of later slices that pass come in by dir lines; section 12, expected.txt and two rows of limits.md.
 relations:
@@ -43,10 +43,11 @@ scope:
   path: docs/plan/slice-04/close-into-4.tsv
 - confidence: cited
   path: website/docs/limits.md
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:28Z", actor: "human:operator", revision: 6}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:29Z", actor: "human:operator", revision: 7}
+- {from: "active", to: "implemented", at: "2026-11-26T10:01:52Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
@@ -96,3 +97,37 @@ Writes: `crates/swell/tests/consumer_slice_04.rs` (new), `crates/swell/tests/mai
 ## Out of scope
 
 Any engine, compiler, parser or runner source file, and any test but the one named above (a failing case of a part of slice 4 goes back to its owner); `Proxy` and `Reflect` (slice 9), `class` and `super` (slice 8), BigInt (slice 12), binary data and `Math.f16round` (slice 13); the epic, `AGENTS.md`, `README.md`, `CHANGELOG.md` and `conformance/slices-delivered.txt` (the coordinator); `taskfiles/test262.yml` (the moves check as it stands); the design text outside section 12.
+
+## As delivered
+
+The unit `close` of wave big-1 delivered the story on `impl/slice-04-close` (`e2ae99d5`,
+corrections at `76195b35`, `11609c8a` and `a1ca60ed`), merged into `wave/big-1`. Where the
+delivery differs from the text above:
+
+- The consumer test file has six tests, not one. The first is the story's
+  (`consumer_nine_references_of_surf_resolve_as_the_standard_says`, the consumer's calls with
+  the consumer's argument values). The adversary's two passes showed that the two calls of
+  `Math.max` cannot fail without slice 4 and that `Math.ceil(300 / 100)` cannot tell `ceil`
+  from the identity or a rounding neighbour, so a second script of 22 calls holds the five
+  parts of slice 4 the consumer calls (`Date.now`, `Math.floor`, `Math.min`, `Math.abs`,
+  `Math.ceil`), run by five tests (`parts_script_*`). Measured by the unit: the slowest of
+  the six takes 0.068 s in the default mode and 1.553 s with a collection at every safe
+  point.
+- The incoming cases of slice 19 are read case by case against a full run at the start
+  commit of the slice (`a46fe885`), not inferred from a difference of counts: 72 cases, each
+  failing in every run there on a part of slice 4 (`docs/plan/slice-04/close-into-4.tsv`).
+  One case the first list held passed at the start and is out
+  (`staging/sm/regress/regress-596805-2.js`); one came in
+  (`staging/sm/Number/conversion-invalid-precision.js`).
+- Three commands of the acceptance cannot print what the text says; the intent holds:
+  - the sum over the slice lines prints `53801 103360` (all 22 lines, excluded slices
+    included); the run lines give `44812 85556` before and after, so no case enters or
+    leaves the run;
+  - the `moves.tsv` command prints `12 1` and `all 1`, not `all 3`: the two `Proxy` lines keep
+    `from` 3, as the closes of slices 6, 5 and 10 kept the `from` of a line they changed;
+  - `check.sh` over `close-joint.cases.txt` is green on the unit's base already (the stories
+    the three cases need landed before the unit); over the run of the start commit it prints
+    6 lines `failing` and exits 1, as the text says.
+- Counts at the close: slice 4 holds 1,681 cases and 3,320 runs, every run passed: 1,612
+  cases by its rules before the close, less 3 moved to later slices (2 to slice 9, 1 to
+  slice 12), plus 72 taken in from slice 19.

@@ -6,9 +6,9 @@
 //! Equality and the relational comparison are `ops/testing.rs`. Written by
 //! `story:object-model-and-realms`.
 //!
-//! `**` (Number::exponentiate, 6.1.6.1.3) is not an ES5 operator: its result is
-//! implementation-approximated and needs the deterministic power function `swell-num` gets with
-//! `Math` (slice 4), so it comes with the `exponentiation` feature.
+//! `**` (Number::exponentiate, 6.1.6.1.3, `#sec-numeric-types-number-exponentiate`) is not an
+//! ES5 operator: its result is implementation-approximated, and it is the one function
+//! `swell_num::math::exponentiate` that `Math.pow` calls too (`story:exponentiation-operator`).
 
 use super::conversion::{number_to_int32, number_to_uint32};
 use crate::heap::accounting::ChargedVec;
@@ -16,8 +16,9 @@ use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::host::{ErrorKind, Host};
 use crate::value::{StringRef, Value};
+use swell_num::fmath;
 
-/// A binary operator of ApplyStringOrNumericBinaryOperator, ES5's set.
+/// A binary operator of ApplyStringOrNumericBinaryOperator: ES5's set and `**`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum BinaryOperator {
     Add,
@@ -25,6 +26,7 @@ pub(crate) enum BinaryOperator {
     Multiply,
     Divide,
     Remainder,
+    Exponentiate,
     LeftShift,
     SignedRightShift,
     UnsignedRightShift,
@@ -43,9 +45,12 @@ pub(crate) fn number_operation(operator: BinaryOperator, x: f64, y: f64) -> f64 
         BinaryOperator::Subtract => x - y,
         BinaryOperator::Multiply => x * y,
         BinaryOperator::Divide => x / y,
-        // Number::remainder truncates like C's fmod, which Rust's `%` on f64 is, with the
+        // Number::remainder truncates like C's fmod, which `fmath::fmod` computes in Rust, with the
         // clause's NaN, infinity and zero cases.
-        BinaryOperator::Remainder => x % y,
+        BinaryOperator::Remainder => fmath::fmod(x, y),
+        // Number::exponentiate (6.1.6.1.3, `#sec-numeric-types-number-exponentiate`): the
+        // function of `swell-num` that `Math.pow` calls, its special cases in the clause's order.
+        BinaryOperator::Exponentiate => swell_num::math::exponentiate(x, y),
         BinaryOperator::LeftShift => f64::from(number_to_int32(x).wrapping_shl(shift)),
         BinaryOperator::SignedRightShift => f64::from(number_to_int32(x) >> shift),
         BinaryOperator::UnsignedRightShift => f64::from(number_to_uint32(x) >> shift),
@@ -177,11 +182,12 @@ mod tests {
     use crate::object::ordinary::OrdinaryData;
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Value};
+    use alloc::string::String;
 
     /// `value`, held by a root for the rest of the test, so that a collection at a safe point
     /// (the feature `collect-every-safe-point`) keeps it.
     fn held(agent: &mut Agent<NoHooks>, value: Value) -> Value {
-        std::mem::forget(agent.heap.roots.add(value));
+        core::mem::forget(agent.heap.roots.add(value));
         value
     }
 
@@ -332,6 +338,9 @@ mod tests {
             (BinaryOperator::BitwiseAnd, 5.0, 3.0, 1.0),
             (BinaryOperator::BitwiseXor, 5.0, 3.0, 6.0),
             (BinaryOperator::BitwiseOr, 5.0, 3.0, 7.0),
+            (BinaryOperator::Exponentiate, 2.0, 10.0, 1024.0),
+            (BinaryOperator::Exponentiate, f64::NAN, 0.0, 1.0),
+            (BinaryOperator::Exponentiate, -0.0, -3.0, f64::NEG_INFINITY),
         ] {
             assert_eq!(
                 number_operation(operator, x, y),
@@ -341,6 +350,8 @@ mod tests {
         }
         assert!(number_operation(BinaryOperator::Remainder, 1.0, 0.0).is_nan());
         assert!(number_operation(BinaryOperator::Remainder, -0.0, 1.0).is_sign_negative());
+        assert!(number_operation(BinaryOperator::Exponentiate, 1.0, f64::INFINITY).is_nan());
+        assert!(number_operation(BinaryOperator::Exponentiate, -8.0, 1.0 / 3.0).is_nan());
         assert_eq!(number_unary_minus(0.0).to_bits(), (-0.0_f64).to_bits());
         assert_eq!(number_bitwise_not(5.0), -6.0);
 

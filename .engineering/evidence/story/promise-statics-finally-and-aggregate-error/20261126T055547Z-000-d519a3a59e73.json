@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:47Z",
+  "actor": "human:operator",
+  "artifact": "story:promise-statics-finally-and-aggregate-error",
+  "kind": "story",
+  "revision": 17,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit c523990aaac0, an ancestor of that head",
+    "reference": "crates/swell/tests/promise_statics.rs:92 promise_all_resolves_with_the_values_in_order_whatever_the_order_of_settlement"
+  }
+}

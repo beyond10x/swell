@@ -11,6 +11,10 @@
 //! else, before the sticky termination of decision 10 too (decision 5).
 //! Written by `story:heap-values-and-host-surface` and `story:object-model-and-realms`.
 
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec::Vec;
+
 pub(crate) mod agent;
 pub(crate) mod hooks;
 pub(crate) mod host_bytes;

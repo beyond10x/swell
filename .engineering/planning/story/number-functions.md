@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:number-functions
 kind: story
-status: active
+status: implemented
 title: Number has isFinite, isInteger, isNaN and isSafeInteger, and the realm has parseInt and parseFloat, exact and the same on every platform
 summary: The four Number predicates, the global parseInt and parseFloat and their Number twins, parse.rs in swell-num, and 181 cases of slice 4.
 relations:
@@ -28,10 +28,11 @@ scope:
   path: crates/swell/src/realm/intrinsics.rs
 - confidence: inferred
   path: crates/swell/tests/builtins_number_functions.rs
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 8}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:26Z", actor: "human:operator", revision: 9}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:47Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

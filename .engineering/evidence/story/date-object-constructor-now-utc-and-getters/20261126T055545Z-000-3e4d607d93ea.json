@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:45Z",
+  "actor": "human:operator",
+  "artifact": "story:date-object-constructor-now-utc-and-getters",
+  "kind": "story",
+  "revision": 16,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit e0aa9268498b, an ancestor of that head",
+    "reference": "crates/swell/tests/date_zone.rs:88 host_127_with_the_provided_zone_get_timezone_offset_answers_zero"
+  }
+}

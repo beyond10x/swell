@@ -326,6 +326,9 @@ mod tests {
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Root, Value};
     use crate::{Outcome, Parsed, Realm, Source, Termination};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::vec::Vec;
 
     /// An agent whose script `source` answered an object, with the root that holds the object
     /// and its realm entered, so that a test runs the operations on the agent directly.
@@ -391,7 +394,7 @@ mod tests {
         }
 
         /// Whether `completion` is a throw of a `TypeError` of the realm.
-        fn throws_type_error<T: std::fmt::Debug>(&mut self, completion: Completion<T>) -> bool {
+        fn throws_type_error<T: core::fmt::Debug>(&mut self, completion: Completion<T>) -> bool {
             match completion {
                 Err(Abrupt::Throw(thrown)) => self.is_type_error(thrown),
                 other => panic!("expected a throw, got {other:?}"),

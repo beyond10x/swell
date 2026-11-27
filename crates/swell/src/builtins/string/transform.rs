@@ -45,6 +45,7 @@
 //! `localeCompare` a step per code unit written into a buffer of the normalization, charged
 //! before it is written (the comparison of two forms charges nothing more).
 
+use alloc::vec::Vec;
 use swell_unicode::{
     Buffer, CaseMapping, Form, FormBuffer, Stop, decompose, final_sigma_lowercase,
     is_case_ignorable, is_cased, reorder_and_compose, to_lowercase, to_uppercase,
@@ -525,9 +526,9 @@ impl<H: Host> Agent<H> {
         // order of the code units of the forms, a String before each longer String that
         // starts with it.
         Ok(Value::Number(match order? {
-            std::cmp::Ordering::Less => -1.0,
-            std::cmp::Ordering::Equal => 0.0,
-            std::cmp::Ordering::Greater => 1.0,
+            core::cmp::Ordering::Less => -1.0,
+            core::cmp::Ordering::Equal => 0.0,
+            core::cmp::Ordering::Greater => 1.0,
         }))
     }
 
@@ -541,7 +542,7 @@ impl<H: Host> Agent<H> {
         units: &[u16],
         that_units: &[u16],
         charged: &mut u64,
-    ) -> Completion<std::cmp::Ordering> {
+    ) -> Completion<core::cmp::Ordering> {
         // The decomposition of S, then of thatValue, in one buffer.
         let mut points = Vec::new();
         let mut form = Vec::new();
@@ -659,7 +660,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<()> {
         points.clear();
         let mut position = 0;
-        let input = std::iter::from_fn(|| {
+        let input = core::iter::from_fn(|| {
             let point = code_point_at(units, position)?;
             position += point.code_unit_count;
             Some(point.code_point)
@@ -697,6 +698,10 @@ impl<H: Host> Agent<H> {
         self.charge_bytes(bytes)?;
         *charged = charged.saturating_add(bytes);
         let length = list.len();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `charge_bytes` into `charged` before it grows"
+        )]
         if list.try_reserve_exact(wanted - length).is_err() {
             return Err(self.terminate(Termination::MemoryBudget));
         }
@@ -827,6 +832,10 @@ pub(crate) mod tests {
     use crate::host::hooks::test_host::{NoHooks, agent_with_realm_and, limits};
     use crate::object::string::copies;
     use crate::{Outcome, Parsed, PropertyKey, Realm, Root, Source, Termination, Value};
+    use alloc::format;
+    use alloc::string::String;
+    use alloc::string::ToString;
+    use alloc::vec;
 
     /// The code units of the long Strings.
     pub(crate) const LONG: usize = 1_000_000;

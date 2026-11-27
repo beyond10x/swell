@@ -20,6 +20,7 @@ use crate::host::Termination;
 use crate::host::agent::Agent;
 use crate::host::outcome::Completion;
 use crate::value::{ObjectRef, Value};
+use alloc::vec::Vec;
 
 /// The slots of a bound function (Table 27).
 pub(crate) struct BoundFunction {
@@ -90,6 +91,10 @@ pub(crate) fn bound_function_create<H: Host>(
     let owned = u64::try_from(size_of_val(arguments)).unwrap_or(u64::MAX);
     agent.charge_bytes(owned)?;
     let mut kept = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `charge_bytes` before it is reserved; the record owns it and its sweep credits it"
+    )]
     if kept.try_reserve_exact(arguments.len()).is_err() {
         agent.heap.accounting.credit(owned);
         return Err(agent.terminate(Termination::MemoryBudget));
@@ -252,6 +257,10 @@ fn call_gathered<H: Host>(
     invocation: Invocation,
 ) -> Completion<Value> {
     let mut gathered = Vec::new();
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "charged by `walk` before it is reserved, a `Value` per gathered argument"
+    )]
     if gathered.try_reserve_exact(count).is_err() {
         return Err(agent.terminate(Termination::MemoryBudget));
     }
@@ -318,16 +327,16 @@ pub(crate) fn construct<H: Host>(
 }
 
 #[cfg(test)]
-thread_local! {
+std::thread_local! {
     /// The bound arguments the walks copied from their links, in the counting build of the
     /// tests; a test resets it before it reads it.
-    static ARGUMENTS_CLONED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static ARGUMENTS_CLONED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
     /// The values `bound_function_create` copied into a bound function's [[BoundArguments]], in
     /// the counting build of the tests; a test resets it before it reads it.
-    static KEPT_COPIED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static KEPT_COPIED: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
     /// `accounting.used()` read just before [`call_gathered`] calls `internal_call`, in the
     /// counting build of the tests; a test resets it before it reads it.
-    static GATHERED_READING: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static GATHERED_READING: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -343,6 +352,7 @@ mod tests {
     use crate::realm::intrinsics::Intrinsic;
     use crate::value::{ObjectRef, Root, Value};
     use crate::{Outcome, Realm, Termination};
+    use alloc::vec::Vec;
 
     /// The bytes of `n` values in a list.
     fn list_bytes(n: u32) -> u64 {
@@ -390,7 +400,7 @@ mod tests {
             "{answer:?}"
         );
         assert_eq!(
-            KEPT_COPIED.with(std::cell::Cell::get),
+            KEPT_COPIED.with(core::cell::Cell::get),
             0,
             "bound arguments copied before the memory budget ended the run"
         );
@@ -398,7 +408,7 @@ mod tests {
         agent.heap.accounting.set_limit(roomy_limit);
         let answer = bound_function_create(&mut agent, target, Value::Undefined, &arguments);
         assert!(answer.is_ok(), "{answer:?}");
-        assert_eq!(KEPT_COPIED.with(std::cell::Cell::get), u64::from(N));
+        assert_eq!(KEPT_COPIED.with(core::cell::Cell::get), u64::from(N));
         assert!(agent.collect().is_ok());
         assert_eq!(
             agent.heap_bytes().unwrap(),
@@ -424,7 +434,7 @@ mod tests {
         GATHERED_READING.with(|reading| reading.set(0));
         let answer = call(&mut agent, bound, Value::Undefined, &[]);
         assert!(matches!(answer, Ok(Value::Undefined)), "{answer:?}");
-        let reading = GATHERED_READING.with(std::cell::Cell::get);
+        let reading = GATHERED_READING.with(core::cell::Cell::get);
         assert!(
             reading >= before + list_bytes(N),
             "{reading} while the target runs, {before} before the call"
@@ -518,7 +528,7 @@ mod tests {
             "{answer:?}"
         );
         assert_eq!(
-            ARGUMENTS_CLONED.with(std::cell::Cell::get),
+            ARGUMENTS_CLONED.with(core::cell::Cell::get),
             0,
             "bound arguments copied before the step budget ended the run"
         );
@@ -546,7 +556,7 @@ mod tests {
             "{answer:?}"
         );
         assert_eq!(
-            ARGUMENTS_CLONED.with(std::cell::Cell::get),
+            ARGUMENTS_CLONED.with(core::cell::Cell::get),
             0,
             "bound arguments copied before the memory budget ended the run"
         );
@@ -554,7 +564,7 @@ mod tests {
         let answer = agent.call(&realm, &bound, &undefined, &[]);
         assert!(matches!(answer, Ok(Outcome::Normal(_))), "{answer:?}");
         drop(answer);
-        assert_eq!(ARGUMENTS_CLONED.with(std::cell::Cell::get), u64::from(N));
+        assert_eq!(ARGUMENTS_CLONED.with(core::cell::Cell::get), u64::from(N));
         assert!(agent.collect().is_ok());
         assert_eq!(agent.heap_bytes().unwrap(), before, "after the next call");
     }

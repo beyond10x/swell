@@ -24,7 +24,8 @@
 //! starts as `undefined` (steps 27 and 28), and the function's code begins with the
 //! instantiation of its function declarations (step 36).
 
-use std::rc::Rc;
+use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 use swell_syntax::ast::FunctionKind;
 
@@ -307,6 +308,10 @@ impl<H: Host> Agent<H> {
             return Err(self.terminate(Termination::MemoryBudget));
         }
         let mut slots = Vec::new();
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged with the frame before it is reserved, a `Value` per local and kept argument"
+        )]
         if slots.try_reserve_exact(count).is_err() {
             self.heap.accounting.credit(charged);
             return Err(self.terminate(Termination::MemoryBudget));
@@ -655,16 +660,16 @@ impl<H: Host> Agent<H> {
 }
 
 #[cfg(test)]
-thread_local! {
+std::thread_local! {
     /// The argument values copied for the activation of a call from Rust ([`call`] and
     /// [`construct`]), counted where [`Agent::enter_code`] copies them, in the counting build of
     /// the tests; a test resets it before it reads it.
-    pub(crate) static CALL_ARGUMENTS_COPIED: std::cell::Cell<u64> =
-        const { std::cell::Cell::new(0) };
+    pub(crate) static CALL_ARGUMENTS_COPIED: core::cell::Cell<u64> =
+        const { core::cell::Cell::new(0) };
     /// The values the `Call(n)` and `New(n)` instructions copied off the operand stack, on
     /// both paths, in the counting build of the tests; a test resets it before it reads it.
-    pub(crate) static INSTRUCTION_ARGUMENTS_COPIED: std::cell::Cell<u64> =
-        const { std::cell::Cell::new(0) };
+    pub(crate) static INSTRUCTION_ARGUMENTS_COPIED: core::cell::Cell<u64> =
+        const { core::cell::Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -754,7 +759,7 @@ mod tests {
             "{outcome:?}"
         );
         assert_eq!(
-            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            CALL_ARGUMENTS_COPIED.with(core::cell::Cell::get),
             0,
             "arguments copied before the memory budget ended the run"
         );
@@ -763,7 +768,7 @@ mod tests {
         assert!(matches!(outcome, Ok(Outcome::Normal(_))), "{outcome:?}");
         drop(outcome);
         assert_eq!(
-            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            CALL_ARGUMENTS_COPIED.with(core::cell::Cell::get),
             u64::from(N)
         );
         assert!(agent.collect().is_ok());
@@ -785,7 +790,7 @@ mod tests {
         };
         assert_eq!(value(&agent, &answer), Value::Undefined);
         assert_eq!(
-            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            CALL_ARGUMENTS_COPIED.with(core::cell::Cell::get),
             0,
             "arguments copied for a call that records none"
         );
@@ -802,13 +807,13 @@ mod tests {
     #[cfg(not(feature = "collect-every-safe-point"))]
     #[test]
     fn a_loop_of_bound_calls_collects_within_its_bound() {
-        use crate::heap::{COLLECTIONS, MIN_TRIGGER_BYTES};
+        use crate::heap::MIN_TRIGGER_BYTES;
         const ON_THE_BASE: u64 = 5;
         const SOURCE: &str = "function f() {} var b8 = f.bind(null, 1, 2, 3, 4, 5, 6, 7, 8); \
             for (var i = 0; i < 12500; i++) b8(); i";
         let (mut agent, realm, _) = roomy_after(0, "");
         let script = parse(&mut agent, &realm, SOURCE);
-        COLLECTIONS.with(|collections| collections.set(0));
+        agent.heap.collections = 0;
         CALL_ARGUMENTS_COPIED.with(|copied| copied.set(0));
         let outcome = agent.evaluate_script(&script);
         let Ok(Outcome::Normal(answer)) = outcome else {
@@ -816,11 +821,11 @@ mod tests {
         };
         assert_eq!(value(&agent, &answer), Value::Number(12_500.0));
         assert_eq!(
-            CALL_ARGUMENTS_COPIED.with(std::cell::Cell::get),
+            CALL_ARGUMENTS_COPIED.with(core::cell::Cell::get),
             u64::from(N),
             "the values the activations recorded"
         );
-        let collections = COLLECTIONS.with(std::cell::Cell::get);
+        let collections = agent.heap.collections;
         let charged = u64::from(N) * size_of::<Value>() as u64;
         let bound = ON_THE_BASE + charged.div_ceil(MIN_TRIGGER_BYTES);
         assert!(

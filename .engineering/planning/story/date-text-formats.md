@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:date-text-formats
 kind: story
-status: active
+status: implemented
 title: 'Date reads and writes text: Date.parse, the String argument, toString and its family, toISOString, toJSON and Symbol.toPrimitive, over one charged zone conversion'
 summary: The Date text builtins over swell-num-date-text, HOST-127 second half, the toLocale precondition, and 165 cases of slice 4.
 relations:
@@ -23,10 +23,11 @@ scope:
   path: crates/swell/tests/date_text.rs
 - confidence: cited
   path: website/data/status.json
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T11:52:27Z", actor: "human:operator", revision: 7}
 - {from: "proposed", to: "active", at: "2026-11-24T11:52:28Z", actor: "human:operator", revision: 8}
+- {from: "active", to: "implemented", at: "2026-11-26T05:55:45Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1}}}
 ---
 ## Context
 

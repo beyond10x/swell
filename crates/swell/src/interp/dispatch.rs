@@ -12,6 +12,10 @@
 //! is done; a value made inside an instruction that a later step of it needs across such an
 //! operation is kept on the agent's kept stack (`object/builtin_function.rs`).
 
+use alloc::boxed::Box;
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 use swell_compiler::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_THROW};
 
 use super::frame::{Entry, Enumerator, SlotValue};
@@ -333,6 +337,7 @@ impl<H: Host> Agent<H> {
             I::Mul => self.binary(BinaryOperator::Multiply),
             I::Div => self.binary(BinaryOperator::Divide),
             I::Rem => self.binary(BinaryOperator::Remainder),
+            I::Exp => self.binary(BinaryOperator::Exponentiate),
             I::Add => self.binary(BinaryOperator::Add),
             I::Sub => self.binary(BinaryOperator::Subtract),
             I::Shl => self.binary(BinaryOperator::LeftShift),
@@ -1233,7 +1238,7 @@ impl<H: Host> Agent<H> {
                 .map(|names| u32::try_from(names.len()).unwrap_or(u32::MAX));
             let names = SlotNames {
                 script: frame.script,
-                compiled: std::rc::Rc::clone(&frame.compiled),
+                compiled: alloc::rc::Rc::clone(&frame.compiled),
                 table: NameTable::Scope {
                     template: frame.template,
                     index: table,
@@ -1390,7 +1395,7 @@ impl<H: Host> Agent<H> {
         let (compiled, script, realm, env) = {
             let frame = self.top_frame()?;
             (
-                std::rc::Rc::clone(&frame.compiled),
+                alloc::rc::Rc::clone(&frame.compiled),
                 frame.script,
                 frame.realm,
                 frame.env,
@@ -1686,6 +1691,9 @@ fn note_instruction_copy(count: usize) {
 mod tests {
     use crate::host::hooks::test_host::agent_with_realm;
     use crate::{Outcome, Parsed, Source};
+    use alloc::format;
+    use alloc::string::ToString;
+    use alloc::vec::Vec;
 
     /// The site records `source`, run as a script in a fresh agent, wrote, and whether it threw.
     fn records(source: &str) -> (u64, bool) {
@@ -1731,16 +1739,16 @@ mod tests {
 
     std::thread_local! {
         /// `used()` at the last two calls of `probe`, the last one second.
-        static PROBED: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
+        static PROBED: core::cell::Cell<(u64, u64)> = const { core::cell::Cell::new((0, 0)) };
         /// The values `Call(n)` and `New(n)` copied before the last call of `probe`.
-        static COPIED_AT_PROBE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+        static COPIED_AT_PROBE: core::cell::Cell<u64> = const { core::cell::Cell::new(0) };
         /// `used()` and the values copied when `h` was last entered, and its depth.
-        static IN_H: std::cell::Cell<(u64, u64, u32)> = const { std::cell::Cell::new((0, 0, 0)) };
+        static IN_H: core::cell::Cell<(u64, u64, u32)> = const { core::cell::Cell::new((0, 0, 0)) };
     }
 
     /// The values the two instructions copied since the last reset.
     fn copied() -> u64 {
-        crate::object::ecmascript_function::INSTRUCTION_ARGUMENTS_COPIED.with(std::cell::Cell::get)
+        crate::object::ecmascript_function::INSTRUCTION_ARGUMENTS_COPIED.with(core::cell::Cell::get)
     }
 
     /// The host function `probe`: records `used()` and the values copied, then counts the
@@ -1806,7 +1814,7 @@ mod tests {
         ] {
             IN_H.with(|in_h| in_h.set((0, 0, 0)));
             assert!(matches!(across.run(&source), Answer::Normal(_)), "{source}");
-            let (inside, copied, _) = IN_H.with(std::cell::Cell::get);
+            let (inside, copied, _) = IN_H.with(core::cell::Cell::get);
             let probed = PROBED.with(|probed| probed.get().1);
             assert!(
                 inside - probed >= 2 * 50 * value,
@@ -1830,8 +1838,8 @@ mod tests {
         let source =
             format!("function e({parameters}) {{ probe(); }} probe(); e(1, {numbers}, 50)");
         assert!(matches!(across.run(&source), Answer::Normal(_)));
-        let (first, second) = PROBED.with(std::cell::Cell::get);
-        assert_eq!(COPIED_AT_PROBE.with(std::cell::Cell::get), 50);
+        let (first, second) = PROBED.with(core::cell::Cell::get);
+        assert_eq!(COPIED_AT_PROBE.with(core::cell::Cell::get), 50);
         assert_eq!(second - first, CALLEE_RISE);
         steps.push(across.steps());
         assert_eq!(steps, CALL_ACROSS_STEPS);

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T05:55:47Z",
+  "actor": "human:operator",
+  "artifact": "story:promise-constructor-then-and-jobs",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-1 at 248a031c, exit 0; the story was delivered by commit 529a79fb1e70, an ancestor of that head",
+    "reference": "crates/swell/tests/promises.rs:406 host_78_promise_jobs_and_host_microtasks_run_in_one_order"
+  }
+}
