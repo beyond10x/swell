@@ -18,7 +18,7 @@ scope:
   path: crates/swell/tests/support/host.rs
 - confidence: cited
   path: taskfiles/realm-places.yml
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 2}
 - {from: "proposed", to: "active", at: "2026-11-24T18:44:28Z", actor: "human:operator", revision: 3}
@@ -41,9 +41,10 @@ paid it. This revision takes the list out of the parts: a committed file holds t
 walk's functions, each part takes the places whose text hashes to it, resolves them, checks that
 each is callable and makes the calls the walk makes now. One test in the default mode, where the
 walk takes 0.05 CPU seconds, makes the list again at every gate run and holds the file equal to
-it line for line, in place of a digest; that form of the rule "an expensive product is made once"
-was put to the operator on 2026-11-27, and the unit does not start before its answer is recorded
-(Change, item 2).
+it line for line, in place of a digest. The question of that form of the rule "an expensive
+product is made once" was put to the operator on 2026-11-27 with the form without a digest as the
+default; no answer came within the 15 minutes of the folder's rule "A default proceeds", and the
+default was taken; the page of the wave records it (Change, item 2).
 
 ## Context
 
@@ -274,27 +275,45 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      check replaced by the regeneration itself: the test of item 3 makes the list again at every
      gate run, in the default mode, at the cost of one call of 0.05 CPU seconds per run, and
      compares it with the file line for line; the parts read the file and never make the list.
-     The form was put to the operator on 2026-11-27; the unit does not start before the page of
-     its wave in `docs/plan/` records the answer.
+     The question of this form was put to the operator on 2026-11-27 with the form without a
+     digest as the default; no answer came within the 15 minutes of the folder's rule "A default
+     proceeds", and the default was taken. The page of the wave in `docs/plan/` records it.
    - The stop: when `the_realm_places_file_equals_the_walk` takes more than 1.2 CPU seconds alone
      in the default mode, it moves to the lane `slow` and a check of a digest of the file's
      sources takes its place in the gate, in a story of its own. That fallback has a cost: the
-     sources of the list are all of `crates/swell/src`, so with a digest every change of the
-     engine, not only one that adds or removes a function, runs the writer, and every two units
-     of a wave meet on the digest's line at their join.
-   - The writer is `realm-places-expected`, in a new `taskfiles/realm-places.yml` of POSIX sh,
-     the one run that writes the file, named as `test262-expected` is. It runs `mkdir -p
-     .out/realm-places`, then the gate's step `test` restricted to one test, `cargo nextest run
+     sources of the list are all of `crates/swell/src` and the walk's own code,
+     `functions_of_the_realm` and `FURTHER_ROOTS` of `builtins_symbol_values.rs`, so with a
+     digest every change of the engine, not only one that adds or removes a function, runs the
+     writer, and every two units of a wave meet on the digest's line at their join.
+   - The two variables. `taskfiles/realm-places.yml` defines `TEST_RUSTFLAGS` (`-D warnings`) and
+     `TEST_NEXTEST_ARGS` (`--workspace --locked --profile default`) in its own `vars:` block, in
+     the form of `taskfiles/collect-mode.yml:3-4`. `Taskfile.yml` includes the file with
+     `flatten: true` and `optional: true`, as its other 19 includes, and its steps read the two
+     variables after the flatten, as `test-doc` reads `COLLECT_CONFIG` (`Taskfile.yml:797`):
+     the step `test` runs `cargo nextest run {{.TEST_NEXTEST_ARGS}}` with `RUSTFLAGS` set to
+     `{{.TEST_RUSTFLAGS}}`, and the step `build-tests` runs `cargo nextest run --no-run
+     {{.TEST_NEXTEST_ARGS}}` with the same `RUSTFLAGS`, in place of the values they write out
+     today (`Taskfile.yml:697`, `:758`, and the `env:` of each). So the writer, `build-tests` and
+     `test` share one build and cannot drift, and `test` compiles nothing inside its clock. An
+     optional include that is missing leaves both variables empty; then `test` and `build-tests`
+     each fail at once with one line, `<step>: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is empty;
+     taskfiles/realm-places.yml defines them`, and so does the writer. The prose of their
+     `summary:` keeps the literal command it quotes.
+   - The writer is `realm-places-expected`, in the new `taskfiles/realm-places.yml` of POSIX sh,
+     the one run that writes the file, named as `test262-expected` is. When either variable is
+     empty it exits 1 with the line `realm-places-expected: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS
+     is empty; taskfiles/realm-places.yml defines them`. It runs `mkdir -p .out/realm-places`, then
+     `rm -f "$(pwd)/.out/realm-places/walk.txt"`, so that no output of an earlier run is read,
+     then the gate's step `test` restricted to one test, `cargo nextest run
      {{.TEST_NEXTEST_ARGS}} -E '<filter>'`, `<filter>` being
      `test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)`, with `RUSTFLAGS`
      set to `{{.TEST_RUSTFLAGS}}` and with `SWELL_REALM_PLACES_OUT` set to
      `"$(pwd)/.out/realm-places/walk.txt"`, an absolute path, since nextest runs the test in
      `crates/swell` (as `test-realm-sizes` passes `"$(pwd)/$cfg"`, `Taskfile.yml:424`).
-     `TEST_RUSTFLAGS` (`-D warnings`) and `TEST_NEXTEST_ARGS` (`--workspace --locked --profile
-     default`) become variables of `Taskfile.yml`, which the step `test` reads in place of the
-     values it writes out today, so the writer and the step share one build and cannot drift.
      The writer first prints `realm-places-expected: RUSTFLAGS=<flags> cargo nextest run <args>
-     -E <filter>` with the values it read, and exits 1 when either variable is empty.
+     -E <filter>` with the values it read. Its nextest output goes to
+     `.out/realm-places/nextest.log`; when nextest exits non-zero, it prints that log and
+     `realm-places-expected: cargo nextest run exited <status>` and exits 1.
    - The test of item 3 writes the walk's places to that path; the task writes the two comment
      lines and those places to the file and prints `realm-places-expected: <t> places written to
      crates/swell/tests/fixtures/realm_places.txt`. When the path holds no place it prints
@@ -307,9 +326,10 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      `tests/gate/` does.
 3. **One test holds the file equal to the walk**, `the_realm_places_file_equals_the_walk`, in
    the default mode only (`#[cfg(not(feature = "collect-every-safe-point"))]`, as
-   `proxy.rs:890` does). `functions_of_the_realm`, and every function of the file that only it
-   or this test calls, carries the same `cfg`, so the collect build, which the gate makes with
-   `RUSTFLAGS=-D warnings`, holds no dead code. The walk takes 0.052 CPU seconds in the default
+   `proxy.rs:890` does). `functions_of_the_realm`, every function of the file that only it or
+   this test calls, and every `use` that only they need carry the same `cfg`, so the collect
+   build, which the gate makes with `RUSTFLAGS=-D warnings`, holds no dead code and no unused
+   import. The walk takes 0.052 CPU seconds in the default
    mode and 2.33 in the collect mode, over that mode's bound of 2 (Context).
    - In the bare realm of item 5 it runs `functions_of_the_realm` as the test does now. With
      `SWELL_REALM_PLACES_OUT` set it writes the walk's places to that path, one per line, and
@@ -334,24 +354,14 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
    - The guard of that gap is a rule for the engine's source, which the unit checks: no code
      that defines a property of the realm depends on the feature `collect-every-safe-point`.
      The check: `git grep -cE 'feature *= *"collect-every-safe-point"' -- crates/swell/src`
-     takes both spellings and prints, per file, the count of lines that use the feature; on
-     `158888d` that is the list below, and the unit compares its output on `B` with it. A file
-     or a count that is not in the list fails the acceptance, and the unit reads the new line
-     and says whether it defines a property of the realm (then it is a defect of the change that
-     added it).
-
-     ```
-     crates/swell/src/heap/collect.rs:2
-     crates/swell/src/host/agent.rs:1
-     crates/swell/src/host/jobs.rs:1
-     crates/swell/src/interp/dispatch.rs:1
-     crates/swell/src/object/builtin_function.rs:3
-     crates/swell/src/object/ecmascript_function.rs:1
-     crates/swell/src/ops/objects.rs:4
-     crates/swell/src/script.rs:1
-     ```
-
-   - The sentence of item 8 writes the rule, the gap and its check into `AGENTS.md`.
+     takes both spellings and prints, per file, the count of lines that use the feature. Its
+     output on `158888d`, eight lines, is the list the sentence of item 8 holds; the list lives
+     in `AGENTS.md`, not in this story, so a later unit finds it there. The unit compares its
+     output on `B` with that list. A file or a count that is not in the list fails the
+     acceptance; the unit reports the new line and whether it defines a property of the realm
+     (then it is a defect of the change that added it), and the coordinator updates the list in
+     `AGENTS.md` at the merge.
+   - The sentence of item 8 writes the rule, the gap, its check and the list into `AGENTS.md`.
 5. **The parts.**
    - `WALK_PARTS`, a list of part numbers from 0, and the macro `walk_parts!`, whose invocation
      writes each test as `#[test]` and `fn <name> = <part>;`, so that
@@ -377,11 +387,16 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      that is not callable with `walk part <p> of <n>: line <k> "<place>": reached an object that
      is not callable`.
    - The partition. A place is in part `p` when FNV-1a, 64 bit, over the UTF-8 bytes of its
-     line, modulo `WALK_PARTS.len()`, is `p`: offset basis `0xcbf29ce484222325`, prime
-     `0x100000001b3`, each byte XORed in and then the product taken modulo 2^64, written out in
-     the test file as `place_hash`, with no dependency. `walk_part_places(part, places)` answers
-     a part's place lines in the order of the file. A function the realm gains or loses moves no
-     other place to another part; only a change of the number of parts does.
+     line without its line end, the 64-bit value modulo `WALK_PARTS.len()`, is `p`: offset
+     basis `0xcbf29ce484222325`, prime `0x100000001b3`, each byte XORed in and then the product
+     taken modulo 2^64, written out in the test file as `place_hash`, with no dependency.
+     `walk_part_places(part, places)` answers a part's place lines in the order of the file. A
+     function the realm gains or loses moves no other place to another part; only a change of
+     the number of parts does. A hash gives no
+     balance: the parts' sizes are what the texts hash to (181 and 163 at 2 parts on `158888d`),
+     and the slowest part, not the mean, sets `n`; the rule for the number of parts below, with
+     its stop, is what holds the parts under their bounds, and the cover test of item 6 bounds
+     the largest part.
    - A part reads the file, makes the bare realm and the Symbol, and resolves and checks all its
      places before its first call, since a call can change a property on a later place's path.
      Then it makes the calls the walk makes now, in the order of the file: per function the same
@@ -410,7 +425,7 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      the `Always` rows of its places with their least number at most `places` and the rows with
      a condition whose condition held. Each kind of difference has its line: `walk part <p> of
      <n>: a row not in WALK_EXPECTED: <row>`; `walk part <p> of <n>: the row <row> was not met`;
-     `walk part <p> of <n>: the row <row> under IndexAtLeastLength(<i>) read length <v>: the
+     `walk part <p> of <n>: the row <row> under IndexAtLeastLength(<i>) read length <l>: the
      condition is <true|false> and the call answered <answer>`. A row with a condition is thus
      met exactly when its condition holds.
    - The count of calls: the Get of a condition and the `toString` call of the callable check
@@ -454,14 +469,18 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
    - no place is on two lines (`the place "<place>" is on <j> lines of <file>`);
    - the place lines the parts take by `walk_part_places`, together, are the place lines of the
      file, each once (`places of the file in no part: [...]; in more than one part: [...]`);
+   - no part holds more than twice `ceil(<t> / <n>)` places (`part <p> of <n> holds <s> places,
+     more than twice <m>, the ceiling of <t> / <n>`); on `158888d` the largest part is at most
+     1.17 times that ceiling at every `n` from 2 to 8;
    - each row of `WALK_EXPECTED` names a place the file holds exactly once (`the row "<place>
      (<what>): <error>" of WALK_EXPECTED names a place the file holds <j> times`), since a part
      would otherwise drop the row unseen;
    - each row with a condition names a call `argument <i>`, whose `this` is the holder (`the row
      <row> carries a condition on a call whose this is not the holder`);
    - `%AsyncFunction.prototype%.constructor` is a place line (`the file has no line
-     %AsyncFunction.prototype%.constructor`), and the file holds at least 100 places (`the file
-     holds <t> places, at least 100`; the old `called >= 100 * places`, `:614`);
+     %AsyncFunction.prototype%.constructor`), and the file holds at least `LEAST_PLACES`, 100,
+     places (`the file holds <t> places, at least <LEAST_PLACES>`, the message built from the
+     constant; the old `called >= 100 * places`, `:614`);
    - it prints `places of the realm: <t>, in <n> parts: <f0> + <f1> + ...`.
 7. **When the realm gains or loses a function, and at a join.**
    - The test of item 3 is red in the gate's step `test` and names the writer. The unit runs
@@ -475,16 +494,26 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      form says yet, with the clause named in the comment. Never a row without a condition that a
      part may meet or not.
    - The unit measures each part and `the_realm_places_file_equals_the_walk` in the cells of
-     item 5. A part over four fifths of its bound makes it add the line `..._part_<q> = <p>` to
-     `walk_parts!`; the cover test follows. Up to 8 parts; past them, or with the test of item 3
-     over 1.2, the stop of item 5 holds.
+     item 5. A part over four fifths of its bound makes it add lines `..._part_<q> = <p>` to
+     `walk_parts!` until the rule of item 5 holds, measuring every part again at each `n`: the
+     slowest part need not fall with each line (a hash gives no balance, item 5), and a new
+     `n` moves every place to a new part. The cover test follows. Up to 8 parts; past them, or
+     with the test of item 3 over 1.2, the stop of item 5 holds.
    - At a join where either side branched before the other's functions, the coordinator runs
      `slot --timeout 30m task realm-places-expected` on the merged tree and commits the file in
      the join's own commit; a conflict in the file is resolved by the writer, never by hand. A
      row a unit added in the old form (a line of the `expected` of today) is rewritten at the
      join as a `WALK_EXPECTED` entry, `When::Always` unless its clause reads what earlier calls
      left. A part that meets a row not in `WALK_EXPECTED` on a merged tree is the join's to fix.
-     The coordinator measures the parts once at the wave's close.
+     A conflict in `walk_parts!` is resolved to the larger `n`. The coordinator measures the
+     parts once at the wave's close.
+   - At a join with a unit that writes `Taskfile.yml` or `taskfiles/` (a unit of the lane
+     `slow`), the coordinator runs the `awk` line of Acceptance 10 on the merged tree and reads
+     again every count of tests that unit holds (a total `test-realm-sizes` prints, a floor such
+     as `MIN_PASSED`): with `n` parts, `swell::main` has `n` + 1 tests more in the default build
+     and `n` more in the collect build than on `B` (the `n` parts, the cover test and, in the
+     default build only, the test of item 3, in place of the one walk), all printed `other` by
+     the awk.
 8. **The records, the files and the sentence.**
    - The doc comment of the parts drops the numbers 144, 576 and 288 and says the count is
      printed. The doc comment of `places_per_function` drops "1.8" and states the unit's
@@ -499,21 +528,27 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      reason no longer says "its full count is at its bound".
    - Writes, five files: `crates/swell/tests/builtins_symbol_values.rs` (items 3 to 6, 8);
      `crates/swell/tests/fixtures/realm_places.txt` (new, written by the writer only);
-     `taskfiles/realm-places.yml` (new, item 2); `Taskfile.yml` (the two variables of item 2,
-     the step `test` reading them, and the include of `taskfiles/realm-places.yml` appended to
-     `includes:` as one hunk); `crates/swell/tests/support/host.rs` (the doc comment line of the
-     walk, and nothing else).
+     `taskfiles/realm-places.yml` (new, item 2, with the two variables and the writer);
+     `Taskfile.yml` (the include of `taskfiles/realm-places.yml`, with `flatten: true` and
+     `optional: true`, appended to `includes:` as one hunk, and the lines of the steps
+     `build-tests` and `test` that read the two variables and fail when either is empty; no
+     `vars:` block); `crates/swell/tests/support/host.rs` (the doc comment line of the walk, and
+     nothing else).
    - Not written by the unit: `AGENTS.md` (the coordinator, below), `crates/swell/tests/main.rs`,
      any file of `crates/swell/src`, `Cargo.lock`, a `Cargo.toml`, `.github/workflows/`,
      `tests/gate/`, `taskfiles/realm-room-tests.awk`, and the section "The gate's numbers".
    - Shared. With the units of any slice that add functions to the realm
      (`story:map-upsert-and-group-by` adds three): `builtins_symbol_values.rs` (a row, an entry of
      `FURTHER_ROOTS`) and the file of places, met at a join as item 7 says. With
-     `story:realm-size-lane-within-its-share`: `Taskfile.yml` (this story's include appended as
-     one hunk, its variables in their own hunks) and `taskfiles/realm-room-tests.awk`, which
-     this story reads and does not write; the unit shows on `B` that the awk prints each part as
-     `other`, and the writer takes its flags and profile from the variables the step `test`
-     reads, not from a copy. With `story:host-object-overrides`:
+     `story:realm-size-lane-within-its-share` and any unit of the lane `slow`: `Taskfile.yml`
+     (its hunks are this story's include, appended as one hunk, and the lines of the steps
+     `build-tests` and `test`; no `vars:` hunk) and `taskfiles/realm-room-tests.awk`, which this
+     story reads and does not write; the unit shows on `B` and after that the awk prints each
+     part as `other`, and the writer, `build-tests` and `test` take their flags and arguments
+     from the variables of `taskfiles/realm-places.yml`, not from a copy. The number of tests of
+     `swell::main` grows by `n` + 1 in the default build and by `n` in the collect build; at the
+     join the coordinator runs the awk again and reads again the counts that unit holds (item
+     7). With `story:host-object-overrides`:
      `crates/swell/tests/support/host.rs`, hunks apart (its literal at `:189`, here
      `:498-500`). The unit applies the cut on `B` with the rows and roots `B` holds.
    - The sentence for `AGENTS.md`, "Commands and the gate", in the bullet that starts "A test
@@ -532,13 +567,20 @@ parts; `<q>` is the suffix of a part's test name, `<p> + 1`, from 2.
      > realm-places-expected` and commits the file. No test of the collect build makes the walk,
      > so a function that only the collect build has is unseen there; the guard is that no code
      > that defines a property of the realm depends on the feature `collect-every-safe-point`,
-     > checked with `git grep -cE 'feature *= *"collect-every-safe-point"' -- crates/swell/src`
-     > against the files and counts the story of the walk lists. A unit that adds functions to
+     > checked with `git grep -cE 'feature *= *"collect-every-safe-point"' -- crates/swell/src`,
+     > which prints these eight lines: `crates/swell/src/heap/collect.rs:2`,
+     > `crates/swell/src/host/agent.rs:1`, `crates/swell/src/host/jobs.rs:1`,
+     > `crates/swell/src/interp/dispatch.rs:1`, `crates/swell/src/object/builtin_function.rs:3`,
+     > `crates/swell/src/object/ecmascript_function.rs:1`, `crates/swell/src/ops/objects.rs:4`,
+     > `crates/swell/src/script.rs:1`. A unit whose grep prints otherwise reports the new line and
+     > whether it defines a property of the realm, and the coordinator updates this list at the
+     > merge. A unit that adds functions to
      > the realm measures each part with the command above, in the default mode and in the
      > collect mode, at the gate count and at the full count, and
      > `the_realm_places_file_equals_the_walk` in the default mode; a part over four fifths of
      > its bound (1.2 CPU seconds in the default mode, 1.6 in the collect mode at the gate
-     > count, 2.0 at the full count) makes it add a part to `WALK_PARTS`, up to 8 parts. Past 8
+     > count, 2.0 at the full count) makes it add parts to `WALK_PARTS`, measuring every part
+     > again, until no part is over, up to 8 parts. Past 8
      > parts, or with `the_realm_places_file_equals_the_walk` over 1.2 CPU seconds, the walk is
      > a defect that gets a story: the unit reports the readings and adds no part.
 
@@ -551,8 +593,9 @@ Changed: `walk_part_indices`, the index rule, becomes `walk_part_places`, the ha
 which makes no list; `walk_part` resolves and checks its places from the file and does not walk;
 the cover test reads the file and makes no agent; a part reads the condition of a row before its
 call; the printed line counts places. New: the file, `realm_places`, `parse_place`,
-`resolve_place`, `place_hash`, the type `When`, the test of item 3 with its writing mode, the
-variables of `Taskfile.yml` and `taskfiles/realm-places.yml`. The placeholders `READINGS` and
+`resolve_place`, `place_hash`, the type `When`, the test of item 3 with its writing mode,
+`taskfiles/realm-places.yml` with its two variables, and the steps `build-tests` and `test`
+reading them. The placeholders `READINGS` and
 `MEASUREMENTS` of the patch get the readings of item 8.
 
 ## Tests
@@ -572,6 +615,10 @@ variables of `Taskfile.yml` and `taskfiles/realm-places.yml`. The placeholders `
   saved patch: it reads the file and makes no agent, in every mode; it holds the file's form, the
   partition and the rows of `WALK_EXPECTED`.
 
+With `n` parts, `swell::main` has `n` + 1 tests more than on `B` in the default build (the `n`
+parts, the cover test and the test of Change item 3, in place of the one walk) and `n` more in
+the collect build, where the test of Change item 3 is not built.
+
 No script of `tests/gate/` is added, and `check` gets no step. The tests of the file other than
 the walk do not change. Each test added took under 1 CPU second in the probe on `158888d`; the
 unit prints the time of each in its report and names any over 5 s with its time.
@@ -589,7 +636,8 @@ runs.
 Names used below: `<F>` is `crates/swell/tests/fixtures/realm_places.txt`; `<N0>` the number of
 places on `B`; `<n>` the number of parts; `<p>` a part, from 0; `<q>` the suffix of a part's test
 name, `<p> + 1`, from 2; `<k>` the number of a line of `<F>`, counted from 1 with its two comment
-lines; a list of places is written as Rust's `{:?}` writes a list of strings,
+lines; `<v>` the value of `SWELL_FULL_COUNTS` in a measure job; `<f>` the number of places of
+one part; a list of places is written as Rust's `{:?}` writes a list of strings,
 `["global.a", "global.b"]`; `<filter>` is
 `test(/^builtins_symbol_values::(every_function|the_parts_of_the_walk|the_realm_places)/)`.
 
@@ -599,33 +647,42 @@ The measuring command, from `AGENTS.md:316-326`. The build prints the path of th
 - build, default mode: `SLOT_TIMEOUT=30m cargo test --locked -p swell --test main --no-run`;
 - build, collect mode: `SLOT_TIMEOUT=30m cargo test --locked -p swell --features
   collect-every-safe-point --test main --no-run`;
-- measure: `slot sh -c 'SWELL_FULL_COUNTS=<f> <bin> --exact builtins_symbol_values::<test>
+- measure: `slot sh -c 'SWELL_FULL_COUNTS=<v> <bin> --exact builtins_symbol_values::<test>
   --test-threads 1 --nocapture; times'`; the second line `times` prints is the children's user
   and system time, and their sum is the reading.
 
-The cells are three, each read with its own `<f>` and binary:
+The cells are three, each read with its own `<v>` and binary:
 
-- the default mode, `<f>` empty (its gate count is its full count), against 1.2;
-- the collect mode at its gate count, `<f>` empty, against 1.6;
-- the collect mode at its full count, `<f>` `1`, against 2.0.
+- the default mode, `<v>` empty (its gate count is its full count), against 1.2;
+- the collect mode at its gate count, `<v>` empty, against 1.6;
+- the collect mode at its full count, `<v>` `1`, against 2.0.
 
 1. **Red first**, on `B`, before any file changes. The measure job with `<test>` the old test name
    prints `functions of the realm: <N0>, calls: <4 x N0>` at the full count, and readings over
    the bound in both collect cells: over 2 at the gate count, over 2.5 at the full count (on
    `158888d`: `N0` 344, 4.07 and 6.56). The unit reports `N0` and the three readings.
-2. **The file and the writer.**
+2. **The file and the writer.** This item runs before item 5, whose plants read the
+   `.out/realm-places/first.txt` it makes.
    - `slot --timeout 30m task realm-places-expected` prints first `realm-places-expected:
      RUSTFLAGS=-D warnings cargo nextest run --workspace --locked --profile default -E
-     test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)`, the values the step
-     `test` reads, and last `realm-places-expected: <N0> places written to
+     test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)`, the values the steps
+     `build-tests` and `test` read, and last `realm-places-expected: <N0> places written to
      crates/swell/tests/fixtures/realm_places.txt`.
-   - No copy of the step's arguments: `git grep -c -e '--workspace --locked --profile default' --
-     Taskfile.yml taskfiles` prints the same counts as on `B`.
+   - No copy of the steps' arguments. On `158888d`, `git grep -c -e '--workspace --locked
+     --profile default' -- Taskfile.yml taskfiles` prints `Taskfile.yml:5`: the command of the
+     step `slow-tests` (`:250`, the lane's, which stays), the `summary:` prose of `build-tests`
+     (`:674`) and of `test` (`:744`), which stay, and the commands of `build-tests` (`:697`) and
+     `test` (`:758`), which become reads of `TEST_NEXTEST_ARGS`. After the change it prints
+     `Taskfile.yml:3` and `taskfiles/realm-places.yml:1` (the definition of the variable), when
+     `B` holds the same five lines; otherwise the unit gives the counts on `B` and after with the
+     same reading of each line.
    - The form: `head -2 <F> | grep -c '^#'` prints 2; `tail -n +3 <F> | grep -c '^#'` prints 0;
-     `grep -c '^$' <F>` prints 0; `tail -c 1 <F> | od -An -c` prints `\n`; `grep -cv '^#' <F>`
-     prints `<N0>`.
+     `grep -c '^$' <F>` prints 0; `tail -c 1 <F> | od -An -c` prints three spaces and `\n`;
+     `grep -cv '^#' <F>` prints `<N0>`.
    - Byte for byte: `cp <F> .out/realm-places/first.txt`, `slot --timeout 30m task
-     realm-places-expected` again, then `cmp .out/realm-places/first.txt <F>` prints nothing.
+     realm-places-expected` again, then `cmp .out/realm-places/first.txt <F>` prints nothing; the
+     writer removed the earlier `walk.txt` before the run, so the second run wrote the file from
+     its own output.
 3. **The readings.** With the cut in place, on `B`:
    - the measure job of every part (part 0 by the old name, then `..._part_<q>`) in each cell
      prints `walk part <p> of <n>: <f> of <N0> places, <c> calls` and a reading at most 1.2
@@ -680,6 +737,11 @@ The cells are three, each read with its own `<f>` and binary:
    - The write of the places to `SWELL_REALM_PLACES_OUT` taken out of the test: `slot --timeout
      30m task realm-places-expected` prints `realm-places-expected: the walk wrote no place to
      <path>` and exits 1.
+   - The value of `TEST_NEXTEST_ARGS` in `taskfiles/realm-places.yml` made empty: `slot
+     --timeout 30m task realm-places-expected` prints `realm-places-expected: TEST_RUSTFLAGS or
+     TEST_NEXTEST_ARGS is empty; taskfiles/realm-places.yml defines them` and exits 1, and `slot
+     --timeout 30m task build-tests` prints `build-tests: TEST_RUSTFLAGS or TEST_NEXTEST_ARGS is
+     empty; taskfiles/realm-places.yml defines them` and exits 1, each before any build.
    - The form of `<F>`, four ways, each red in the cover test: the `#` of line 1 removed (`line 1
      of <F> does not start with #`); a line `# planted` after line 5 (`line 6 of <F> starts with
      #; only lines 1 and 2 may`); an empty line after line 5 (`line 6 of <F> is blank`); the last
@@ -690,7 +752,7 @@ The cells are three, each read with its own `<f>` and binary:
      at least 2`.
    - `% WALK_PARTS.len()` written `% (WALK_PARTS.len() + 1)` in `walk_part_places`: the cover
      test fails with `places of the file in no part: [...]`.
-   - The least number of places 100 in the cover test written `<N0+1>`: it fails with `the file
+   - The constant `LEAST_PLACES`, 100, set to `<N0+1>`: the cover test fails with `the file
      holds <N0> places, at least <N0+1>`.
    - The place of one row of `WALK_EXPECTED` changed by one character: the cover test fails with
      `the row "<place> (<what>): <error>" of WALK_EXPECTED names a place the file holds 0 times`.
@@ -717,8 +779,9 @@ The cells are three, each read with its own `<f>` and binary:
      - the Get of the condition made on the key `constructor` in place of `length`: part 1 fails
        with `walk part 1 of 2: the row global.Array.prototype.with (argument 2): RangeError under
        IndexAtLeastLength(0) read length <value>, not a Number`.
-   - The `with` row met when its condition holds: at 3 parts (macro line `_part_3 = 2` added for
-     this edit when `n` is 2), where `push` and `with` lie in parts 0 and 1, the row `with`,
+   - The `with` row met when its condition holds: `WALK_PARTS` is set to 3 parts for this edit,
+     by adding or removing macro lines; at 3 parts `push` and `with` lie in parts 0 and 1. The
+     row `with`,
      `argument 2` removed from `WALK_EXPECTED`: the part of `with` fails with `walk part 1 of 3: a
      row not in WALK_EXPECTED: global.Array.prototype.with (argument 2): RangeError`.
 6. **The padding does not move it.** `SWELL_TEST_REALM_FUNCTIONS=200 cargo nextest run --locked
@@ -727,9 +790,9 @@ The cells are three, each read with its own `<f>` and binary:
 7. **The records are true.**
    - `git grep -n '144 functions\|576 calls\|288 at\|1\.8 CPU\|READINGS\|MEASUREMENTS' --
      crates/swell/tests/builtins_symbol_values.rs` prints nothing.
-   - `git grep -c '<b>' -- crates/swell/tests/builtins_symbol_values.rs`, `<b>` the short hash of
-     the commit the readings were read on, prints a count of at least 2 (the doc comments of
-     `WALK_PARTS` and `places_per_function`).
+   - `<b>` is `git rev-parse --short B`; `git grep -n '<b>' --
+     crates/swell/tests/builtins_symbol_values.rs` prints a line inside the doc comment of
+     `places_per_function` and one inside that of `WALK_PARTS`.
    - `git grep -c '\.create_realm(' -- crates/swell/tests/builtins_symbol_values.rs` prints
      `crates/swell/tests/builtins_symbol_values.rs:1`.
    - `git grep -c 'builtins_symbol_values.rs::in_a_bare_realm' --
@@ -737,9 +800,10 @@ The cells are three, each read with its own `<f>` and binary:
    - `git grep -c 'every_function_of_the_realm\|at its bound' --
      crates/swell/tests/support/host.rs` prints nothing.
 8. **The rule for the engine's source** (Change item 4). `git grep -cE 'feature *=
-   *"collect-every-safe-point"' -- crates/swell/src` prints exactly the eight lines of the list
-   in Change item 4, in its order. A line that differs stops the unit until it has read the new
-   use and reported whether it defines a property of the realm.
+   *"collect-every-safe-point"' -- crates/swell/src` prints exactly the eight lines that the
+   sentence for `AGENTS.md` of Change item 8 lists, in its order. A line that differs stops the
+   unit until it has read the new use and reported whether it defines a property of the realm;
+   the coordinator then updates the list in the sentence.
 9. **The gate.** `slot --timeout 30m task check` exits 0, with its steps `build-collect` and
    `test-collect` built under `RUSTFLAGS=-D warnings` (the `cfg` of Change item 3). The unit
    reports the lines `gate-time test-steps <s> of 120, cpu <c>, load <l> on <cores> cores` and
@@ -751,8 +815,11 @@ The cells are three, each read with its own `<f>` and binary:
 10. **The files.**
     - On the unit's commit, `git diff --name-only B HEAD -- . ':!.engineering'` prints exactly
       the five files of Change item 8.
-    - `git diff B HEAD -- Taskfile.yml` shows the two variables, the lines of the step `test`
-      that read them, and the include appended to `includes:`, and nothing else.
+    - `git diff B HEAD -- Taskfile.yml` shows the include of `taskfiles/realm-places.yml`
+      appended to `includes:` with `flatten: true` and `optional: true`, and the lines of the
+      steps `build-tests` and `test` that read the two variables and fail when either is empty,
+      and nothing else; `grep -c '^vars:' Taskfile.yml` prints the same count as on `B` (0 on
+      `158888d`).
     - `sh taskfiles/test-main.sh check` exits 0 and prints its last line `test-main: <c> crate(s)
       with tests, each with one integration-test binary and its tests/main.rs as generated`, `<c>`
       the number it prints on `B`.
