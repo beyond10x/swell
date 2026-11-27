@@ -50,17 +50,22 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use swell_compiler::bytecode::Slot;
-use swell_syntax::ParseOptions;
+use swell_syntax::{EvalContext, ParseOptions};
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
 use crate::env::{Bound, NameTable, RecordNames, SlotKind, SlotNames};
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
+use crate::heap::string::CodeUnits;
 use crate::host::agent::Agent;
 use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{CompilationType, CompileStrings, Cx, HookCx, Host};
-use crate::interp::frame::{Frame, SlotValue, frame_bytes};
+use crate::interp::frame::{Constructed, Frame, SlotValue, frame_bytes};
+use crate::object::ObjectKind;
 use crate::object::builtin_function::{Activation, KeptRoom};
+use crate::object::class_constructor::ConstructorKind;
+use crate::object::property::Key;
 use crate::realm::intrinsics::Intrinsic;
 use crate::script::{Compiled, ParsedTree, SourceCopy, vec_bytes};
 use crate::value::{ObjectRef, RealmRef, StringRef, Value};
@@ -113,6 +118,20 @@ impl DynamicFunctionKind {
             DynamicFunctionKind::AsyncGenerator => Intrinsic::AsyncGeneratorFunctionPrototype,
         }
     }
+}
+
+/// What an eval code's frame takes from the code that called `eval` (PerformEval,
+/// `#sec-performeval`; `docs/design/engine.md`, decision 3, "`this` and `arguments` in an arrow
+/// function", item 5).
+#[derive(Clone, Copy)]
+struct EvalCaller {
+    /// The caller's ThisBinding, or the global `this` for an indirect `eval`.
+    this: Value,
+    /// GetThisEnvironment's [[FunctionObject]] for a direct `eval`: the caller frame's function;
+    /// `None` for an indirect `eval` and outside function code.
+    function: Option<ObjectRef>,
+    /// The caller frame's NewTarget for a direct `eval`; `None` for an indirect one.
+    new_target: Option<ObjectRef>,
 }
 
 /// The environments of an eval code's frame (PerformEval, steps 16 to 18).
@@ -230,11 +249,12 @@ impl<H: Host> Agent<H> {
     /// parse of steps 9 to 15: HostGetCodeForEval of an object, the return of a value that is no
     /// String, HostEnsureCanCompileStrings, then the parse and compile step of eval code in the
     /// current realm (`compilation`: `DirectEval` with `strict_caller` and the activation the
-    /// hook runs under, or `IndirectEval`). The script record of the code holds `host_defined`.
+    /// hook runs under, or `IndirectEval`; `function` the function GetThisEnvironment answers for
+    /// a direct `eval`, `None` otherwise). The script record of the code holds `host_defined`.
     fn eval_start(
         &mut self,
         source: Value,
-        strict_caller: bool,
+        (strict_caller, function): (bool, Option<ObjectRef>),
         compilation: (CompilationType, Option<Activation>),
         host_defined: Option<crate::host::HostDefined>,
     ) -> Completion<EvalStart> {
@@ -248,17 +268,24 @@ impl<H: Host> Agent<H> {
             _ => return Ok(EvalStart::Done(source)),
         };
         let keep = self.keep(Value::String(string));
-        let started = self.eval_code_of(string, source, strict_caller, compilation, host_defined);
+        let started = self.eval_code_of(
+            string,
+            source,
+            (strict_caller, function),
+            compilation,
+            host_defined,
+        );
         self.release(keep);
         started
     }
 
-    /// Steps 4 to 15 of PerformEval for the String `string`, made from `source`.
+    /// Steps 4 to 15 of PerformEval for the String `string`, made from `source`, the eval context
+    /// derived from the caller's strictness and its function ([`Agent::eval_context`]).
     fn eval_code_of(
         &mut self,
         string: StringRef,
         source: Value,
-        strict_caller: bool,
+        (strict_caller, function): (bool, Option<ObjectRef>),
         compilation: (CompilationType, Option<Activation>),
         host_defined: Option<crate::host::HostDefined>,
     ) -> Completion<EvalStart> {
@@ -278,8 +305,10 @@ impl<H: Host> Agent<H> {
             },
             activation,
         )?;
-        // Steps 9 to 15.
-        let (script, copy) = self.parse_eval_code(realm, string, strict_caller)?;
+        // Steps 7 to 11: the flags; then the parse of steps 12 to 15.
+        let context = self.eval_context(strict_caller, function)?;
+        let direct = matches!(kind, CompilationType::DirectEval);
+        let (script, copy) = self.parse_eval_code(realm, string, context, direct)?;
         // Step 11: a source with no statement.
         if script.body.is_empty() {
             self.drop_tree(script);
@@ -287,7 +316,11 @@ impl<H: Host> Agent<H> {
             return Ok(EvalStart::Done(Value::Undefined));
         }
         let strict = script.strict;
-        let compiled = swell_compiler::compile_eval_with(&script, &mut self.ledger());
+        let compiled = swell_compiler::compile_eval_with(
+            &script,
+            context.in_derived_constructor,
+            &mut self.ledger(),
+        );
         self.drop_tree(script);
         let (code, copy) = match self.compiled_with_source(realm, compiled, copy)? {
             Ok(made) => made,
@@ -302,18 +335,63 @@ impl<H: Host> Agent<H> {
         })
     }
 
-    /// `ParseText(x, Script)` of PerformEval (steps 9 and 10) through
+    /// PerformEval, steps 7 to 11 (`#sec-performeval`): the eval context of eval code whose
+    /// caller's strictness is `strict_caller` and whose GetThisEnvironment's [[FunctionObject]]
+    /// is `function` (decision 3, item 5): inFunc when there is one, inMethod when it has a
+    /// [[HomeObject]] (HasSuperBinding), inDerivedCtor when it is a class constructor whose box
+    /// says derived ([[ConstructorKind]], `object/class_constructor.rs`), and
+    /// inClassFieldInitializer when its template is of kind `FieldInitializer` (its
+    /// [[ClassFieldInitializerName]]; an arrow in an initializer too, whose GetThisEnvironment
+    /// is the initializer's), which makes ContainsArguments of the eval code a `SyntaxError`
+    /// (`swell_syntax::parse_eval_with`).
+    fn eval_context(
+        &mut self,
+        strict_caller: bool,
+        function: Option<ObjectRef>,
+    ) -> Completion<EvalContext> {
+        let (in_method, in_derived_constructor, in_initializer) = match function {
+            Some(function) => match &self.engine_object(function)?.kind {
+                ObjectKind::EcmascriptFunction(f) => (
+                    f.home_object.is_some(),
+                    f.class
+                        .as_ref()
+                        .is_some_and(|c| c.kind == ConstructorKind::Derived),
+                    f.compiled.as_ref().is_some_and(|c| {
+                        usize::try_from(f.template)
+                            .ok()
+                            .and_then(|t| c.code.functions.get(t))
+                            .is_some_and(|t| {
+                                t.kind == swell_syntax::ast::FunctionKind::FieldInitializer
+                            })
+                    }),
+                ),
+                _ => (false, false, false),
+            },
+            None => (false, false, false),
+        };
+        Ok(EvalContext {
+            strict_caller,
+            in_function: function.is_some(),
+            in_method,
+            in_derived_constructor,
+            in_class_field_initializer: in_initializer,
+        })
+    }
+
+    /// `ParseText(x, Script)` of PerformEval (step 12) in the eval context `context` through
     /// `swell_syntax::parse_eval_with` on the agent's ledger, with the agent's `parser_nesting`:
     /// the script with the charged copy of its source, or the throw of its first `SyntaxError` in
     /// `realm`, the copy credited. A step per code unit of the String is charged before the copy
     /// (`Agent::charge_steps`, which reads the interrupt flag first). Not inlined into the run
-    /// loop, whose frame stays as small as it was.
+    /// loop, whose frame stays as small as it was. For a `direct` eval an error of an undeclared
+    /// private name is read by [`Agent::private_names_of_direct_eval`].
     #[inline(never)]
     fn parse_eval_code(
         &mut self,
         realm: Handle,
         string: StringRef,
-        strict_caller: bool,
+        context: EvalContext,
+        direct: bool,
     ) -> Completion<(swell_syntax::Script, SourceCopy)> {
         let options = ParseOptions {
             max_nesting: self.limits.parser_nesting,
@@ -322,23 +400,30 @@ impl<H: Host> Agent<H> {
         self.charge_steps(u64::try_from(length).unwrap_or(u64::MAX))?;
         let copy = self.charged_source(string)?;
         let parsed =
-            swell_syntax::parse_eval_with(&copy.units, strict_caller, options, &mut self.ledger());
+            swell_syntax::parse_eval_with(&copy.units, context, options, &mut self.ledger());
         match self.parsed_tree(parsed, copy)? {
             ParsedTree::Tree(script, copy) => Ok((script, copy)),
-            ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
+            ParsedTree::Errors(mut errors) => {
+                if direct {
+                    self.private_names_of_direct_eval(&mut errors)?;
+                }
+                Err(self.throw_parse_errors(realm, errors))
+            }
         }
     }
 
-    /// The frame of eval code (PerformEval, steps 16 to 26), not yet pushed: Function null, the
-    /// current realm, the environments `envs`, `this` the caller's ThisBinding, and the code of
-    /// the script record `script`. Its locals and its own bytes are charged with it.
+    /// The frame of eval code (PerformEval, steps 16 to 26), not yet pushed: the current realm,
+    /// the environments `envs`, from `caller` the `this` (the caller's ThisBinding), the function
+    /// GetThisEnvironment answers and the NewTarget (decision 3, item 5; the evalContext's own
+    /// Function component is null, and nothing reads it but through GetThisEnvironment), and
+    /// the code of the script record `script`. Its locals and its own bytes are charged with it.
     fn eval_frame(
         &mut self,
         script: Handle,
         compiled: Rc<Compiled>,
         strict: bool,
         envs: EvalEnvironments,
-        this: Value,
+        caller: EvalCaller,
     ) -> Completion<Frame> {
         let realm = self.current_realm()?;
         let count = usize::try_from(compiled.code.locals).unwrap_or(usize::MAX);
@@ -374,13 +459,14 @@ impl<H: Host> Agent<H> {
             env: envs.lexical,
             var_env: envs.variable,
             pushed_envs: 0,
-            this,
-            function: None,
+            this: caller.this,
+            function: caller.function,
+            new_target: caller.new_target,
             realm,
             script,
             strict,
             completion: Value::Undefined,
-            constructed: None,
+            constructed: Constructed::None,
             charged,
         })
     }
@@ -443,14 +529,18 @@ impl<H: Host> Agent<H> {
         source: Value,
         strict_caller: bool,
     ) -> Completion<Option<Value>> {
-        let (script, realm, lexical, variable, this) = {
+        let (script, realm, lexical, variable, caller) = {
             let frame = self.top_frame()?;
             (
                 frame.script,
                 frame.realm,
                 frame.env,
                 frame.var_env,
-                frame.this,
+                EvalCaller {
+                    this: frame.this,
+                    function: frame.function,
+                    new_target: frame.new_target,
+                },
             )
         };
         // The evalContext's ScriptOrModule is the caller's (step 22): its [[HostDefined]] is
@@ -465,7 +555,7 @@ impl<H: Host> Agent<H> {
         };
         let start = self.eval_start(
             source,
-            strict_caller,
+            (strict_caller, caller.function),
             (CompilationType::DirectEval, Some(activation)),
             host_defined,
         )?;
@@ -480,7 +570,7 @@ impl<H: Host> Agent<H> {
         self.check_frame_depth()?;
         self.step()?;
         let envs = self.eval_environments(&compiled, script, strict, (lexical, variable))?;
-        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, this)?;
+        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, caller)?;
         let base = self.interp.frames.len();
         self.push_frame(frame);
         // Step 27, with the eval code's frame running: a throw drops it, before any of its code
@@ -500,7 +590,12 @@ impl<H: Host> Agent<H> {
     /// is the builtin's, whose ScriptOrModule is null).
     pub(crate) fn indirect_eval(&mut self, args: &[Value]) -> Completion<Value> {
         let source = argument(args, 0);
-        let start = self.eval_start(source, false, (CompilationType::IndirectEval, None), None)?;
+        let start = self.eval_start(
+            source,
+            (false, None),
+            (CompilationType::IndirectEval, None),
+            None,
+        )?;
         let (script, compiled, strict) = match start {
             EvalStart::Done(value) => return Ok(value),
             EvalStart::Code {
@@ -527,7 +622,12 @@ impl<H: Host> Agent<H> {
         let realm = self.current_realm()?;
         let this = self.global_this_binding(realm)?;
         let envs = self.eval_environments(&compiled, script, strict, (None, None))?;
-        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, this)?;
+        let caller = EvalCaller {
+            this,
+            function: None,
+            new_target: None,
+        };
+        let frame = self.eval_frame(script, Rc::clone(&compiled), strict, envs, caller)?;
         self.run_frame(frame, |agent| {
             agent.eval_declaration_instantiation(&compiled, script, envs)
         })
@@ -924,6 +1024,95 @@ impl<H: Host> Agent<H> {
         match self.parsed_tree(parsed, copy)? {
             ParsedTree::Tree(script, copy) => Ok((script, copy)),
             ParsedTree::Errors(errors) => Err(self.throw_parse_errors(realm, errors)),
+        }
+    }
+}
+
+/// The text of the early error AllPrivateIdentifiersValid gives for `#x` in eval code
+/// (`swell_syntax`, `early.rs`): `private name #x is not declared in an enclosing class`.
+const UNDECLARED_PRIVATE_NAME: (&str, &str) =
+    ("private name ", " is not declared in an enclosing class");
+
+impl<H: Host> Agent<H> {
+    /// Direct eval code is parsed with the private names of the classes around the call
+    /// (`#sec-performeval`, step 12: privateIdentifiers, the names of the running
+    /// PrivateEnvironment and its outer ones), which `story:private-names-in-eval-code` brings.
+    /// Until then the parse knows none of them and gives AllPrivateIdentifiersValid's error for
+    /// each private name of the code. Read here, after a parse that failed, for each such error:
+    /// - the name is declared by a class whose body encloses the call when a declarative record
+    ///   on the chain of the running frame's LexicalEnvironment names a slot `#x`
+    ///   ([`Agent::chain_names_slot`]): the class's private record, whose slots are named
+    ///   whenever a direct `eval` stands in the class body (`swell-compiler`, `resolve.rs`,
+    ///   `LexicalScope::named`), entered after the heritage;
+    /// - when every error of the parse is of such a name, the standard runs the code and the
+    ///   engine cannot: the first becomes the one error, the refusal `private name #x in direct
+    ///   eval code is not supported before slice 8` (a `Refusal` by `swell_syntax::message_kind`);
+    /// - otherwise the errors of declared names are no errors of the standard and are dropped;
+    ///   the others stay, the first of them thrown. A name no enclosing class declares, inside a
+    ///   class or outside every class, keeps its `SyntaxError`.
+    ///
+    /// A direct `eval` whose code parses never comes here, so one that names no `#` pays
+    /// nothing: no walk, no allocation. The name is looked up as an atom that already exists
+    /// (`Heap::atom_of`, which makes nothing): when there is none, no table names it.
+    fn private_names_of_direct_eval(
+        &mut self,
+        errors: &mut Vec<swell_syntax::SyntaxError>,
+    ) -> Completion<()> {
+        // The direct `eval` pushed no frame before its parse: the running frame is the caller's.
+        let env = self.top_frame()?.env;
+        let (head, tail) = UNDECLARED_PRIVATE_NAME;
+        let mut declared = 0usize;
+        for error in errors.iter_mut() {
+            let Some(name) = error
+                .message
+                .strip_prefix(head)
+                .and_then(|rest| rest.strip_suffix(tail))
+            else {
+                continue;
+            };
+            if !self.enclosing_class_declares(env, name)? {
+                continue;
+            }
+            let refusal = alloc::format!(
+                "private name {name} in direct eval code is not supported before slice 8"
+            );
+            error.message = refusal;
+            declared += 1;
+        }
+        if declared == 0 {
+            return Ok(());
+        }
+        if declared == errors.len() {
+            errors.truncate(1);
+        } else {
+            errors.retain(|e| {
+                !matches!(
+                    swell_syntax::message_kind(&e.message),
+                    swell_syntax::MessageKind::Refusal { .. }
+                )
+            });
+        }
+        Ok(())
+    }
+
+    /// Whether a class whose body encloses the running code declares the private name `name`
+    /// (its text, with its `#`): a slot of that name in a record on the chain from `env`.
+    fn enclosing_class_declares(&mut self, env: Option<Handle>, name: &str) -> Completion<bool> {
+        let atom = if name.is_ascii() {
+            self.heap.atom_of(CodeUnits::Latin1(name.as_bytes()))
+        } else {
+            let mut units = ChargedVec::new();
+            self.reserve_vec(&mut units, name.encode_utf16().count())?;
+            for unit in name.encode_utf16() {
+                if units.push(unit).is_err() {
+                    return Err(self.fault());
+                }
+            }
+            self.heap.atom_of(&units[..])
+        };
+        match atom {
+            Some(atom) => self.chain_names_slot(env, Key::String(atom)),
+            None => Ok(false),
         }
     }
 }

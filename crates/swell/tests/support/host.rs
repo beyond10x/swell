@@ -191,6 +191,7 @@ pub fn in_provided_hook<R>(f: impl FnOnce(&mut HookCx<'_, ProvidedHost>) -> R) -
                 brand: Brand(1),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()?;
         if let Some(f) = f.take() {
@@ -235,7 +236,33 @@ pub fn limits() -> Limits {
 /// above are the margin of the build with full debug information, cargo's default for a dev
 /// build: the profile `stack-debug` runs the stack tests in it (`taskfiles/stack-profiles.yml`).
 pub fn stack_with_room(limits: Limits) -> usize {
+    no_stack_test_here();
     limits.min_stack_bytes() / 8 * 7
+}
+
+/// The variable the lane's run of the collect mode at opt-level 1 sets for its test processes
+/// (task `slow-tests` of `Taskfile.yml`): that run holds no test that runs on a bounded stack,
+/// since such a test proves the stack with frames whose size depends on the optimization
+/// level and runs at opt-level 0 there.
+pub const NO_STACK_TESTS: &str = "SWELL_NO_STACK_TESTS";
+
+/// The thread a test runs its body on with a stack of `bytes`: the one way of the tests to a
+/// bounded stack besides [`stack_with_room`], and like it the guard of [`NO_STACK_TESTS`].
+pub fn stack_thread(bytes: usize) -> std::thread::Builder {
+    no_stack_test_here();
+    std::thread::Builder::new().stack_size(bytes)
+}
+
+/// The line a stack test fails with when it runs where [`NO_STACK_TESTS`] is set.
+pub const NO_STACK_TESTS_LINE: &str = "this test runs on a bounded stack, but SWELL_NO_STACK_TESTS is set: it runs in the lane's run at opt-level 1 (task slow-tests), because taskfiles/realm-room-tests.awk -v rule=stack did not find it; it must run at opt-level 0: call stack_with_room or stack_thread in the test's own text, or in a function the rule reads it through";
+
+/// Panics with [`NO_STACK_TESTS_LINE`] when [`NO_STACK_TESTS`] is set: a test the rule of
+/// `slow-tests` did not find fails in that run, by itself, instead of passing on frames of
+/// another size.
+fn no_stack_test_here() {
+    if std::env::var_os(NO_STACK_TESTS).is_some() {
+        panic!("{NO_STACK_TESTS_LINE}");
+    }
 }
 
 /// The seeds the tests use: fixed, so every run is the same.
@@ -495,9 +522,9 @@ pub fn pad_realm<H: Host>(agent: &mut Agent<H>, realm: &Realm, k: usize) {
 ///
 /// - `budgets.rs::host_9_zero_steps_ends_before_the_first`: `steps_per_entry` 0, which the
 ///   padding's entry needs steps of.
-/// - `builtins_symbol_values.rs::every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error`:
-///   asserts over every function of the realm and prints their count; its full count is at its
-///   bound.
+/// - `builtins_symbol_values.rs::in_a_bare_realm`: the parts of the walk over the functions of
+///   the realm and the test that holds the file of their places equal to the walk make their
+///   realm through it, because the file holds the places of the bare realm.
 /// - `calls.rs::cx_methods_check_their_handles_before_the_sticky_termination`: `steps_per_entry`
 ///   0.
 /// - `calls.rs::a_call_spends_the_step_budget_of_the_outermost_entry`: `steps_per_entry` 0 among

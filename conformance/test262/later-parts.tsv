@@ -307,7 +307,7 @@ function *	7	generator function is not supported before slice 7
 yield	7	generator function is not supported before slice 7
 ({* foo})	7	generator function is not supported before slice 7
 { * f	7	generator function is not supported before slice 7
-class	8	class is not supported before slice 8
+class	8	classes: class definitions
 super	8	super is not supported before slice 8
 new.target	8	classes: new.target
 var #x	8	private name is not supported before slice 8

@@ -29,11 +29,12 @@
 
 use alloc::rc::Rc;
 use alloc::vec::Vec;
+use swell_syntax::ast::FunctionKind;
 
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, HookCx, Host};
 use crate::object::ObjectKind;
 use crate::object::bound_function::bound_function_create;
@@ -42,6 +43,87 @@ use crate::object::property::{Key, Property};
 use crate::realm::intrinsics::Making;
 use crate::script::{Compiled, vec_bytes};
 use crate::value::{ObjectRef, StringRef, Value};
+
+/// The start of the [[SourceText]] of the method, getter or setter whose function spans
+/// `source[start..end]`. The function of a static element starts at `static`, but its source
+/// text is the MethodDefinition after it (`ClassElement : static MethodDefinition`,
+/// `#sec-class-definitions`; `story:class-definition-evaluation`): `static`, a whole token
+/// that a `(` does not follow (which makes it a method's name), is skipped with the white space,
+/// line terminators and comments after it. Any other function starts where it starts. Runs over
+/// the code units of the trivia once, a part of the text the step per code unit of the String
+/// it makes covers.
+fn method_definition_start(source: &[u16], start: u32, end: u32) -> u32 {
+    let first = usize::try_from(start).unwrap_or(usize::MAX);
+    let last = usize::try_from(end).unwrap_or(usize::MAX).min(source.len());
+    let text = source.get(first..last).unwrap_or_default();
+    let Some(rest) = text.strip_prefix(&[0x73, 0x74, 0x61, 0x74, 0x69, 0x63][..]) else {
+        return start;
+    };
+    // `static` followed by an identifier part is the start of a longer name.
+    match rest.first() {
+        Some(&unit) if is_identifier_part_unit(unit) => return start,
+        None => return start,
+        Some(_) => {}
+    }
+    let mut at = 0usize;
+    loop {
+        match (
+            rest.get(at).copied(),
+            rest.get(at.saturating_add(1)).copied(),
+        ) {
+            (Some(unit), _) if is_white_space_or_line_terminator(unit) => at = at.saturating_add(1),
+            // `//`: a comment to the end of the line.
+            (Some(0x2F), Some(0x2F)) => {
+                at = at.saturating_add(2);
+                while rest
+                    .get(at)
+                    .is_some_and(|&u| !matches!(u, 0x0A | 0x0D | 0x2028 | 0x2029))
+                {
+                    at = at.saturating_add(1);
+                }
+            }
+            // `/*`: a comment to its `*/`.
+            (Some(0x2F), Some(0x2A)) => {
+                at = at.saturating_add(2);
+                while rest.get(at).is_some()
+                    && !(rest.get(at) == Some(&0x2A)
+                        && rest.get(at.saturating_add(1)) == Some(&0x2F))
+                {
+                    at = at.saturating_add(1);
+                }
+                at = at.saturating_add(2);
+            }
+            // `static (`: a method named `static`.
+            (Some(0x28), _) | (None, _) => return start,
+            (Some(_), _) => break,
+        }
+    }
+    let skipped = u32::try_from(at.saturating_add(6)).unwrap_or(0);
+    start.saturating_add(skipped).min(end)
+}
+
+/// Whether the code unit `unit` right after `static` continues an IdentifierName: an ASCII
+/// letter, digit, `$`, `_` or `\` (a Unicode escape), or a unit outside ASCII that is neither
+/// white space nor a line terminator (in a source the parser accepted, such a unit there is a
+/// part of the name).
+fn is_identifier_part_unit(unit: u16) -> bool {
+    match u8::try_from(unit) {
+        Ok(byte) if byte.is_ascii() => {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'_' | b'\\')
+        }
+        _ => !is_white_space_or_line_terminator(unit),
+    }
+}
+
+/// WhiteSpace and LineTerminator (`#sec-white-space`, `#sec-line-terminators`): TAB, VT, FF,
+/// SP, NBSP, ZWNBSP and the other code points of category Zs, LF, CR, LS and PS.
+fn is_white_space_or_line_terminator(unit: u16) -> bool {
+    matches!(
+        unit,
+        0x09 | 0x0A | 0x0B | 0x0C | 0x0D | 0x20 | 0xA0 | 0x1680 | 0x2000
+            ..=0x200A | 0x2028 | 0x2029 | 0x202F | 0x205F | 0x3000 | 0xFEFF
+    )
+}
 
 /// What `Function.prototype.toString` reads of a function object.
 enum Shape {
@@ -70,6 +152,10 @@ pub(crate) enum FunctionBuiltin {
     /// `Function.prototype.toString ( )` (20.2.3.5).
     ToString,
 }
+
+/// Step 6.c of CreateListFromArrayLike with validElementTypes property-key: the throw for an
+/// element that is not a property key, or `None` for one that is.
+pub(crate) type Refuse<H> = dyn FnMut(&mut Agent<H>, Value) -> Option<Abrupt>;
 
 impl<H: Host> Agent<H> {
     /// `%Function%` (20.2.1, 20.2.2): a built-in constructor of length 1 whose [[Prototype]] is
@@ -196,14 +282,42 @@ impl<H: Host> Agent<H> {
     /// all: each element is pushed on the kept stack as it is read, in `room`, and stays there
     /// until the caller releases it; `charged` counts the bytes charged for the elements' slots
     /// of the list, which the caller credits.
-    #[inline(never)]
-    fn create_list_from_array_like(
+    pub(crate) fn create_list_from_array_like(
         &mut self,
         value: Value,
         charged: &mut u64,
         room: &mut KeptRoom,
     ) -> Completion<Vec<Value>> {
-        // 1. validElementTypes is all. 2. If obj is not an Object, throw a TypeError.
+        self.create_list_from_array_like_of(value, None, charged, room)
+    }
+
+    /// CreateListFromArrayLike of `value` with validElementTypes property-key
+    /// (`story:proxy-descriptor-prototype-and-extensibility-traps`, the `ownKeys` trap's
+    /// answer): as [`Agent::create_list_from_array_like`], and `refuse` answers, for each element
+    /// right after it is read (step 6.c), the throw of an element that is not a property key, or
+    /// `None` for one that is.
+    pub(crate) fn create_list_of_property_keys(
+        &mut self,
+        value: Value,
+        refuse: &mut Refuse<H>,
+        charged: &mut u64,
+        room: &mut KeptRoom,
+    ) -> Completion<Vec<Value>> {
+        self.create_list_from_array_like_of(value, Some(refuse), charged, room)
+    }
+
+    /// The steps of CreateListFromArrayLike; `refuse`, when present, is step 6.c of
+    /// validElementTypes property-key.
+    #[inline(never)]
+    fn create_list_from_array_like_of(
+        &mut self,
+        value: Value,
+        mut refuse: Option<&mut Refuse<H>>,
+        charged: &mut u64,
+        room: &mut KeptRoom,
+    ) -> Completion<Vec<Value>> {
+        // 1. validElementTypes is all unless `refuse` is given. 2. If obj is not an Object,
+        // throw a TypeError.
         let Value::Object(object) = value else {
             return Err(self.throw_error(
                 ErrorKind::TypeError,
@@ -220,8 +334,15 @@ impl<H: Host> Agent<H> {
             // 6.a. Let indexName be ! ToString(𝔽(index)). 6.b. Let next be ? Get(obj, indexName).
             let key = self.index_key(index)?;
             let next = self.get(object, key)?;
-            // 6.c does not apply to all. 6.d. Append next to list: kept in the room, and charged
-            // for its slot of the argument list.
+            // 6.c. If validElementTypes is property-key and next is not a property key, throw
+            // a TypeError exception.
+            if let Some(refuse) = refuse.as_mut()
+                && let Some(abrupt) = refuse(self, next)
+            {
+                return Err(abrupt);
+            }
+            // 6.d. Append next to list: kept in the room, and charged for its slot of the
+            // argument list.
             let bytes = vec_bytes::<Value>(1);
             if self.heap.accounting.charge(bytes).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));
@@ -257,11 +378,18 @@ impl<H: Host> Agent<H> {
             ObjectKind::EcmascriptFunction(function) => {
                 function.compiled.as_ref().and_then(|compiled| {
                     let position = usize::try_from(function.template).unwrap_or(usize::MAX);
-                    let span = compiled.code.functions.get(position)?.source_text;
+                    let template = compiled.code.functions.get(position)?;
+                    let span = template.source_text;
+                    let start = match template.kind {
+                        FunctionKind::Method | FunctionKind::Getter | FunctionKind::Setter => {
+                            method_definition_start(&compiled.source, span.start, span.end)
+                        }
+                        _ => span.start,
+                    };
                     Some(Shape::Ecmascript(
                         func,
                         Rc::clone(compiled),
-                        span.start,
+                        start,
                         span.end,
                     ))
                 })

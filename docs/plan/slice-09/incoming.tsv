@@ -1,0 +1,2 @@
+test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-proxy.js	04	Proxy
+test/built-ins/Array/prototype/slice/length-exceeding-integer-limit-proxied-array.js	04	Proxy

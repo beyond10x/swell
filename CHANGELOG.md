@@ -54,9 +54,443 @@ Every number below comes from the gate, `task check`, on the released commit.
   `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
+- The close of slice 9, `collections-proxy-reflect` (`story:slice-09-conformance-close`):
+  every case of the slice passes in every run, `test262-slice 09 1858 3678 0 0 1858 1858 0 0`.
+  59 cases that need a later slice move with evidence in `conformance/test262/moves.tsv`:
+  37 to slice 8, each refused at the start of the slice on `class` (36: subclasses and
+  set-like classes of the seven set methods of `Set/prototype/`) or `new.target` (1,
+  `optional-chaining/new-target-optional-call`), and 22 to slice 12 on a BigInt literal
+  (`1n` 15, `0n` 7: `Map/prototype/getOrInsertComputed/this-not-object-throw` and the
+  `called-with-object`, `require-internal-slot` and `size-is-a-number` cases of the set
+  methods). 130 cases of `test/staging/` that failed at the start of the slice on `Proxy`,
+  `Reflect`, `Map`, `Set` or `WeakMap` and pass now come into slice 9 from slice 19 by lines
+  of the block (`docs/plan/slice-09/close-into-09.tsv`). Each was read case by case against
+  the full run at the start commit of the slice; 31 of them name later slices only in the
+  `typeof` guards of `harness/deepEqual.js`. The table of section 12 moves by them: slice 8
+  9,339 cases and 18,529 runs, slice 9 1,858 and 3,678, slice 12 381 and 760, slice 19 1,233
+  and 2,299; the sums do not move.
+- `Reflect`, the first story of the ninth slice (`#sec-reflect-object`): the global `Reflect`,
+  an ordinary object of `%Object.prototype%` with its 13 functions in the order of their
+  clauses (`apply`, `construct`, `defineProperty`, `deleteProperty`, `get`,
+  `getOwnPropertyDescriptor`, `getPrototypeOf`, `has`, `isExtensible`, `ownKeys`,
+  `preventExtensions`, `set`, `setPrototypeOf`) and `Reflect[Symbol.toStringTag]` "Reflect".
+  Each function calls one internal method of its target after the checks of its clause, and
+  throws a TypeError for a target that is no object (for `apply` not callable, for
+  `construct` no constructor) before it reads another argument. `apply` and `construct` copy
+  their argument list as `Function.prototype.apply` does: a step per element, each element
+  charged to the memory budget before it is kept, a re-entry per call; `ownKeys` charges the
+  list of its values before it makes it and a step per element of the Array it answers
+  (`story:reflect-namespace`).
+- `Map` and `Set` with their prototypes, `get [Symbol.species]`, and the Map and Set Iterators
+  (`#sec-map-objects`, `#sec-set-objects`), on one ordered entry table
+  (`object/keyed_entries.rs`, `EntryTable`): entries in insertion order with a hole per
+  deletion, an index map once the table's room passes 8 entries, keys compared by
+  SameValueZero after CanonicalizeKeyedCollectionKey (`-0` as `+0`, every NaN one key, a
+  String as its atom, so `"0"` and `0` stay two keys), and cursors that a compaction and
+  `clear` move, so `forEach` and an iterator visit an entry added before they reach it and
+  skip one deleted before it. Every operation charges its steps before its work and every
+  growth its bytes; the collector drops the cursors of dead iterators. A cursor id carries a
+  generation, so a stale id reaches no cursor (`story:keyed-entry-table`,
+  `story:map-and-set`).
+- Proxy objects (`story:proxy-objects-and-access-traps`): the global `Proxy` (a constructor of
+  `length` 2 with no "prototype"; a call without `new`, or a target or handler that is not an
+  object, is a TypeError) and `Proxy.revocable`, whose `{ proxy, revoke }` object holds a
+  revoke function of `length` 0 and name "" that drops the Proxy's target and handler on its
+  first call. Every internal method of an object has a Proxy arm: `get`, `set`, `has`,
+  `deleteProperty`, `apply` and `construct` call their trap on the handler and check its
+  answer against the invariants of `#sec-proxy-object-internal-methods-and-internal-slots` (a
+  broken one is a TypeError that names the trap and the key), reading the target's descriptor
+  and extensibility only at the step of the clause; the seven other methods check for
+  revocation and forward to the target. A revoked Proxy throws a TypeError from each method.
+  The walks of the prototype chain hand a key over to a Proxy parent's [[Get]],
+  [[HasProperty]] or [[Set]] with the same receiver; IsArray and GetFunctionRealm follow the
+  target. Every internal method of a Proxy is one re-entry for its duration and spends a step
+  before it reads the handler, so a chain of proxies of any length ends in the RangeError of
+  `reentry_depth`, not in a stack overflow.
+- `super.x` and `super[e]` in the methods, getters and setters of object literals, plain,
+  generator, async and async generator ones, and in their parameters
+  (`#sec-super-keyword`, `#sec-makesuperpropertyreference`): the base is the [[Prototype]] of
+  the method's [[HomeObject]] when the reference is made, the receiver is `this`, and ToObject
+  of a `null` base throws a `TypeError` before a computed key is converted. Reads, calls
+  (`this` is the receiver), tagged templates, `?.`, assignment, compound and logical
+  assignment, `++` and `--`, destructuring targets and `for`-`in` heads work on it; `delete`
+  of one throws a `ReferenceError` without converting the key. The compiler emits seven
+  instructions, `SuperBase`, `GetSuperNamed`, `GetSuperIndex`, `PutSuperNamed`,
+  `PutSuperIndex`, `SuperKey` and `DeleteSuper`. A SuperProperty outside a method (a plain
+  function, generator, async function, its parameters, global code, an arrow at the top) is
+  the early SyntaxError "super property outside a method", a SuperCall outside a derived class
+  constructor is "super call outside a derived class constructor". The refusal `super is not
+  supported before slice 8` is gone; `super` in an arrow function inside a method and `super`
+  in eval code run since `story:derived-classes-and-super-call`
+  (`story:super-property-and-super-syntax`).
+- `new.target` parses and runs in functions, arrow functions, generators, `async` functions
+  and direct eval code (`story:new-target-meta-property`).
+- `WeakMap` and `WeakSet` (`#sec-weakmap-objects`, `#sec-weakset-objects`), a story of the ninth
+  slice: the constructors with their adders `set` and `add` (the loop of `Map` and `Set`, a step
+  per entry), `WeakMap.prototype.delete`, `get`, `has`, `set`, `getOrInsert` and
+  `getOrInsertComputed`, `WeakSet.prototype.add`, `delete` and `has`, and their
+  `@@toStringTag`. A key is an object or a Symbol that CanBeHeldWeakly (`#sec-canbeheldweakly`):
+  a Symbol of `Symbol.for` is refused with a `TypeError` by `set`, `add` and `getOrInsert*`, a
+  well-known Symbol is accepted. The table is the keyed hash map of `heap/map.rs` with the
+  heap's hasher, each growth charged before it and credited when the object is freed; a rehash
+  of the table in place, once deleted entries used up its room, is charged nothing; the box of
+  the kind is charged with the object. The collector holds the entries weakly by linear
+  ephemeron marking: a WeakMap's trace reports the value of an entry whose key is marked and
+  puts any other entry on a pending list headed at its key's slot, which the mark phase empties
+  when the key is marked; after marking, every marked weak table drops its entries whose key is
+  not marked, so a key reachable only through the values of such entries is freed with them,
+  in one collection (`story:weak-map-and-weak-set`).
+- The set methods of `Set.prototype`, a story of the ninth slice: `union`, `intersection`,
+  `difference`, `symmetricDifference`, `isSubsetOf`, `isSupersetOf` and `isDisjointFrom`, with
+  GetSetRecord over a set-like (its `size`, `has` and `keys`). Each picks the side it iterates
+  by the clause's size comparison, walks `this` with a cursor of its table (an entry a `has`
+  callback deletes before the walk reaches it is skipped, one it adds is visited), closes the
+  set-like's iterator where the clause closes it, and answers a new plain `Set` of the current
+  realm (no species). One step per entry of `this` visited and per key read from the set-like,
+  the result's table charged to the memory budget, every callback counted against the depth
+  bounds. The own keys of `%Set.prototype%` stand in the order of the clauses
+  (`story:set-methods`).
+
+- Class declarations and class expressions without `extends`, three stories of the eighth
+  slice (`#sec-class-definitions`, `#sec-runtime-semantics-classdefinitionevaluation`). The
+  parser reads a class where a declaration stands and as an expression, with methods, getters,
+  setters, generator, async and async generator methods, `static` or not, with literal, string,
+  number or computed keys, and empty elements; a class is strict code from `class` to its `}`.
+  Its early errors are answered: a second `constructor`, a `constructor` that is a special
+  method, a `static` method named `prototype`, a reserved or restricted class name, the strict
+  rules in its methods, and the redeclaration of its name in a block, a `switch` and a script
+  (`story:class-syntax-and-early-errors`). A class runs: the class scope with its own name
+  uninitialized and immutable while the computed keys run, the prototype with
+  `%Object.prototype%` as [[Prototype]], the constructor F made from the constructor's template
+  (or the default base constructor) with the prototype as [[HomeObject]] and its name at
+  creation, `prototype` (not writable, not enumerable, not configurable) and `constructor`,
+  then the methods, getters and setters in source order, non-enumerable, on the prototype or,
+  for a static one, on F; a computed key is converted by ToPropertyKey once, and a static
+  element keyed `prototype` throws a `TypeError`. A class constructor called without `new`
+  throws a `TypeError` of its own realm; `new` makes `this` from NewTarget (through a bound
+  function too). A class at the top of a script binds in the declarative record of the global
+  environment; in a block and in eval code it binds lexically. The computed keys of a class in
+  non-strict code run as strict mode code (`#sec-strict-mode-code`): an assignment to an
+  undeclared name throws a `ReferenceError`, a write to a frozen property and `delete` of a
+  non-configurable one throw a `TypeError`, a direct `eval` there keeps its `var` to itself,
+  and a class, function or arrow function made there is strict; the code around the class, its
+  `catch` and `finally`, and a frame resumed after a `yield` in a key keep their own
+  strictness. An anonymous class under a computed key of an object literal takes the key's
+  name before its elements are defined, so a static `name` method wins and `Reflect.ownKeys`
+  lists `length`, `name`, `prototype` first. `Function.prototype.toString` of a class gives
+  its source text from `class` to `}`, of a method its source text without a leading `static`.
+  The compiler emits thirteen instructions, `ClassPrototype`, `MakeClassConstructor`,
+  `DefineClassMethod`, `DefineClassGetter`, `DefineClassSetter`, their three computed forms,
+  `StoreInitializer`, `MakeMethod`, `InitInstance`, `SetStrict` and `SetClassName`; a class
+  constructor carries a box of its kind (`ConstructorKind::Base`) and its instance
+  initializer, charged with F. The refusal `class is not supported before slice 8` is gone
+  (`story:class-definition-evaluation`).
+- The parser reads every other element of a class and holds it: fields, public and private,
+  static or not, with or without an initializer, ending at `;`, before `}` or where a line
+  terminator lets a semicolon be inserted, with `static`, `get`, `set` and `async` as field
+  names; private methods and accessors (`#m() {}`, `get #x() {}`, `static async *#m() {}`);
+  static blocks; the private name token (`#` and an identifier name, escapes included); the
+  member forms `a.#x` and `a?.#x` and `#x in a`, whose private name stands only directly
+  before `in` where a relational expression may start. The tree holds the functions of the
+  elements: one `FieldInitializer` per run of consecutive static fields, one for the instance
+  elements of a class with a field or a private method that is not static, one `StaticBlock`
+  per static block. Their early errors are answered: a field named `constructor`, a static
+  field named `prototype` or `constructor`, `#constructor`, a private name declared twice but
+  for a getter and setter pair of the same placement, `arguments` in a field initializer or a
+  static block (arrow functions in them included), a SuperCall there, `await` as an identifier
+  and `return` in a static block (a class nested in it included), a YieldExpression or an
+  AwaitExpression in a field initializer (refused at its token, a stated difference from the
+  pinned draft: no runtime can run one in an initializer's own function), the var and lexical
+  names of a static block, AllPrivateIdentifiersValid in a script, a function body, `Function`
+  code, eval code and a class body (a class's heritage excepted), `delete` of a private
+  reference, and a private name in an object literal or after `super.`. A source that has
+  such an element and no early error answers its hold: `class field`, `private method`,
+  `private field`, `private name in` or `class static block is not supported before slice 8`;
+  a heritage answers `class heritage is not supported before slice 8`. The refusal `private
+  name is not supported before slice 8` of the lexer is gone
+  (`story:class-element-syntax-and-early-errors`).
+
+- The seven traps of shape of Proxy exotic objects: `getPrototypeOf`, `setPrototypeOf`,
+  `isExtensible`, `preventExtensions`, `getOwnPropertyDescriptor`, `defineProperty` and
+  `ownKeys` (`#sec-proxy-object-internal-methods-and-internal-slots`, 10.5.1 to 10.5.6 and
+  10.5.11). Each is called with the clause's arguments and its answer is checked against the
+  target by the 21 invariants of those clauses; the target is read only at the steps of the
+  clause and only under their conditions. A broken invariant throws a `TypeError` that names
+  the trap, the key and the invariant's number (`I1` to `I21`). The answer of `ownKeys` is
+  made a list by CreateListFromArrayLike with a step per element, each check of the clause
+  spends a step per key, and the map of the answer's keys and the list of the target's
+  non-configurable keys are charged to the memory budget before they are made: a trap that
+  answers an array-like of length 2^32 - 1 ends at the step budget or the memory budget. A
+  trap runs code and the collector may run inside it, so every value used after a trap is kept
+  until its last use (`JSON.stringify` and the reviver walk of `JSON.parse`, `Object.keys`,
+  `values` and `entries`, `for`-`in`, OrdinaryHasInstance and
+  `Object.prototype.isPrototypeOf`); a trap's arguments are released when it returns, and no
+  internal method of a Proxy keeps more than 10 values outside a charged room.
+  `for`-`in` over an object whose prototype chain has a Proxy reads whether a key is still a
+  property with [[GetOwnProperty]] along the chain its enumeration walked: it calls no `has`
+  trap, a `getPrototypeOf` trap is called once per object, and the keys of the prototype such
+  a trap answered are visited. A chain of ordinary objects costs the steps it cost before
+  (`story:proxy-descriptor-prototype-and-extensibility-traps`).
+
+- Public class fields, instance and static (`#sec-class-definitions`,
+  `#sec-runtime-semantics-classfielddefinitionevaluation`, `#sec-definefield`): a computed field
+  key runs once, when the class is defined, in source order with the keys of the methods, is
+  converted by ToPropertyKey there and kept in a hidden binding of the class scope; each
+  construction defines the instance fields in source order on the new object before the
+  constructor's body runs, each initializer evaluated (or `undefined`) with the instance as
+  `this` and `new.target` undefined, by CreateDataPropertyOrThrow, so a field over a prototype
+  accessor is an own data property and a non-extensible object or a non-configurable property
+  throws a `TypeError`; the static fields are defined on the class in source order after every
+  method, each run of them a function called with the class as `this`; `super.x` in an
+  initializer reads through the prototype (or the class, for a static field); an anonymous
+  function or class takes the field's name. The initializers run as frames of the run loop
+  (`InitInstance`, `Call(0)`), so the step budget, the interrupt and the frame depth reach
+  them. No instruction is added. The refusal `class field is not supported before slice 8` is
+  gone. A direct `eval` in a field initializer (an arrow in one too) runs since
+  `story:eval-in-class-field-initializers`; an indirect `eval` there ran before it
+  (`story:public-class-fields`).
+
+- Derived classes and `super(...)` (`#sec-runtime-semantics-classdefinitionevaluation`,
+  `#sec-super-keyword-runtime-semantics-evaluation`,
+  `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`): `class C extends H`
+  in declarations and expressions, with `H` a constructor or `null`. The heritage sets both
+  prototype chains (constructor and prototype); `extends null` makes a prototype without a
+  parent, and a non-constructor heritage or a `prototype` that is neither an object nor `null`
+  throws a `TypeError`. A derived constructor's `this` is a hidden binding of its function
+  scope, uninitialized until `super(...)` returns: a read before throws a `ReferenceError`, a
+  second `super(...)` throws a `ReferenceError` after the parent ran. `super(...)` works in the
+  constructor, in its parameters, in arrow functions within it and in direct eval code in it.
+  The derived return rule (an object, `undefined` with `this` bound, else a `TypeError`, or a
+  `ReferenceError` when `this` is unbound) throws its errors in the caller's realm, for a frame
+  of the running loop and for a [[Construct]] from Rust (a bound function,
+  `Reflect.construct`, the host). The default derived constructor passes its arguments to the
+  parent without an iterator, a step per argument. A chain of 1,000 derived classes runs one
+  frame per level and no re-entry. The fields of a derived class are defined when `super(...)`
+  returns. `super` in an arrow within a method and `super.x` in direct eval code in a method
+  now run. An arrow inside a derived constructor keeps the constructor's `this` binding in the
+  function environment whether or not it reads `this` (184 bytes more per kept construction,
+  measured over 100 instances). The compiler emits `ClassHeritage`, `GetSuperConstructor`,
+  `SuperCall`, `SuperCallSpread`, `SuperCallKept`, `BindThis`, `BindThisEnv`, `BindThisName`,
+  `KeepThis`, `KeepThisEnv` and `UninitializeEnv`. The refusal `class heritage is not
+  supported before slice 8` is gone (`story:derived-classes-and-super-call`).
+
+- `eval` in a class field initializer (`#sec-performeval`,
+  `#sec-static-semantics-containsarguments`): a direct eval whose GetThisEnvironment is a
+  field initializer's (an instance or a static field, or an arrow function in one) runs with
+  inFunction and inMethod set, inDerivedConstructor clear and inClassFieldInitializer set,
+  read from the template kind `FieldInitializer`: `new.target` in the eval code is
+  `undefined`, `super.x` reads through the initializer's home object, `super()` is a
+  `SyntaxError` (in a derived class too), `this` is the instance (the class in a static
+  field), a `var` stays in the eval's own record, and ContainsArguments of the eval code
+  (`arguments` outside every function that is not an arrow function) is the `SyntaxError`
+  `arguments in eval code in a class field initializer`, answered before any other early
+  error and before a held refusal of the eval code. An indirect eval there has every flag
+  clear. The refusal `eval in a class field initializer is not supported before slice 8` is
+  gone (`story:eval-in-class-field-initializers`).
+
+- Private methods and accessors run (`#sec-private-names`,
+  `#sec-privateelement-specification-type`): each evaluation of a class makes one Private Name
+  per private identifier (a heap record of its own, its description the identifier with its
+  `#`), held by the class's private record, a lexical scope pushed after the heritage. An
+  object holds its private elements in a list of its own, charged to the memory budget before
+  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  exactly the elements that level adds (a getter and a setter of one name are one element), so
+  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
+  methods 200, with 17 methods 772
+  (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
+  methods and accessors are added by the class's instance initializer before any other
+  element, the static ones to the constructor before the first static element runs
+  (PrivateMethodOrAccessorAdd); an object a base constructor returns gets them too, and a
+  second add of the same name is a `TypeError`. `o.#m`, `o.#m()` with `o` as `this`,
+  `o?.#m()`, and every assignment form on a private reference (plain, compound, logical,
+  update, destructuring and the `for`-`in`/`of` head) run PrivateGet and PrivateSet, which
+  throw a `TypeError` for a missing element, a primitive, a write to a method and a read or
+  write of an accessor that lacks that half. A find spends a step per comparison past the
+  eighth entry, so a construction that adds n private elements of one class level spends
+  (n - 9)(n - 8)/2 steps on its adds for n over 9 and none below. Private names are not
+  visible to any listing of the language or of the host interface; the collector frees a
+  Private Name that nothing holds. One class holds at most 32,768 private methods with names
+  of their own (the 65,536 slots of its private record); past it the class is the
+  `SyntaxError` `more private record slots in one class than the bytecode can number`. Direct
+  eval code that reads a private name an enclosing class declares is refused with the
+  `SyntaxError` `private name #x in direct eval code is not supported before slice 8` until
+  `story:private-names-in-eval-code`; a name no enclosing class declares, an indirect `eval`
+  and `Function` keep the early error `private name #x is not declared in an enclosing
+  class`. The hold `private method is not supported before slice 8` is gone
+  (`story:private-names-and-private-methods`).
+
+- Host object overrides, a story of the ninth slice: a host object may carry an override
+  table, `Overrides<H>`, with one optional function per essential internal method. An
+  override's answer, and an answer of the object's record where the table leaves an override
+  out, is checked against the invariants of ECMA-262 6.1.7.3, read as facts of the object's
+  own earlier answers; a broken invariant ends the run in `Terminated(EngineFault)`. "Host
+  interface" below names the surface and the one breaking change, `HostObjectSpec`
+  (`story:host-object-overrides`).
+
+- Class static blocks (`#sec-class-definitions`, ClassStaticBlock;
+  `#sec-runtime-semantics-classstaticblockdefinitionevaluation`): each block is a function of its
+  own, made as a method with home object F and called with `this` F at its place among the static
+  elements, in source order with the runs of static fields, after every method and computed key.
+  The block has a `var` scope of its own (its `var`, `let`, `const` and function declarations are
+  not visible outside it or in the next block), `new.target` is `undefined`, `super.x` reads
+  through F, `await` is reserved in it and is a binding name in a function inside it; a throw
+  from a block ends the class's definition with the class's own outer binding uninitialized. A
+  direct `eval` in a block runs with inFunction and inMethod set and inClassFieldInitializer and
+  inDerivedConstructor clear: `eval("arguments")` is the block's own arguments object (made only
+  when the block's code has a direct `eval`), `super()` in the eval code is a `SyntaxError`. The
+  block runs as a frame of the run loop (`Call(0)`), so the step budget, the interrupt and the
+  frame depth reach it. No instruction is added. The refusal `class static block is not supported
+  before slice 8` is gone (`story:class-static-blocks`).
+
+- `Map.prototype.getOrInsert`, `Map.prototype.getOrInsertComputed` and `Map.groupBy`, a story
+  of the ninth slice (`story:map-upsert-and-group-by`), the group `builtins/map/upsert.rs`.
+  `getOrInsert` answers the value of a key the Map holds and appends the entry otherwise;
+  `getOrInsertComputed` checks that its callback is callable before the lookup, calls it only
+  for a missing key, with the key after CanonicalizeKeyedCollectionKey (`+0` for `-0`), and
+  stores its answer with one insertion of the entry table, so a key the callback set keeps its
+  place and takes the answer, with no second entry. A present key whose value is `undefined`
+  is found by both. `Map.groupBy` runs the loop of GroupBy that `Object.groupBy` runs, now with
+  the keyCoercion collection beside property: keys compared by SameValueZero (`-0` and `+0` one
+  group, every NaN one group, objects by identity), the result Map made and kept before the
+  first element is read, each group's Array stored in its table when its key first appears.
+  One step per element before the callback; the table and each group's Array charged to the
+  memory budget (a run with one growing group and a run with a new group per element both end
+  at the budget; that the table is charged before it grows is held by reading
+  `object/keyed_entries.rs`, not by a test); the callbacks and `next` counted against the
+  depth bounds; an abrupt callback closes the iterator. The messages of the shared steps name
+  the method (`Map.groupBy called on undefined or null`, `Map.groupBy: the callback is not a
+  function`); those of `Object.groupBy` read as before. 15 tests in
+  `tests/builtins_map_upsert.rs` (14 with `collect-every-safe-point`).
 
 ### Changed
 
+- A character class outside `v` keeps its last answer together with the range of code
+  points around it that answer the same (`ClassSet::contains_around`, with
+  `swell_unicode::Property::contains_around` for the property tables). A run of characters
+  from one range costs one search instead of one per character. Steps, memory charges and
+  results are unchanged. On a sample of 37 of the 442 generated property-escape files of
+  test262, one worker: 52.7 s before, 49.2 to 49.6 s after.
+- The lane `slow` runs its collect mode in the profile `collect` (opt-level 1), except for
+  the tests that run on a bounded stack, the tests a macro writes and the library's unit
+  tests, which stay at opt-level 0. This covers `test-realm-sizes` and the full counts of
+  `slow-tests`. A stack test that the rule misses fails the run at opt-level 1 by itself:
+  that run sets `SWELL_NO_STACK_TESTS`, and `stack_with_room` and the new `stack_thread` of the
+  tests' support panic when it is set; the six direct `Builder::stack_size` calls of the
+  tests go through `stack_thread`. The lane builds the profile `collect` in the background
+  beside `slow-test262`, and ends that build when it ends. `taskfiles/realm-room-tests.awk`
+  gains `-v rule=stack` and reads more forms (a function nested in another, a function passed
+  by value, in an array or as a field's value, a path to another module or to the helpers,
+  every definition of a twice-defined name); the forms it does not read are listed at its
+  head. After the merge it prints 73 stack tests and 304 room tests of 1,644. The count line of
+  `slow-tests` counts what runs (a test compiled out of the collect build apart). The
+  workflow `slow` also starts on a change of `.cargo/collect-profile.toml`
+  (`story:realm-size-lane-within-its-share`).
+- The realm holds the three functions more: `heap_bytes()` after `create_realm` reads 394,751
+  bytes, before 393,818; `live_bytes()` 282,792, before 281,115 (the test
+  `realm_padding::a_padded_realm_holds_k_functions_more`, k = 0; at k = 200 645,964 and 428,053,
+  before 645,031 and 426,376). The reading of HOST-187 is 398,621 bytes, unchanged, its bound
+  `BINDINGS_REALM_HEAP_BYTES` (506,112) unchanged; `heap_bytes()` in `host_187` after the build
+  793,372 and 795,036 (792,439 and 794,103), after the scripts 799,499 in the default mode and
+  790,919 in the collect mode (798,566 and 789,986). `host_186` unchanged: a host function
+  512, a host object 208, with 4,096 bytes of data 4,624 and 4,304, 300 definitions 107,816.
+- The walk of `builtins_symbol_values` reads 347 places
+  (`crates/swell/tests/fixtures/realm_places.txt`), before 344, in 2 parts of 183 + 164
+  (181 + 163); no row of `WALK_EXPECTED` added (each of the three throws the `TypeError` of
+  RequireInternalSlot, RequireObjectCoercible or IsCallable before a Symbol is read).
+- The walk that calls every function of the realm with a Symbol in each place runs in 2
+  parts and reads the places of the functions from a committed file,
+  `crates/swell/tests/fixtures/realm_places.txt` (344 places), which the task
+  `realm-places-expected` writes. A place is in the part its line hashes to (FNV-1a, 64 bit),
+  so a function the realm gains moves no other place. Each part takes from the file the
+  places, calls and rows it owes and fails when it walked, called or met fewer. The test
+  `the_realm_places_file_equals_the_walk` makes the list again in the default mode at every
+  gate run and fails when the file differs, its two comment lines included; before the writer
+  writes, it reads every place back to its function and fails naming one that does not read
+  back. The cover test `the_parts_of_the_walk_cover_every_function_of_the_realm` holds the
+  file's form, the partition, no empty part, no part under half the mean, at most 8 parts and
+  the rows of `WALK_EXPECTED`, two of which (`Array.prototype.with` with the Symbol as
+  argument 2 or 3) carry the condition their clause tests, an index at least the length that
+  earlier calls left. The slowest part takes 0.022 CPU seconds alone in the default mode,
+  0.317 with a collection at every safe point and 0.672 there at the full count, against
+  0.069, 4.10 and 6.59 for the one walk before. The gate's steps `build`, `build-tests`, `test`
+  and `test-doc` read their flags and nextest arguments from `TEST_RUSTFLAGS` and
+  `TEST_NEXTEST_ARGS` of `taskfiles/realm-places.yml`, which the writer reads too, list both
+  in `gate-vars`, and fail with one line when either is empty or is not that file's value
+  (`story:realm-walk-in-parts-under-the-cpu-bound`).
+
+- The record of every object is 208 bytes, before 200: it holds the box of the object's
+  private elements (`private_elements`, empty for an object without one). Every reading that
+  counts objects rises by 8 bytes per object, over the readings of the next entry:
+  `heap_bytes()` after `create_realm` reads 393,818 bytes (389,722 without the field),
+  `live_bytes()` 281,115 (277,947); the reading of HOST-187 is 398,621 bytes (394,525), its
+  bound `BINDINGS_REALM_HEAP_BYTES` (506,112) unchanged; a host function reads 512 live bytes
+  (504) and a host object 208 (200), with 4,096 bytes of host data 4,624 (4,616) and 4,304
+  (4,296) (`host_186`, `host_187`). `JSON.parse` of 100,000 nested brackets, which returned
+  its result under a memory budget of 64 MiB, needs 66,304 KiB now
+  (`story:private-names-and-private-methods`).
+
+- A realm reads larger. The collector's workspace holds a head word per slot of every arena
+  besides the mark word and the room on the worklist, charged with the arenas' capacity
+  (`arena::slot_bytes`, one `u32` per slot more), and the realm holds the intrinsics added
+  since 0.12.0, among them `Reflect`, `Map`, `Set`, `WeakMap`, `WeakSet` and `Proxy`.
+  `heap_bytes()` after `create_realm` reads 389,722 bytes, 357,960 in 0.12.0; `live_bytes()`
+  277,947, before 237,374 (the test `realm_padding::a_padded_realm_holds_k_functions_more`
+  prints both, in the default mode). The reading of HOST-187, a realm with 300 host functions
+  and 40 host objects, is 394,525 bytes, before 386,781; its bound `BINDINGS_REALM_HEAP_BYTES`
+  (506,112) is unchanged (`story:weak-map-and-weak-set`).
+
+- A Proxy method called directly by a builtin no longer counts one re-entry more than code
+  that the builtin calls: the builtin's activation is that re-entry, as in
+  `Agent::enter_code`. `Object.keys` of a Proxy whose `ownKeys` trap recurses reaches
+  `reentry_depth`, where it stopped one level short
+  (`story:proxy-descriptor-prototype-and-extensibility-traps`).
+
+- The lane `slow` states its bound: `task slow` fails when it ran over 900 s or one of its
+  parts over 600 s, naming the part and its seconds (`slow-time-sum`); it also fails a lane
+  whose clock ran over 900 s, so a step without its own time line is bounded. `test-realm-sizes`
+  runs the tests that read the realm's room (by the rule of `taskfiles/realm-room-tests.awk`)
+  in the default mode and with a collection at every safe point at every size of
+  `REALM_SIZES`, on the builds `slow-tests` makes; it no longer builds the profile `collect`,
+  and it hands nextest its list of tests in a generated configuration file, so it runs at any
+  count of tests. `builtins_json_parse::parse_gives_back_its_charges_on_every_way_out` nests
+  200 levels in the collect mode without `SWELL_FULL_COUNTS` (2,000 with it and in the
+  default mode). The workflow `slow` starts on a change of `taskfiles/gate-time.yml`,
+  `taskfiles/realm-room-tests.awk` and `.config/nextest.toml` too
+  (`story:realm-size-lane-within-its-share`).
+- The lane `slow` prints the machine it runs on, `slow-runner: <n> cores, <cpu>, <memory>,
+  sh is <sh>`, right after its clock starts, so that two runs on the same code can be read
+  against their machines. The forge ran the lane on one code in 882.6 s and in 1,142.0 s.
+- The lane `slow` builds the stack tests' binary with their modules only:
+  `build-stack-profiles` passes `--cfg test_modules` and the modules of `STACK_MODULE_LIST`
+  (`taskfiles/stack-profiles.yml`) to the test target of `swell` through `cargo rustc`, so
+  the release and `stack-debug` builds compile `limits_scripts`, `eval_stack` and `support`
+  (9 tests) and not every test, and the library's release build stays the test262 runner's.
+  `test-stack-profiles` builds them first and runs them through cargo-nextest.
+  `stack-modules-check` refuses a stack test outside the listed modules and a test named
+  twice. The generator `taskfiles/test-main.sh` writes the module cfgs into `swell`'s
+  `tests/main.rs`, and `crates/swell/Cargo.toml` declares the cfg `test_modules`, so the lint
+  `unexpected_cfgs` still refuses a misspelled feature in a test module; every build of the
+  gate compiles every module, as before, and `gate-vars` fails when a caller's `RUSTFLAGS`
+  (or `CARGO_ENCODED_RUSTFLAGS`, `CARGO_BUILD_RUSTFLAGS`, `CARGO_TARGET_<triple>_RUSTFLAGS`)
+  names `test_modules`.
+- The tests over 2 CPU seconds alone in the lane's collect build (a collection at every safe
+  point, opt-level 0) run under that bound: smaller counts in collect mode for `host_133`, the
+  memory-budget fill of `termination`, five tests of Map and Set, two of async generators,
+  `for_await`, `property_index`, `tagged_templates` and two of `new_target`; with
+  `SWELL_FULL_COUNTS=1` four of them run their earlier count again, under 2.5 s. The surface
+  test of Map and Set is three tests, its random operations two tests over two seeds, the
+  re-entry through `super` four, the parse cases of `new.target` two; the `language` scripts
+  run in 47 parts, the 13 try-completion scripts each split by `break` and `continue`, and
+  `test-realm-sizes` no longer runs the parts, which read no room of the realm. Every smaller
+  count was shown red with the defect it tests planted. The collect runs of
+  `test-realm-sizes` went from 2,588 to 1,626 test-seconds on the build node (the sums of
+  cargo-nextest's JUnit files, measured at different loads)
+  (`story:realm-size-lane-within-its-share`).
+- `swell_syntax::parse_eval` and `parse_eval_with` take `context: impl Into<EvalContext>` in
+  place of `strict_caller: bool`: the new public `EvalContext` holds the caller's strictness
+  and PerformEval's four flags (`in_function`, `in_method`, `in_derived_constructor`,
+  `in_class_field_initializer`), and `EvalContext: From<bool>` keeps every call with a `bool`
+  compiling (`story:new-target-meta-property`).
 - Releases ship seven archives of the `swell` binary and `SHA256SUMS`: besides the five
   targets of 0.12.0, `.github/workflows/release-build.yml` builds `x86_64-unknown-linux-musl`
   and `aarch64-unknown-linux-musl`, static binaries that load no shared library; the glibc
@@ -167,8 +601,24 @@ Every number below comes from the gate, `task check`, on the released commit.
   group that holds it, an `expect` with a blank reason, and an attribute naming the lint in
   another crate of the workspace (`story:buffer-growth-outside-the-charged-list-is-listed`).
 
+- `Agent::run_builtin` picks one of four functions by the group of the builtin and makes one
+  call, where one match held the arms of every group. In the `stack-debug` profile a re-entry
+  through a builtin passes at most 736 bytes of dispatch (1,424 with the arms of `WeakMap`
+  and `WeakSet` in the one match), and the stack test through builtins needs 12,195,840 of
+  its 12,838,560 bytes at depth 1,000. In the release profile 27 of the 31 measured routes
+  are larger, by up to 1,184 bytes per re-entry; the largest takes 5,872 of the 14,336 bytes
+  promised per re-entry (measured on x86_64 with rustc 1.99.1).
+  `limits_scripts::min_stack_bytes_is_enough_through_builtins` runs a fifth route, `Math.max`
+  through a `valueOf`.
+
 ### Fixed
 
+- The lane's background build of the profile collect ends with the lane on the forge too:
+  the kills of its process group had two dashes after the signal, which the forge's `sh`
+  (dash) refuses, so `slow-collect-stop` and the build's watcher ended nothing there, and
+  the forge's `task check` went red on the planted script that holds it. A new static check
+  of the gate, `kill-check`, refuses that form in `Taskfile.yml`, `taskfiles/`, `tests/gate/`
+  and `.github/workflows/`.
 - `JSON.parse` frees the room of its stack of open values when the parse ends, before the
   reviver is called; before, that room stayed allocated, uncharged, while the reviver ran
   (found by the review of `story:buffer-growth-outside-the-charged-list-is-listed`).
@@ -190,6 +640,44 @@ Every number below comes from the gate, `task check`, on the released commit.
   not; two child processes print the same 1,000 values and the key order of an object of
   10,000 keys; 100,000 values are in [0, 1) with positive sign and 53 bits; a realm's stream
   is its creation index, not the order of calls.
+- `HOST-25` and `HOST-214` (slice 9) have tests:
+  `swell::determinism::host_25_key_order_does_not_depend_on_hash_key` and
+  `swell::determinism::host_214_two_processes_print_the_same_map_order`. A `Map` and a `Set`
+  give their keys in insertion order under every `hash_key`, and two child processes print
+  the same order (`story:map-and-set`).
+- `HOST-222` (slice 9): an override of a host object whose `Ok` or `Abrupt::Throw` value
+  holds a stale handle or a handle of another agent ends the run with
+  `Terminated(EngineFault)`. It was the start gate of `story:host-object-overrides`, which
+  holds it with a test.
+- `Overrides`: the override table of a host object, generic over the host type
+  (`Overrides<H>`), with one optional function per internal method:
+  `Overrides::get_prototype_of`, `Overrides::set_prototype_of`,
+  `Overrides::is_extensible`, `Overrides::prevent_extensions`, `Overrides::get_own_property`,
+  `Overrides::define_own_property`, `Overrides::has_property`, `Overrides::get`,
+  `Overrides::set`, `Overrides::delete` and `Overrides::own_property_keys`, as
+  `docs/design/host-interface.md` section 15 states them.
+  - Each override given runs in place of the ordinary method; each one left `None` runs the
+    ordinary one (HOST-114).
+  - An override call is one re-entry and spends a step.
+  - The handles of its answer are checked first (HOST-222). Then the answer is checked
+    against the invariants of the essential internal methods, read as facts of the object's
+    own earlier answers.
+  - An answer of the object's record, where the table leaves an override out, is checked
+    and recorded the same way: an answer is the object's, whoever gives it.
+  - A `has_property` false records nothing and faults only for a non-configurable property
+    (reported by `get_own_property`, or held by the record), extensible or not.
+  - A stale or foreign handle, a descriptor that is not complete (HOST-113), or a broken
+    invariant (HOST-112) ends the run in `Terminated(EngineFault)` and faults the agent.
+    Nothing is thrown to the script.
+  - A global object whose `define_own_property` refuses a property of clause 19 makes
+    `create_realm` answer `Throw` of a `TypeError` (HOST-41).
+- `HostObjectSpec` changed: it takes the host type, `HostObjectSpec<H>`, and has the field
+  `HostObjectSpec::overrides`, of type `Option<&'static Overrides<H>>`.
+- `new_host_object` takes `HostObjectSpec<H>`.
+- **Breaking**: `HostObjectSpec`. A host that names the type or writes a literal stops
+  compiling once. A literal names `overrides` (`overrides: None` for no table), and a type
+  position names the host type (`HostObjectSpec<MyHost>`).
+- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-222.
 
 ## [0.12.0] - 2026-11-25
 

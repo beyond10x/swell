@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T07:55:18Z",
+  "actor": "human:operator",
+  "artifact": "story:keyed-entry-table",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/keyed at 763d7bf6, build node, before the merge into wave/big-2",
+    "reference": "story filter: 78 tests run: 78 passed (default and collect-every-safe-point); task clippy exit 0; cargo fmt --check exit 0"
+  }
+}

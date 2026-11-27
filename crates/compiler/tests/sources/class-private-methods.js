@@ -1,0 +1,2 @@
+// sec-runtime-semantics-classdefinitionevaluation: the private record inside the class scope with a new Private Name per identifier, each private function stored in its slot at step 3, the static ones added to F at step 4, the others by pass 1 of the initializer; o.#m() calls with o as this, and a private reference is a target
+class C { #m() { return this.#a; } get #a() { return 1; } set #a(v) {} static #s() {} run(o) { o.#a = 2; o.#a += 1; return o.#m(); } static t() { return C.#s(); } }

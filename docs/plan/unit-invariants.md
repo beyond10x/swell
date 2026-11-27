@@ -41,9 +41,13 @@ report and does not work around it.
 - A number in a test, a comment or the report comes from a command's output on the pinned
   checkout; the report says which command.
 - Never write under `.engineering/`. No `aep plan artifact` write verb; reads are fine.
-- No `git commit`, `git add`, `git stash`, branch or worktree command. Changes are left in the
-  working tree; the coordinator commits. `Cargo.lock`, the root `Taskfile.yml`, `AGENTS.md` and
-  `README.md` are the coordinator's unless the brief assigns one.
+- A unit commits on its own branch, through the commit command its brief gives, and only
+  there. No `git stash`, `git reset`, `git checkout --`, push, merge, branch or worktree
+  command. `Cargo.lock`, the root `Taskfile.yml`, `AGENTS.md` and `README.md` are the
+  coordinator's unless the brief or the story's Writes line assigns one.
+- A change planted to see a test go red is made in a copy of the tree in the scratch
+  directory (an export of the files, not a second worktree) or reasoned from the code; tracked
+  files of the worktree are not edited for it. A copy is built only where the brief says so.
 - Nothing under `/tmp` or `/dev/shm`. Scratch output goes to `.out/` in the worktree or to the
   scratch directory the brief assigns.
 - The shell runs as `zsh -c … < /dev/null`: no heredoc into a command that reads standard

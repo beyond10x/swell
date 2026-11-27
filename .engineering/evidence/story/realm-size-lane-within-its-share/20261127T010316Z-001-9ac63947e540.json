@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T01:03:16Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/lanetests at d89192ea, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1389 passed and 1 skipped in both modes; lib 269 passed; clippy 0; fmt 0; test-stack-profiles: release 4 passed, stack-debug 3 passed and 1 failed (the red of wave/big-2 before the merge of impl/stackjoin, which the unit's base does not hold)"
+  }
+}

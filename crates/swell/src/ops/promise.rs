@@ -261,9 +261,10 @@ impl<H: Host> Agent<H> {
     fn executor_slots(&mut self, executor: ObjectRef) -> Completion<(Value, Value)> {
         match self.closure_slots(executor)? {
             Slots::Executor { resolve, reject } => Ok((*resolve, *reject)),
-            Slots::Resolving { .. } | Slots::Await { .. } | Slots::AsyncFromSync(_) => {
-                Err(self.fault())
-            }
+            Slots::Resolving { .. }
+            | Slots::Await { .. }
+            | Slots::AsyncFromSync(_)
+            | Slots::Revocable { .. } => Err(self.fault()),
         }
     }
 

@@ -1,7 +1,7 @@
 //! Testing and comparison operations (ECMA-262 7.2, `#sec-testing-and-comparison-operations`):
 //! IsCallable, IsConstructor, IsArray, SameValue, SameValueZero, IsLooselyEqual,
-//! IsStrictlyEqual and IsLessThan. No Proxy exists before slice 9 and no BigInt before slice 12,
-//! so the steps for them are not reached here. Written by `story:object-model-and-realms`.
+//! IsStrictlyEqual and IsLessThan. No BigInt exists before slice 12, so the steps for it are not
+//! reached here. Written by `story:object-model-and-realms`.
 //!
 //! Two Strings are compared in place, with no copy. Equality charges a step per code unit past
 //! [`FREE_CODE_UNITS`], IsLessThan a step per code unit of the shorter String, each before a
@@ -42,11 +42,21 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// IsArray (`#sec-isarray`).
+    /// IsArray (`#sec-isarray`): a Proxy answers IsArray of its [[ProxyTarget]] (step 3), a
+    /// revoked one a TypeError, in a loop with a step per Proxy.
     pub(crate) fn is_array(&mut self, value: Value) -> Completion<bool> {
-        match value {
-            Value::Object(object) => Ok(self.kind_of(object)? == KindTag::Array),
-            _ => Ok(false),
+        let Value::Object(mut object) = value else {
+            return Ok(false);
+        };
+        loop {
+            match self.kind_of(object)? {
+                KindTag::Array => return Ok(true),
+                KindTag::Proxy => {
+                    self.charge_steps(1)?;
+                    object = self.proxy_target(object)?;
+                }
+                _ => return Ok(false),
+            }
         }
     }
 
@@ -108,6 +118,23 @@ impl<H: Host> Agent<H> {
         match (x, y) {
             (Value::Number(x), Value::Number(y)) => Ok((x.is_nan() && y.is_nan()) || x == y),
             _ => self.same_value_non_number(x, y),
+        }
+    }
+
+    /// CanBeHeldWeakly (`#sec-canbeheldweakly`), `story:weak-map-and-weak-set`: an Object, or
+    /// a Symbol that is not in the GlobalSymbolRegistry (a well-known Symbol can be held
+    /// weakly). A Symbol whose record is gone is a broken invariant.
+    pub(crate) fn can_be_held_weakly(&mut self, value: Value) -> Completion<bool> {
+        match value {
+            // 1. If v is an Object, return true.
+            Value::Object(_) => Ok(true),
+            // 2. If v is a Symbol and KeyForSymbol(v) is undefined, return true.
+            Value::Symbol(symbol) => match self.heap.symbols.get(symbol.handle) {
+                Ok(record) => Ok(!record.registered),
+                Err(_) => Err(self.fault()),
+            },
+            // 3. Return false.
+            _ => Ok(false),
         }
     }
 

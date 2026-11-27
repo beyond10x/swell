@@ -11,11 +11,14 @@
 //! bindings: a function whose code contains one always makes it, its arguments object at least
 //! living there (decision 3, "Names", item 4).
 //!
-//! The fields a Function Environment Record adds, [[ThisValue]], [[ThisBindingStatus]],
-//! [[FunctionObject]] and [[NewTarget]], are held by the function's frame (`interp/frame.rs`):
-//! in slice 1 only the function's own code reads `this`, since arrow functions, `super` and
-//! `new.target`, which read them from an outer function's environment, come with slices 6 and 8.
-//! Those slices move them here when a nested function must reach them.
+//! The fields a Function Environment Record adds, [[ThisValue]], [[FunctionObject]] and
+//! [[NewTarget]], stay on the function's frame (`interp/frame.rs`: `this`, `function` and
+//! `new_target`) and in an arrow function's box (`ArrowContext`, `object/ecmascript_function.rs`),
+//! which takes the three from the frame that makes the arrow, so the arrow's frame and the
+//! frame of direct eval code in it answer GetThisEnvironment's values without a walk of the
+//! environments (`docs/design/engine.md`, decision 3, "`this` and `arguments` in an arrow
+//! function", items 4 and 5). A derived constructor's [[ThisBindingStatus]] is a hidden binding
+//! (item 6 of "Classes").
 
 use crate::env::SlotNames;
 use crate::heap::arena::Handle;

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T06:15:58Z",
+  "actor": "human:operator",
+  "artifact": "story:host-object-overrides",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/overrides at 2a91ce5b, build node, before the merge into wave/big-2",
+    "reference": "swell::main 1657 passed (default) and 1630 passed (collect-every-safe-point), 1 skipped each; swell lib 283 passed; task test-stack-profiles 7 passed in the profile release and 7 in stack-debug; task clippy and cargo fmt --all -- --check exit 0"
+  }
+}

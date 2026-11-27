@@ -343,7 +343,10 @@ impl<H: Host> Agent<H> {
                 activation,
                 suspension,
             } => (*activation, *suspension),
-            Slots::Resolving { .. } | Slots::Executor { .. } | Slots::AsyncFromSync(_) => {
+            Slots::Resolving { .. }
+            | Slots::Executor { .. }
+            | Slots::AsyncFromSync(_)
+            | Slots::Revocable { .. } => {
                 return Err(self.fault());
             }
         };

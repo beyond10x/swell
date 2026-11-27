@@ -1,0 +1,15 @@
+{
+  "at": "2026-11-27T09:54:45Z",
+  "actor": "human:operator",
+  "artifact": "review-result:adversary-keyed-pass-1",
+  "kind": "review-result",
+  "revision": 2,
+  "change": {
+    "change": "redaction",
+    "literal_sha256": "5bc5a3af7a8fdd8fb3f39c4b207ddc66feecf036fa9e8e7f838fc9b16fde7441",
+    "literal_chars": 35,
+    "replacement": "which the rules of this host forbid",
+    "count": 1,
+    "reason": "the name of a private instruction file; the repository names no private file"
+  }
+}

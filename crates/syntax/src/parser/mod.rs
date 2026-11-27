@@ -21,10 +21,12 @@
 //!
 //! The parser stops at its first error: a parse that fails has exactly one error.
 
+mod class;
 mod expression;
 mod function;
 mod statement;
 
+use crate::EvalContext;
 use crate::ast::{
     Ast, Child, Expr, ExprId, ExprNode, Function, FunctionId, NumberLiteral, RegExpLiteral, Span,
     Stmt, StmtId, StmtNode, StringLiteral, TemplateString,
@@ -52,6 +54,20 @@ pub(crate) struct Parsed {
     pub strict: bool,
     pub held: Option<SyntaxError>,
 }
+
+/// The constructs the parser holds ([`Parser::hold`]), one line each: the construct and the
+/// slice that brings it, in the order the stories of slice 8 add them (`docs/plan/waves.md`,
+/// "Slice 8, `classes`"). A source with one of them is parsed to its end, and when it has no
+/// grammar error and no early error its one error is the refusal `<construct> is not supported
+/// before slice <n>` of the first one it holds ([`Parser::held`]). A story that lifts a hold
+/// deletes its `hold` call and its line here in the same change. The test of the sources under
+/// `tests/sources/held/` reads this list to know which construct of a source is still held.
+/// `rustfmt` would join a short list on one line; it is skipped so each hold keeps its own.
+#[rustfmt::skip]
+pub const HOLDS: &[(&str, u32)] = &[
+    ("private field", 8),
+    ("private name in", 8),
+];
 
 pub(crate) struct Parser<'a, 'm> {
     /// The ledger of the parse, shared with the lexer, the walks after the parser and the
@@ -90,10 +106,44 @@ pub(crate) struct Parser<'a, 'm> {
     /// The [Await] of the code around each function whose parameters or body the parser is in,
     /// beside `outer_yields`, saved and put back with it; the growth charged first.
     outer_awaits: Vec<bool>,
+    /// Whether `new.target` stands at the current position (`#sec-scripts-static-semantics-early-errors`,
+    /// the rule on NewTarget, with PerformEval's `inFunction`, `#sec-performeval`): set in the
+    /// parameters and the body of every function that is not an arrow function, kept in an
+    /// arrow function from the code around it, and at the top of eval code set from the eval
+    /// context's `in_function`. Kept beside [Yield] and [Await] in the same way.
+    new_target: bool,
+    /// Whether `new.target` stood in the code around each function whose parameters or body the
+    /// parser is in, beside `outer_awaits`, saved and put back with it; the growth charged first.
+    outer_new_target: Vec<bool>,
+    /// Whether a SuperProperty stands at the current position
+    /// (`#sec-function-definitions-static-semantics-early-errors`,
+    /// `#sec-method-definitions-static-semantics-early-errors`,
+    /// `#sec-scripts-static-semantics-early-errors`): set by the parameters and body of a
+    /// MethodDefinition, and with a SuperCall by those of the constructor of a class with a
+    /// heritage, cleared by those of every other function that is not an arrow function; an
+    /// arrow function takes the answer of the code around it, and eval code the answer of its
+    /// context ([`parse_eval`]).
+    super_property: SuperProperty,
+    /// The constructor of a class with a heritage whose parameters and body the parser is about
+    /// to read (`parser/class.rs`): [`Parser::open_context`] takes it and gives that function
+    /// [`SuperProperty::DerivedConstructor`].
+    derived_constructor: Option<FunctionId>,
+    /// The `super_property` of the code around each function whose parameters or body the
+    /// parser is in, beside `outer_awaits`, saved and put back with it; the growth charged first.
+    outer_super_properties: Vec<SuperProperty>,
+    /// Whether the current position is code of a field initializer and of no function in it
+    /// (`parser/class.rs`): a class nested in the initializer, its heritage, its computed keys
+    /// and its own initializers included. A YieldExpression and an AwaitExpression, which the
+    /// [Yield] and [Await] around the class admit there by the grammar, are refused at their
+    /// first token. Kept beside [Await] in the same way, cleared by every function.
+    field_code: bool,
+    /// Whether the code around each function, field initializer and static block the parser is
+    /// in was code of a field initializer, beside `outer_awaits`, saved and put back with it;
+    /// the growth charged first.
+    outer_field_code: Vec<bool>,
     /// The refusal of a construct whose parse goes on, held back to the end of the parse, at the
-    /// first token of the first such construct of the source. No construct holds one: the last,
-    /// `yield*` in an async generator, parses and runs since
-    /// `story:yield-star-in-async-generators`. The parse answers it only when it ends without a
+    /// first token of the first such construct of the source ([`Parser::hold`]). The constructs
+    /// held are the lines of [`HOLDS`]. The parse answers it only when it ends without a
     /// grammar error and without an early error (`lib.rs`, `analyse_parsed`).
     held: Option<SyntaxError>,
     /// The operator stack of the binary expression parser, shared by its nested calls.
@@ -103,24 +153,67 @@ pub(crate) struct Parser<'a, 'm> {
     prefixes: Vec<(expression::Prefix, Span)>,
 }
 
+/// Where a SuperProperty (`super.name`, `super[expression]`, `#sec-super-keyword`) stands, as
+/// [`Parser::super_property`] answers it for the current position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SuperProperty {
+    /// The nearest function that is not an arrow function is no MethodDefinition, or there is
+    /// none: a SuperProperty is an early error.
+    Outside,
+    /// The nearest function that is not an arrow function is a MethodDefinition (an accessor, a
+    /// method, a generator, `async` or async generator method, a class's constructor, a field
+    /// initializer or a static block): a SuperProperty stands, a SuperCall is an early error.
+    Method,
+    /// The nearest function that is not an arrow function is the constructor of a class with a
+    /// heritage (`#sec-class-definitions-static-semantics-early-errors`, ClassElement :
+    /// MethodDefinition): a SuperProperty and a SuperCall stand. This is the SuperCall flag of
+    /// `story:derived-classes-and-super-call`, folded into the one flag, since a SuperCall
+    /// stands only where a SuperProperty does.
+    DerivedConstructor,
+}
+
+impl HeapBytes for SuperProperty {
+    fn heap_bytes(&self) -> usize {
+        0
+    }
+}
+
 /// Parses `source` as a `Script` with nesting limit `max`, charged to `m`.
 pub(crate) fn parse(source: &[u16], max: u32, m: &Meter<'_>) -> Result<Parsed, SyntaxError> {
-    parse_eval(source, max, false, m)
+    let parser = Parser::new(source, max, m);
+    parse_script_with(parser, false)
 }
 
 /// Parses `source` as a `Script` with nesting limit `max` for PerformEval (`#sec-performeval`,
-/// step 9, `ParseText(x, Script)`): the code is strict from its start when `strict` (a strict
-/// caller), and from its directive prologue on when that holds a Use Strict Directive.
+/// step 9, `ParseText(x, Script)`) in the eval context `context` (steps 6 and 7): the code is
+/// strict from its start when the caller is strict, and from its directive prologue on when
+/// that holds a Use Strict Directive; `new.target` stands at its top when `in_function` is set;
+/// a SuperProperty when `in_method` is set, and a SuperCall too when `in_derived_constructor`
+/// is (steps 7 to 11), so elsewhere `super` answers the early errors a script answers.
 /// [`Parsed::strict`] is whether the eval code is strict. Charged to `m`; after a stop of the
 /// meter the answer is an error the caller does not read.
 pub(crate) fn parse_eval(
     source: &[u16],
     max: u32,
-    strict: bool,
+    context: EvalContext,
     m: &Meter<'_>,
 ) -> Result<Parsed, SyntaxError> {
     let mut parser = Parser::new(source, max, m);
-    parser.strict = strict;
+    parser.strict = context.strict_caller;
+    parser.new_target = context.in_function;
+    parser.super_property = if context.in_derived_constructor {
+        SuperProperty::DerivedConstructor
+    } else if context.in_method {
+        SuperProperty::Method
+    } else {
+        SuperProperty::Outside
+    };
+    parse_script_with(parser, context.strict_caller)
+}
+
+/// The parse of a `Script` by `parser`, set up by [`parse`] or [`parse_eval`]: the code is strict
+/// when `strict` or when its directive prologue holds a Use Strict Directive.
+fn parse_script_with(mut parser: Parser<'_, '_>, strict: bool) -> Result<Parsed, SyntaxError> {
     match parser.script() {
         Ok((body, use_strict)) => Ok(Parsed {
             ast: parser.finish_parse(),
@@ -200,6 +293,7 @@ pub(crate) fn parse_dynamic_function(
     let mut alone = Parser::new(parameters, max, m);
     alone.yields = kind.yields();
     alone.awaits = kind.awaits();
+    alone.new_target = true;
     if alone.formal_parameters_text().is_err() {
         return Err(alone.into_error());
     }
@@ -217,6 +311,7 @@ pub(crate) fn parse_dynamic_function(
     let mut alone = Parser::new(&body_text, max, m);
     alone.yields = kind.yields();
     alone.awaits = kind.awaits();
+    alone.new_target = true;
     if alone.function_body_text().is_err() {
         return Err(alone.into_error());
     }
@@ -340,6 +435,13 @@ impl<'a, 'm> Parser<'a, 'm> {
             outer_yields: Vec::new(),
             awaits: false,
             outer_awaits: Vec::new(),
+            new_target: false,
+            outer_new_target: Vec::new(),
+            super_property: SuperProperty::Outside,
+            derived_constructor: None,
+            outer_super_properties: Vec::new(),
+            field_code: false,
+            outer_field_code: Vec::new(),
             held: None,
             operators: Vec::new(),
             prefixes: Vec::new(),
@@ -360,6 +462,9 @@ impl<'a, 'm> Parser<'a, 'm> {
         m.release(core::mem::take(&mut self.prefixes));
         m.release(core::mem::take(&mut self.outer_yields));
         m.release(core::mem::take(&mut self.outer_awaits));
+        m.release(core::mem::take(&mut self.outer_new_target));
+        m.release(core::mem::take(&mut self.outer_super_properties));
+        m.release(core::mem::take(&mut self.outer_field_code));
         m.credit(self.tok.kind.heap_bytes());
         self.tok.kind = TokenKind::Eof;
         if let Some(peeked) = self.peeked.take() {
@@ -421,12 +526,30 @@ impl<'a, 'm> Parser<'a, 'm> {
         ))
     }
 
+    /// Holds the refusal of `construct`, which slice `slice` brings, at `span` back to the end
+    /// of the parse, which goes on: the first hold of a parse is kept ([`Parser::held`]), and the
+    /// parse answers it only when it ends without a grammar error and without an early error.
+    /// Every construct held is a line of [`HOLDS`]; the story that lifts one deletes its call
+    /// and its line.
+    #[inline(never)]
+    fn hold(&mut self, construct: &str, slice: u32, span: Span) {
+        if self.held.is_none() {
+            self.held = Some(SyntaxError::refused(
+                construct,
+                slice,
+                span.line,
+                span.column,
+            ));
+        }
+    }
+
     #[inline(never)]
     fn unexpected<T>(&mut self) -> R<T> {
         let message = match &self.tok.kind {
             TokenKind::Eof => "unexpected end of input".to_string(),
             TokenKind::Name(n) => format!("unexpected token {n}"),
             TokenKind::Keyword(k) => format!("unexpected token {}", k.as_str()),
+            TokenKind::PrivateName(n) => format!("unexpected private name {n}"),
             TokenKind::Punct(p) => format!("unexpected token {}", p.as_str()),
             TokenKind::Number(n) => format!("unexpected number {}", n.text),
             TokenKind::String(_) => "unexpected string literal".to_string(),

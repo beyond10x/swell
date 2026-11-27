@@ -24,12 +24,12 @@
 //! binary search per table, a sequence by one binary search per table of sorted sequences, each
 //! comparison at most [`LONGEST_STRING`] code points; `RGI_Emoji` by the six tables it joins.
 
-use crate::in_ranges;
 use crate::simple_case_fold_equivalents;
 use crate::tables::{
     binary_properties, general_category, properties_of_strings, property_names, script,
     script_extensions,
 };
+use crate::{in_ranges, in_ranges_around};
 
 /// The largest code point.
 const MAX_CODE_POINT: u32 = 0x10FFFF;
@@ -115,6 +115,33 @@ fn extensions_of(c: u32) -> Option<&'static [u8]> {
     script_extensions::LISTS.get(start..start.saturating_add(usize::from(len)))
 }
 
+/// [`Property::contains_around`] of Script_Extensions with the script `index` at `c`: inside a
+/// row of `script_extensions::RANGES` the row's list answers for the whole row, and outside every
+/// row the script's ranges answer, cut to the gap between the rows beside `c`.
+fn extensions_around(index: u8, c: u32) -> (bool, u32, u32) {
+    let script = table(script::VALUES, index);
+    let rows = script_extensions::RANGES;
+    let at = rows.partition_point(|&(_, last, _, _)| last < c);
+    let next = rows.get(at);
+    if let Some(&(first, last, start, len)) = next.filter(|row| row.0 <= c) {
+        let start = usize::from(start);
+        return match script_extensions::LISTS.get(start..start.saturating_add(usize::from(len))) {
+            Some(list) => (list.binary_search(&index).is_ok(), first, last),
+            None => {
+                let (held, from, to) = in_ranges_around(script, c);
+                (held, from.max(first), to.min(last))
+            }
+        };
+    }
+    let gap_first = at
+        .checked_sub(1)
+        .and_then(|before| rows.get(before))
+        .map_or(0, |row| row.1.saturating_add(1));
+    let gap_last = next.map_or(u32::MAX, |row| row.0.saturating_sub(1));
+    let (held, from, to) = in_ranges_around(script, c);
+    (held, from.max(gap_first), to.min(gap_last))
+}
+
 impl Property {
     /// Whether the code point `c` has the property: a bounded number of binary searches (the
     /// module's head). Any `u32` may be asked; a value above U+10FFFF has none.
@@ -144,6 +171,48 @@ impl Property {
             Kind::Any => c <= MAX_CODE_POINT,
             Kind::Ascii => c <= 0x7F,
             Kind::Assigned => c <= MAX_CODE_POINT && !in_ranges(general_category::CN, c),
+        }
+    }
+
+    /// [`Property::contains`] of `c`, with an inclusive range `(first, last)` of code points
+    /// around `c`, `c` among them, every one of which has the same answer: the range of a table
+    /// that holds `c`, or the gap between two ranges, cut to where every table the answer reads
+    /// agrees. The binary searches of `contains`, each one ending in the range or the gap it
+    /// finds; a group of General_Category that holds `c` stops at the member that does. A
+    /// subject read in order is answered with one call per range it crosses (`swell-regexp`
+    /// keeps a class's last answer and its range).
+    pub fn contains_around(self, c: u32) -> (bool, u32, u32) {
+        match self.0 {
+            Kind::Categories(mask) => {
+                let (mut from, mut to) = (0, u32::MAX);
+                let mut bits = mask;
+                while bits != 0 {
+                    let index = bits.trailing_zeros();
+                    let ranges = general_category::VALUES
+                        .get(index as usize)
+                        .copied()
+                        .unwrap_or(&[]);
+                    let (held, first, last) = in_ranges_around(ranges, c);
+                    if held {
+                        return (true, first, last);
+                    }
+                    from = from.max(first);
+                    to = to.min(last);
+                    bits &= bits - 1;
+                }
+                (false, from, to)
+            }
+            Kind::Script(index) => in_ranges_around(table(script::VALUES, index), c),
+            Kind::Extensions(index) => extensions_around(index, c),
+            Kind::Binary(index) => in_ranges_around(table(binary_properties::VALUES, index), c),
+            Kind::Any if c <= MAX_CODE_POINT => (true, 0, MAX_CODE_POINT),
+            Kind::Ascii if c <= 0x7F => (true, 0, 0x7F),
+            Kind::Ascii if c <= MAX_CODE_POINT => (false, 0x80, MAX_CODE_POINT),
+            Kind::Assigned if c <= MAX_CODE_POINT => {
+                let (unassigned, first, last) = in_ranges_around(general_category::CN, c);
+                (!unassigned, first, last.min(MAX_CODE_POINT))
+            }
+            Kind::Any | Kind::Ascii | Kind::Assigned => (false, MAX_CODE_POINT + 1, u32::MAX),
         }
     }
 

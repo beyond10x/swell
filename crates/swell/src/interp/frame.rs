@@ -22,6 +22,8 @@ use alloc::vec::Vec;
 use swell_compiler::bytecode::{Handler, Instruction};
 
 use crate::env::NameReference;
+use crate::heap::PrivateNameRef;
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::object::property::Key;
@@ -78,11 +80,15 @@ impl Entry {
 /// What a local slot or a slot of a declarative record holds: a value, or the uninitialized
 /// state of a `let` or `const` binding before its declaration ran (`docs/design/engine.md`,
 /// decision 3, "Lexical bindings", item 2). A type of the engine that no host interface and no
-/// builtin receives; the same size as a [`Value`], so a slot costs what it cost before.
+/// builtin receives; the same size as a [`Value`], so a slot costs what it cost before. A slot of
+/// a private record holds a Private Name (`docs/design/engine.md`, "Private names", item 1),
+/// which is no value: read where a value is expected it is a logic error of the engine
+/// (section 13), which faults the agent.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SlotValue {
     Value(Value),
     Uninitialized,
+    PrivateName(PrivateNameRef),
 }
 
 impl SlotValue {
@@ -90,7 +96,16 @@ impl SlotValue {
     pub(crate) fn value(self) -> Option<Value> {
         match self {
             SlotValue::Value(value) => Some(value),
-            SlotValue::Uninitialized => None,
+            SlotValue::Uninitialized | SlotValue::PrivateName(_) => None,
+        }
+    }
+
+    /// Report what the slot holds to the collector: a value's handle or a Private Name.
+    pub(crate) fn trace(self, mark: &mut Mark) {
+        match self {
+            SlotValue::Value(value) => mark.value(value),
+            SlotValue::PrivateName(name) => mark.push(Item::PrivateName(name.handle)),
+            SlotValue::Uninitialized => {}
         }
     }
 }
@@ -100,12 +115,17 @@ impl SlotValue {
 /// `object` is `None` for the empty enumerator of `undefined` and `null`. `bytes` is what the
 /// list of keys was charged (0 for the empty enumerator): it is part of the frame's `charged`
 /// while the enumerator is on the operand stack, and credited when it leaves it
-/// (`Agent::truncate_stack`) or with the frame.
+/// (`Agent::truncate_stack`) or with the frame. `chain` is the chain of objects the walk went
+/// through when it met a Proxy, which the loop reads instead of asking [[GetPrototypeOf]] again
+/// (each object of the chain is asked for its prototype once, by the walk), traced with the
+/// enumerator; its charge is its own and is credited when it drops, with the entry or with the
+/// frame (a generator's frame with the generator). Empty for a chain without a Proxy.
 pub(crate) struct Enumerator {
     pub(crate) object: Option<ObjectRef>,
     pub(crate) keys: Vec<Key>,
     pub(crate) next: usize,
     pub(crate) bytes: u64,
+    pub(crate) chain: ChargedVec<ObjectRef>,
 }
 
 /// One ECMAScript code execution context.
@@ -138,8 +158,17 @@ pub(crate) struct Frame {
     pub(crate) pushed_envs: u32,
     /// The `this` binding (ResolveThisBinding, `#sec-resolvethisbinding`).
     pub(crate) this: Value,
-    /// The Function component: the callee, `None` for a script.
+    /// The function GetThisEnvironment answers (`#sec-getthisenvironment`, [[FunctionObject]]):
+    /// the callee; for an arrow function the function its box kept, that of the code that made
+    /// it (`docs/design/engine.md`, decision 3, "`this` and `arguments` in an arrow function",
+    /// item 4); for direct eval code the caller frame's (item 5); `None` for a script, an
+    /// indirect eval's code and an arrow made outside function code.
     pub(crate) function: Option<ObjectRef>,
+    /// [[NewTarget]] (`#sec-function-environment-records`, GetNewTarget `#sec-getnewtarget`):
+    /// the NewTarget of a [[Construct]], set before the code runs and never changed; for an
+    /// arrow function the value its box kept, for direct eval code the caller frame's; `None`
+    /// (`undefined`) for every other frame.
+    pub(crate) new_target: Option<ObjectRef>,
     /// The Realm component.
     pub(crate) realm: Handle,
     /// The ScriptOrModule component.
@@ -148,11 +177,27 @@ pub(crate) struct Frame {
     pub(crate) strict: bool,
     /// The completion value register of a script.
     pub(crate) completion: Value,
-    /// For a [[Construct]], the `this` object the call answers when its code returns no object.
-    pub(crate) constructed: Option<ObjectRef>,
+    /// Which [[Construct]] the frame runs, if any ("Classes", item 8, `docs/design/engine.md`),
+    /// which decides what its return answers ([`Constructed`]).
+    pub(crate) constructed: Constructed,
     /// The bytes charged for the frame, the key lists of the enumerators and the Iterator
     /// Records on its operand stack, credited when it is popped.
     pub(crate) charged: u64,
+}
+
+/// Which [[Construct]] a frame runs (`#sec-ecmascript-function-objects-construct-argumentslist-newtarget`;
+/// `docs/design/engine.md`, "Classes", item 8), as large as an `Option<ObjectRef>`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Constructed {
+    /// A call, eval code or a script: the return answers its value.
+    None,
+    /// The [[Construct]] of a base constructor, with the `this` object made for it: a return
+    /// with no object answers that object (step 10).
+    Base(ObjectRef),
+    /// The [[Construct]] of a derived constructor, which made no object: its `this` is the
+    /// binding of its code, which `KeepThis` copies into the frame's `this` before a return;
+    /// the return answers by steps 10 to 12 (`Agent::derived_result`).
+    Derived,
 }
 
 /// The bytes a frame charges besides its locals and its operand stack.
@@ -206,6 +251,9 @@ impl Frame {
                     for key in &enumerator.keys {
                         key.trace(mark);
                     }
+                    for &object in &enumerator.chain {
+                        mark.object(object);
+                    }
                 }
                 Entry::Iterator(record) => {
                     mark.object(record.iterator);
@@ -216,8 +264,8 @@ impl Frame {
                 Entry::Reference(_) | Entry::Tag(_) => {}
             }
         }
-        for value in self.locals.iter().filter_map(|slot| slot.value()) {
-            mark.value(value);
+        for slot in &self.locals {
+            slot.trace(mark);
         }
         if let Some(env) = self.env {
             mark.push(Item::Environment(env));
@@ -229,10 +277,13 @@ impl Frame {
         if let Some(function) = self.function {
             mark.object(function);
         }
+        if let Some(new_target) = self.new_target {
+            mark.object(new_target);
+        }
         mark.push(Item::Realm(self.realm));
         mark.push(Item::Script(self.script));
         mark.value(self.completion);
-        if let Some(object) = self.constructed {
+        if let Constructed::Base(object) = self.constructed {
             mark.object(object);
         }
     }
@@ -249,5 +300,15 @@ mod tests {
     fn a_slot_is_as_large_as_a_value() {
         assert_eq!(size_of::<SlotValue>(), size_of::<Value>());
         assert_eq!(size_of::<SlotValue>(), 16);
+    }
+
+    /// "Classes", item 8: the three states of a frame's `constructed` (no [[Construct]], the
+    /// object of a base constructor, a derived constructor) take the room of an
+    /// `Option<ObjectRef>`, so `frame_bytes()` does not grow.
+    #[test]
+    fn constructed_is_as_large_as_an_option_of_an_object() {
+        use super::Constructed;
+        use crate::value::ObjectRef;
+        assert_eq!(size_of::<Constructed>(), size_of::<Option<ObjectRef>>());
     }
 }

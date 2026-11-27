@@ -554,13 +554,32 @@ fn a_frame_suspended_in_an_async_generator_is_charged_until_its_object_is_freed(
 
 /// The requests of [`host_206_requests_are_charged_until_the_generator_is_freed_and_bounded_by_the_memory_budget`]
 /// and [`settling_a_request_credits_nothing_until_the_generator_is_freed`]: 1,000, HOST-206's
-/// count; 100 with the feature `collect-every-safe-point`, where every safe point collects the
-/// whole heap, which grows with each request (at 1,000 the second test passed 60 s there).
+/// count; 40 with the feature `collect-every-safe-point`, where every safe point collects the
+/// whole heap, which grows with each request (at 1,000 the second test passed 60 s there; at 100
+/// HOST-206 took 2.5 s and the second test 2.2 s alone in the test profile, opt-level 0, on
+/// 2026-11-27, with a [`QUEUE_ROOM`] of 64 KiB).
 const REQUESTS: u64 = if cfg!(feature = "collect-every-safe-point") {
-    100
+    40
 } else {
     1_000
 };
+
+/// Whether the lane `slow` asks for the full count (`SWELL_FULL_COUNTS=1`).
+fn full_counts() -> bool {
+    std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+}
+
+/// The requests of [`settling_a_request_credits_nothing_until_the_generator_is_freed`]:
+/// [`REQUESTS`], and 100 with the feature `collect-every-safe-point` in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`), the count that took 2.2 s alone there. HOST-206 keeps
+/// [`REQUESTS`] in that lane too: its 100 took 2.5 s alone.
+fn settling_requests() -> u64 {
+    if cfg!(feature = "collect-every-safe-point") && full_counts() {
+        100
+    } else {
+        REQUESTS
+    }
+}
 
 /// The bytes HOST-206 states per request.
 const PER_REQUEST: u64 = 64;
@@ -625,13 +644,15 @@ fn host_206_requests_are_charged_until_the_generator_is_freed_and_bounded_by_the
 }
 
 /// "Async generators on suspended frames", item 2: settling a request credits nothing. A
-/// generator with [`REQUESTS`] requests queued at an `await` completes and drains them all; with
-/// the promises released and the generator still held, a `collect()` keeps the queue's capacity
-/// charged, which the `collect()` after the script drops the generator gives back: at least
-/// [`REQUESTS`] times [`REQUEST_BYTES`]. Both readings are `heap_bytes()` after a `collect()`,
-/// whose arenas keep their capacity, so their difference is what the freed records owned.
+/// generator with [`settling_requests`] requests queued at an `await` completes and drains them
+/// all; with the promises released and the generator still held, a `collect()` keeps the
+/// queue's capacity charged, which the `collect()` after the script drops the generator gives
+/// back: at least the requests times [`REQUEST_BYTES`]. Both readings are `heap_bytes()` after
+/// a `collect()`, whose arenas keep their capacity, so their difference is what the freed
+/// records owned.
 #[test]
 fn settling_a_request_credits_nothing_until_the_generator_is_freed() {
+    let requests = settling_requests();
     let (mut agent, realm) = new_agent(limits());
     run(
         &mut agent,
@@ -639,24 +660,24 @@ fn settling_a_request_credits_nothing_until_the_generator_is_freed() {
         &format!(
             "var resolveP, settled = 0;\n\
              var it = (async function* () {{ await new Promise(function (r) {{ resolveP = r; }}); }})();\n\
-             for (var i = 0; i < {REQUESTS}; i++) it.next().then(function () {{ settled++; }});\n\
+             for (var i = 0; i < {requests}; i++) it.next().then(function () {{ settled++; }});\n\
              0;"
         ),
     );
     run(&mut agent, &realm, "resolveP(); resolveP = null; 0;");
     normal(&mut agent);
-    assert_eq!(text(&mut agent, &realm, "settled"), REQUESTS.to_string());
+    assert_eq!(text(&mut agent, &realm, "settled"), requests.to_string());
     let drop_it = parse(&mut agent, &realm, "it = null; 0;");
     let held = collected(&mut agent);
     run_parsed(&mut agent, &drop_it);
     let freed = collected(&mut agent);
     println!(
         "heap_bytes: {held} with the requests settled, {freed} once the generator is freed \
-         (-{}); {REQUESTS} x {REQUEST_BYTES}",
+         (-{}); {requests} x {REQUEST_BYTES}",
         held.saturating_sub(freed)
     );
     assert!(
-        held.saturating_sub(freed) >= REQUESTS * REQUEST_BYTES,
+        held.saturating_sub(freed) >= requests * REQUEST_BYTES,
         "{held} -> {freed}"
     );
 }
@@ -901,20 +922,32 @@ const QUEUE_BUDGET: u64 = if cfg!(feature = "collect-every-safe-point") {
 };
 
 /// The room of the memory rounds of [`a_script_that_queues_requests_without_end_ends_at_a_budget`]
-/// and of HOST-206 above the reading of a fresh realm: 256 KiB; 64 KiB with the feature
-/// `collect-every-safe-point`.
+/// and of HOST-206 above the reading of a fresh realm: 256 KiB; 16 KiB with the feature
+/// `collect-every-safe-point`, where every request of the loop that fills it collects the heap.
 const QUEUE_ROOM: u64 = if cfg!(feature = "collect-every-safe-point") {
-    64 * 1024
+    16 * 1024
 } else {
     256 * 1024
 };
+
+/// The room of the memory round of [`a_script_that_queues_requests_without_end_ends_at_a_budget`]:
+/// [`QUEUE_ROOM`], and 64 KiB with the feature `collect-every-safe-point` in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`), the room the test had there before 2026-11-27 (1.5 s alone in the
+/// test profile, opt-level 0). HOST-206 keeps [`QUEUE_ROOM`] in that lane too.
+fn loop_room() -> u64 {
+    if cfg!(feature = "collect-every-safe-point") && full_counts() {
+        64 * 1024
+    } else {
+        QUEUE_ROOM
+    }
+}
 
 /// "Async generators on suspended frames", item 2: `for (;;) g.next();` on a generator suspended
 /// at an `await` that never settles ends at a budget. With `steps_per_entry` [`QUEUE_BUDGET`]
 /// the script answers `Terminated(StepBudget)` and `last_entry_steps()` reads at most the
 /// budget; once the script releases the generator, one `collect()` brings `heap_bytes()` back to
 /// the reading before the script (the second of two rounds, so that the arenas grew in the
-/// first). With a memory budget of [`QUEUE_ROOM`] over a realm and steps to spare the requests
+/// first). With a memory budget of [`loop_room`] over a realm and steps to spare the requests
 /// reach the memory budget first: `Terminated(MemoryBudget)`. The test prints the readings.
 #[test]
 fn a_script_that_queues_requests_without_end_ends_at_a_budget() {
@@ -946,7 +979,7 @@ fn a_script_that_queues_requests_without_end_ends_at_a_budget() {
     assert!(held > before, "{readings:?}");
     assert!(after <= before, "{readings:?}");
 
-    let (mut agent, realm) = memory_agent(QUEUE_ROOM, 1_000_000_000);
+    let (mut agent, realm) = memory_agent(loop_room(), 1_000_000_000);
     assert_eq!(
         eval_text(
             &mut agent,

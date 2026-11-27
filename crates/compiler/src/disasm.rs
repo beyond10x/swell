@@ -7,7 +7,7 @@
 //!   lexical let|const "<name>"[ local <n>|env <n>] ...   the top level's lexical names
 //!   template <k> "<cooked>"|undefined ... raw "<raw>" ...   each tagged template site
 //!   <index> <line>:<column> <instruction> <operands>
-//!   catch|finally <start>..<end> -> <target> items <n> envs <n>
+//!   catch|finally|pattern <start>..<end> -> <target> items <n> envs <n>[ strict]
 //!
 //! function <i> <kind> "<name>" length <n> locals <n>[ strict][ self][ eval-environment]
 //!         [ binds-parameters][ parameter-environment]
@@ -94,6 +94,7 @@ pub fn disassemble(code: &Code) -> String {
         &code.instructions,
         &code.positions,
         &code.handlers,
+        code.strict,
     );
     for (i, f) in code.functions.iter().enumerate() {
         let kind = match f.kind {
@@ -103,6 +104,9 @@ pub fn disassemble(code: &Code) -> String {
             FunctionKind::Setter => "setter",
             FunctionKind::Method => "method",
             FunctionKind::Arrow => "arrow",
+            FunctionKind::ClassConstructor => "class constructor",
+            FunctionKind::FieldInitializer => "field initializer",
+            FunctionKind::StaticBlock => "static block",
         };
         let _ = write!(
             out,
@@ -160,6 +164,7 @@ pub fn disassemble(code: &Code) -> String {
             &f.instructions,
             &f.positions,
             &f.handlers,
+            f.strict,
         );
     }
     out
@@ -180,6 +185,7 @@ fn body(
     instructions: &[Instruction],
     positions: &[Span],
     handlers: &[Handler],
+    strict: bool,
 ) {
     for (i, instruction) in instructions.iter().enumerate() {
         let span = positions.get(i).copied().unwrap_or_default();
@@ -197,9 +203,16 @@ fn body(
             HandlerKind::Finally => "finally",
             HandlerKind::Pattern => "pattern",
         };
+        // A handler's strictness is written only where it differs from its code's: inside
+        // the code of a class in non-strict code.
+        let mark = match (h.strict, strict) {
+            (true, false) => " strict",
+            (false, true) => " non-strict",
+            _ => "",
+        };
         let _ = writeln!(
             out,
-            "  {kind} {:04}..{:04} -> {:04} items {} envs {}",
+            "  {kind} {:04}..{:04} -> {:04} items {} envs {}{mark}",
             h.start, h.end, h.target, h.items, h.envs
         );
     }
@@ -267,6 +280,16 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::SetLocal(n) => format!("SetLocal {n}"),
         I::GetEnv { hops, slot } => format!("GetEnv {hops} {slot}"),
         I::SetEnv { hops, slot } => format!("SetEnv {hops} {slot}"),
+        I::GetPrivate { hops, slot } => format!("GetPrivate {hops} {slot}"),
+        I::SetPrivate { hops, slot } => format!("SetPrivate {hops} {slot}"),
+        I::AddPrivateMethod {
+            hops,
+            slot,
+            function_hops,
+            function_slot,
+            room,
+        } => format!("AddPrivateMethod {hops} {slot} {function_hops} {function_slot} room {room}"),
+        I::NewPrivateName { slot, name } => format!("NewPrivateName {slot} {}", s(name)),
         I::AssignImmutable(k) => format!("AssignImmutable {}", s(k)),
         I::GetGlobal(k) => format!("GetGlobal {}", s(k)),
         I::ResolveGlobal(k) => format!("ResolveGlobal {}", s(k)),
@@ -284,15 +307,35 @@ fn text(code: &Code, scopes: &[Vec<SlotName>], instruction: &Instruction) -> Str
         I::GetNamed(k) => format!("GetNamed {}", s(k)),
         I::PutNamed(k) => format!("PutNamed {}", s(k)),
         I::DeleteNamed(k) => format!("DeleteNamed {}", s(k)),
+        I::GetSuperNamed(k) => format!("GetSuperNamed {}", s(k)),
+        I::PutSuperNamed(k) => format!("PutSuperNamed {}", s(k)),
         I::DefineField(k) => format!("DefineField {}", s(k)),
         I::DefineGetter(k) => format!("DefineGetter {}", s(k)),
         I::DefineSetter(k) => format!("DefineSetter {}", s(k)),
         I::DefineMethod(k) => format!("DefineMethod {}", s(k)),
+        I::MakeClassConstructor { function, derived } => {
+            let kind = if derived { "derived" } else { "base" };
+            format!("MakeClassConstructor {function} {kind}")
+        }
+        I::DefineClassMethod(k) => format!("DefineClassMethod {}", s(k)),
+        I::DefineClassGetter(k) => format!("DefineClassGetter {}", s(k)),
+        I::DefineClassSetter(k) => format!("DefineClassSetter {}", s(k)),
+        I::StoreInitializer(f) => format!("StoreInitializer {f}"),
+        I::SetStrict(strict) => format!("SetStrict {strict}"),
+        I::MakeMethod(f) => format!("MakeMethod {f}"),
         I::DefineIndex(n) => format!("DefineIndex {n}"),
         I::ArrayLength(n) => format!("ArrayLength {n}"),
         I::Call(n) => format!("Call {n}"),
         I::CallEval(n) => format!("CallEval {n}"),
         I::New(n) => format!("New {n}"),
+        I::SuperCall(n) => format!("SuperCall {n}"),
+        I::SuperCallKept(n) => format!("SuperCallKept {n}"),
+        I::BindThis(n) => format!("BindThis {n}"),
+        I::BindThisEnv { hops, slot } => format!("BindThisEnv {hops} {slot}"),
+        I::BindThisName(k) => format!("BindThisName {}", s(k)),
+        I::KeepThis(n) => format!("KeepThis {n}"),
+        I::KeepThisEnv { hops, slot } => format!("KeepThisEnv {hops} {slot}"),
+        I::UninitializeEnv { hops, slot } => format!("UninitializeEnv {hops} {slot}"),
         I::Jump(t) => format!("Jump {t:04}"),
         I::JumpIfTrue(t) => format!("JumpIfTrue {t:04}"),
         I::JumpIfFalse(t) => format!("JumpIfFalse {t:04}"),

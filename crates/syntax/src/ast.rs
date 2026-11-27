@@ -9,6 +9,7 @@
 //! Every node records its source position.
 
 use crate::ledger::HeapBytes;
+use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -153,6 +154,17 @@ pub enum PropertyKey {
     /// A ComputedPropertyName `[ AssignmentExpression ]` (`#sec-object-initializer`): the
     /// expression, evaluated and converted by ToPropertyKey (`#sec-topropertykey`) where the
     /// property is defined or read.
+    Computed(ExprId),
+}
+
+/// The property of a [`Expr::SuperMember`] (`#sec-super-keyword`): `super . IdentifierName` or
+/// `super [ Expression ]`, whose value is converted by ToPropertyKey where the reference is read
+/// or written.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SuperKey {
+    /// An `IdentifierName`, reserved words included.
+    Name(String),
+    /// The `Expression` of `super [ Expression ]`.
     Computed(ExprId),
 }
 
@@ -301,6 +313,9 @@ impl BindingTarget {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
     This,
+    /// `new.target`, the MetaProperty NewTarget (`#sec-meta-properties`): only where a function
+    /// that is not an arrow function encloses it, or in eval code whose context admits it.
+    NewTarget,
     /// An `IdentifierReference`.
     Identifier(String),
     Null,
@@ -312,6 +327,9 @@ pub enum Expr {
     Array(Vec<Option<ExprId>>),
     Object(Vec<Property>),
     Function(FunctionId),
+    /// A ClassExpression (`#sec-class-definitions`), its [`Class`] record boxed, so that an
+    /// expression node keeps its size.
+    Class(Box<Class>),
     Unary {
         op: UnaryOp,
         operand: ExprId,
@@ -357,6 +375,11 @@ pub enum Expr {
         callee: ExprId,
         arguments: Vec<ExprId>,
     },
+    /// A SuperProperty (`#sec-super-keyword`): `super.name` or `super[expression]`. It stands
+    /// only where the nearest function that is not an arrow function is a MethodDefinition.
+    SuperMember(SuperKey),
+    /// A SuperCall (`#sec-super-keyword`), `super(arguments)`, its arguments as a call's.
+    SuperCall(Vec<ExprId>),
     /// `new callee(arguments)`; `None` when the `Arguments` are absent (`new X`).
     New {
         callee: ExprId,
@@ -381,6 +404,20 @@ pub enum Expr {
     OptionalCall {
         callee: ExprId,
         arguments: Vec<ExprId>,
+    },
+    /// `object.#name` (`#sec-left-hand-side-expressions`, MemberExpression : MemberExpression .
+    /// PrivateIdentifier), or with `optional` the link `object?.#name` of an optional chain
+    /// (OptionalChain : ?. PrivateIdentifier). The name's StringValue keeps its `#`.
+    PrivateMember {
+        object: ExprId,
+        name: Name,
+        optional: bool,
+    },
+    /// `#name in right` (`#sec-relational-operators`, RelationalExpression : PrivateIdentifier
+    /// in ShiftExpression).
+    PrivateIn {
+        name: Name,
+        right: ExprId,
     },
     /// A `TemplateLiteral` without a tag (`#sec-template-literals`): its template strings in
     /// source order, one more than its substitutions, each `Expression` of a `${ }`.
@@ -598,6 +635,11 @@ pub enum Stmt {
     },
     Debugger,
     FunctionDeclaration(FunctionId),
+    /// A ClassDeclaration (`#sec-class-definitions`), its [`Class`] record boxed. It binds its
+    /// name as a `let` declaration does: a LexicallyDeclaredName of the statement list it stands
+    /// in, at the top of a body too (`#sec-block-static-semantics-lexicallydeclarednames`,
+    /// `#sec-scripts-static-semantics-lexicallydeclarednames`).
+    Class(Box<Class>),
     /// `LabelIdentifier : LabelledItem` (`#sec-labelled-statements`); the item is a statement.
     Labelled {
         label: Name,
@@ -636,6 +678,152 @@ pub enum FunctionKind {
     /// (`#sec-arrow-function-definitions-runtime-semantics-evaluatebody`). Its span runs from
     /// the first token of its parameters to the end of its body.
     Arrow,
+    /// The constructor of a class (`#sec-class-definitions`, ConstructorMethod): the written
+    /// `constructor` method, or the default one the parser makes when the class has none, with
+    /// no parameter and an empty body. Numbered at the class's `{`; its span is the class's,
+    /// since F's [[SourceText]] is the source text of the class (`docs/design/engine.md`,
+    /// section 3, "Classes", item 1).
+    ClassConstructor,
+    /// The initializers of one run of fields of a class, read as one body, the function's own
+    /// code (item 1 and item 4 of "Classes"); numbered at the first token of its first field.
+    FieldInitializer,
+    /// A ClassStaticBlock (`#sec-class-definitions`).
+    StaticBlock,
+}
+
+/// A ClassDeclaration or a ClassExpression (`#sec-class-definitions`), the record of
+/// `docs/design/engine.md`, section 3, "Classes", item 1. All of it is strict mode code
+/// (`#sec-strict-mode-code`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Class {
+    /// The BindingIdentifier; a declaration always has one.
+    pub name: Option<Name>,
+    /// The LeftHandSideExpression of the ClassHeritage, `extends` and it.
+    pub heritage: Option<ExprId>,
+    /// The constructor, a function of kind [`FunctionKind::ClassConstructor`]: the written one
+    /// or the default one.
+    pub constructor: FunctionId,
+    /// Whether `constructor` is the default one the parser made (ClassDefinitionEvaluation,
+    /// step 14: ConstructorMethod of the ClassBody is empty): of a class with a heritage it
+    /// passes its arguments to the parent as they are, which a written one cannot say.
+    pub default_constructor: bool,
+    /// The ClassElements but the constructor and the empty ones (`;`), in source order.
+    pub elements: Vec<ClassElement>,
+    /// The initializer of the instance elements (`docs/design/engine.md`, section 3, "Classes",
+    /// item 4), a function of kind [`FunctionKind::FieldInitializer`] whose body holds the
+    /// initializers of the fields that are not static, each an expression statement, in source
+    /// order; present when the class has a field or a private method that is not static, and
+    /// numbered at the first token of the first such element.
+    pub instance_elements: Option<FunctionId>,
+    /// From `class` to the `}` of the body.
+    pub span: Span,
+}
+
+/// The name of a class element, a `ClassElementName`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClassKey {
+    /// A literal PropertyName: an IdentifierName, a string or a number, never
+    /// [`PropertyKey::Computed`].
+    Literal(PropertyKey),
+    /// A ComputedPropertyName, `[ AssignmentExpression ]`, evaluated and converted by
+    /// ToPropertyKey as the class is defined.
+    Computed(ExprId),
+    /// A PrivateIdentifier, `#` and its name (`#sec-private-names`).
+    Private(Name),
+}
+
+/// A ClassElement other than the constructor and `;` (`#sec-class-definitions`), with its span
+/// from its first token (`static` included) to its last.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClassElement {
+    /// A MethodDefinition: its name and its function, whose kind is `kind`,
+    /// [`FunctionKind::Method`] (a generator, `async` or async generator method by the
+    /// function's flags), [`FunctionKind::Getter`] or [`FunctionKind::Setter`].
+    Method {
+        is_static: bool,
+        key: ClassKey,
+        kind: FunctionKind,
+        function: FunctionId,
+        span: Span,
+    },
+    /// A FieldDefinition: its name and its Initializer, if any, which is code of `function`,
+    /// the function of kind [`FunctionKind::FieldInitializer`] of its run of fields: for a
+    /// static field the run of consecutive static fields it belongs to, numbered at the first
+    /// token of the run's first field; for any other field [`Class::instance_elements`]. The
+    /// function's body holds the initializer as an expression statement.
+    Field {
+        is_static: bool,
+        key: ClassKey,
+        initializer: Option<ExprId>,
+        function: FunctionId,
+        span: Span,
+    },
+    /// A ClassStaticBlock, its function of kind [`FunctionKind::StaticBlock`].
+    StaticBlock { function: FunctionId, span: Span },
+}
+
+impl Class {
+    /// Calls `f` on each child of the class: the heritage, the constructor, then each
+    /// element's computed name and function, in the order of their numbers. A field's
+    /// initializer is code of its run's function, which is visited once, after the computed
+    /// name of the run's first field; the instance elements' function is visited at the first
+    /// element that is not static and is a field or a private method, before its function.
+    pub(crate) fn children(&self, f: &mut dyn FnMut(Child)) {
+        if let Some(e) = self.heritage {
+            f(Child::Expr(e));
+        }
+        f(Child::Function(self.constructor));
+        let mut instance = self.instance_elements;
+        let mut run = None;
+        for element in &self.elements {
+            match element {
+                ClassElement::Method {
+                    is_static,
+                    key,
+                    function,
+                    ..
+                } => {
+                    if let ClassKey::Computed(e) = key {
+                        f(Child::Expr(*e));
+                    }
+                    if !is_static
+                        && matches!(key, ClassKey::Private(_))
+                        && let Some(id) = instance.take()
+                    {
+                        f(Child::Function(id));
+                    }
+                    f(Child::Function(*function));
+                }
+                ClassElement::Field {
+                    is_static,
+                    key,
+                    function,
+                    ..
+                } => {
+                    if let ClassKey::Computed(e) = key {
+                        f(Child::Expr(*e));
+                    }
+                    let first = if *is_static {
+                        run != Some(*function)
+                    } else {
+                        instance.take().is_some()
+                    };
+                    if first {
+                        f(Child::Function(*function));
+                    }
+                }
+                ClassElement::StaticBlock { function, .. } => f(Child::Function(*function)),
+            }
+            run = match element {
+                ClassElement::Field {
+                    is_static: true,
+                    function,
+                    ..
+                } => Some(*function),
+                _ => None,
+            };
+        }
+    }
 }
 
 /// What scope analysis found for a function body or the script (`src/scope.rs`).
@@ -1013,6 +1201,7 @@ impl HeapBytes for Expr {
     fn heap_bytes(&self) -> usize {
         match self {
             Expr::This
+            | Expr::NewTarget
             | Expr::Null
             | Expr::Boolean(_)
             | Expr::Function(_)
@@ -1028,6 +1217,7 @@ impl HeapBytes for Expr {
             | Expr::Spread(_)
             | Expr::Yield { .. }
             | Expr::Await(_) => 0,
+            Expr::Class(class) => size_of::<Class>().saturating_add(class.heap_bytes()),
             Expr::Identifier(name) => name.heap_bytes(),
             Expr::Number(n) => n.heap_bytes(),
             Expr::String(s) => s.heap_bytes(),
@@ -1041,6 +1231,10 @@ impl HeapBytes for Expr {
             Expr::Call { arguments, .. } | Expr::OptionalCall { arguments, .. } => {
                 arguments.heap_bytes()
             }
+            Expr::SuperMember(SuperKey::Name(name)) => name.heap_bytes(),
+            Expr::SuperMember(SuperKey::Computed(_)) => 0,
+            Expr::SuperCall(arguments) => arguments.heap_bytes(),
+            Expr::PrivateMember { name, .. } | Expr::PrivateIn { name, .. } => name.heap_bytes(),
             Expr::New { arguments, .. } => arguments.heap_bytes(),
             Expr::Template {
                 strings,
@@ -1118,6 +1312,7 @@ impl HeapBytes for Stmt {
             | Stmt::Debugger
             | Stmt::FunctionDeclaration(_)
             | Stmt::With { .. } => 0,
+            Stmt::Class(class) => size_of::<Class>().saturating_add(class.heap_bytes()),
             Stmt::Block(body) => body.heap_bytes(),
             Stmt::Var(_, declarators) => declarators.heap_bytes(),
             Stmt::For { init, .. } => init.heap_bytes(),
@@ -1159,6 +1354,34 @@ impl HeapBytes for Scope {
     }
 }
 
+impl HeapBytes for ClassKey {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            ClassKey::Literal(key) => key.heap_bytes(),
+            ClassKey::Computed(_) => 0,
+            ClassKey::Private(name) => name.heap_bytes(),
+        }
+    }
+}
+
+impl HeapBytes for ClassElement {
+    fn heap_bytes(&self) -> usize {
+        match self {
+            ClassElement::Method { key, .. } | ClassElement::Field { key, .. } => key.heap_bytes(),
+            ClassElement::StaticBlock { .. } => 0,
+        }
+    }
+}
+
+impl HeapBytes for Class {
+    /// What the record owns beside its own box: its name and its elements.
+    fn heap_bytes(&self) -> usize {
+        self.name
+            .heap_bytes()
+            .saturating_add(self.elements.heap_bytes())
+    }
+}
+
 impl HeapBytes for Function {
     fn heap_bytes(&self) -> usize {
         self.name
@@ -1185,6 +1408,7 @@ impl Expr {
     pub(crate) fn children(&self, mut f: impl FnMut(Child)) {
         match self {
             Expr::This
+            | Expr::NewTarget
             | Expr::Identifier(_)
             | Expr::Null
             | Expr::Boolean(_)
@@ -1245,6 +1469,7 @@ impl Expr {
                 }
             }
             Expr::Function(id) => f(Child::Function(*id)),
+            Expr::Class(class) => class.children(&mut f),
             Expr::Unary { operand, .. } | Expr::Update { operand, .. } => f(Child::Expr(*operand)),
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 f(Child::Expr(*left));
@@ -1282,6 +1507,15 @@ impl Expr {
                     f(Child::Expr(*e));
                 }
             }
+            Expr::SuperMember(SuperKey::Name(_)) => {}
+            Expr::SuperMember(SuperKey::Computed(key)) => f(Child::Expr(*key)),
+            Expr::SuperCall(arguments) => {
+                for e in arguments {
+                    f(Child::Expr(*e));
+                }
+            }
+            Expr::PrivateMember { object, .. } => f(Child::Expr(*object)),
+            Expr::PrivateIn { right, .. } => f(Child::Expr(*right)),
             Expr::New { callee, arguments } => {
                 f(Child::Expr(*callee));
                 for e in arguments.iter().flatten() {
@@ -1426,6 +1660,7 @@ impl Stmt {
                 }
             }
             Stmt::FunctionDeclaration(id) => f(Child::Function(*id)),
+            Stmt::Class(class) => class.children(&mut f),
             Stmt::With { object, body } => {
                 f(Child::Expr(*object));
                 f(Child::Stmt(*body));

@@ -1,0 +1,51 @@
+script locals 0
+  var "B"
+  0000 2:5 ResolveGlobal "B"
+  0001 2:9 SetStrict true
+  0002 2:9 ClassPrototype
+  0003 2:9 MakeClassConstructor 0 base
+  0004 2:17 Dup2
+  0005 2:17 Pop
+  0006 2:18 GetGlobal "k"
+  0007 2:18 ToPropertyKey
+  0008 2:17 Closure 1
+  0009 2:17 DefineClassComputedMethod
+  0010 2:17 Pop
+  0011 2:26 Dup
+  0012 2:34 GetGlobal "k"
+  0013 2:38 Number 1
+  0014 2:34 Add
+  0015 2:34 ToPropertyKey
+  0016 2:26 Closure 2
+  0017 2:26 DefineClassComputedMethod
+  0018 2:26 Pop
+  0019 2:46 Dup2
+  0020 2:46 Pop
+  0021 2:51 GetGlobal "k"
+  0022 2:51 ToPropertyKey
+  0023 2:46 Closure 3
+  0024 2:46 DefineClassComputedSetter
+  0025 2:46 Pop
+  0026 2:9 Nip 1
+  0027 2:9 SetStrict false
+  0028 2:5 PutGlobalRef "B"
+  0029 2:5 Pop
+  0030 0:0 LoadCompletion
+  0031 0:0 Return
+
+function 0 class constructor "B" length 0 locals 0 strict
+  0000 2:9 Undefined
+  0001 2:9 Return
+
+function 1 method "" length 0 locals 0 strict
+  0000 2:17 Undefined
+  0001 2:17 Return
+
+function 2 method "" length 0 locals 0 strict
+  0000 2:26 Undefined
+  0001 2:26 Return
+
+function 3 setter "" length 1 locals 1 strict
+  params local 0
+  0000 2:46 Undefined
+  0001 2:46 Return

@@ -123,7 +123,7 @@ impl<H: Host> Agent<H> {
     /// key is its description in brackets, or the empty String when it has none; a prefix comes
     /// before it with a space. `function`, made by its closure, has its `name` property already,
     /// configurable, which is defined again with the name.
-    fn set_function_name(
+    pub(super) fn set_function_name(
         &mut self,
         function: ObjectRef,
         key: Key,

@@ -85,14 +85,20 @@ impl<H: Host> Agent<H> {
             ("Number", Intrinsic::Number),
             ("eval", Intrinsic::Eval),
             ("Function", Intrinsic::Function),
+            ("Proxy", Intrinsic::Proxy),
             ("Symbol", Intrinsic::Symbol),
             ("RegExp", Intrinsic::RegExp),
             ("Promise", Intrinsic::Promise),
+            ("Map", Intrinsic::Map),
+            ("Set", Intrinsic::Set),
             (
                 "AggregateError",
                 Intrinsic::Error(ErrorKind::AggregateError),
             ),
             ("Date", Intrinsic::Date),
+            ("Reflect", Intrinsic::Reflect),
+            ("WeakMap", Intrinsic::WeakMap),
+            ("WeakSet", Intrinsic::WeakSet),
         ] {
             let value = self.intrinsic(realm, which)?;
             let key = self.name_key(name)?;

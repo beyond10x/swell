@@ -1,0 +1,136 @@
+script locals 0
+  var "o"
+  declare 4
+  0000 2:5 ResolveGlobal "o"
+  0001 2:9 NewObject
+  0002 2:12 GetGlobal "k"
+  0003 2:12 ToPropertyKey
+  0004 2:16 SetStrict true
+  0005 2:16 ClassPrototype
+  0006 2:16 MakeClassConstructor 0 base
+  0007 2:16 SetClassName
+  0008 2:24 Dup2
+  0009 2:24 Pop
+  0010 2:25 ClassPrototype
+  0011 2:25 MakeClassConstructor 1 base
+  0012 2:33 Dup2
+  0013 2:33 Pop
+  0014 2:34 GetGlobal "k"
+  0015 2:34 ToPropertyKey
+  0016 2:33 Closure 2
+  0017 2:33 DefineClassComputedMethod
+  0018 2:33 Pop
+  0019 2:25 Nip 1
+  0020 2:25 ToPropertyKey
+  0021 2:24 Closure 3
+  0022 2:24 DefineClassComputedMethod
+  0023 2:24 Pop
+  0024 2:16 Nip 1
+  0025 2:16 SetStrict false
+  0026 2:11 DefineComputedField
+  0027 2:5 PutGlobalRef "o"
+  0028 2:5 Pop
+  0029 0:0 LoadCompletion
+  0030 0:0 Return
+
+function 0 class constructor "" length 0 locals 0 strict
+  0000 2:16 Undefined
+  0001 2:16 Return
+
+function 1 class constructor "" length 0 locals 0 strict
+  0000 2:25 Undefined
+  0001 2:25 Return
+
+function 2 method "" length 0 locals 0 strict
+  0000 2:33 Undefined
+  0001 2:33 Return
+
+function 3 method "" length 0 locals 0 strict
+  0000 2:24 Undefined
+  0001 2:24 Return
+
+function 4 declaration "g" length 0 locals 3 generator
+  0000 3:1 GeneratorStart 2
+  0001 3:1 EndFinally
+  0002 3:23 SetStrict true
+  0003 3:23 ClassPrototype
+  0004 3:23 MakeClassConstructor 5 base
+  0005 3:33 Dup2
+  0006 3:33 Pop
+  0007 3:41 Undefined
+  0008 3:41 GetGlobal "h"
+  0009 3:41 Call 0
+  0010 3:34 GetIterator
+  0011 3:34 Undefined
+  0012 3:34 Tag 0
+  0013 3:34 DelegateStep 0021
+  0014 3:34 JumpIfDelegateDone 0021
+  0015 3:34 DelegateYield 2
+  0016 3:34 LoopJump 0013
+  0017 3:34 Bury 2
+  0018 3:34 Bury 2
+  0019 3:34 Pop
+  0020 3:34 EndFinally
+  0021 3:34 JumpIfTag 0 0027
+  0022 3:34 Pop
+  0023 3:34 YieldReturn 0
+  0024 3:34 SetStrict false
+  0025 3:34 Tag 2
+  0026 3:34 Jump 0053
+  0027 3:34 ToPropertyKey
+  0028 3:33 Closure 6
+  0029 3:33 DefineClassComputedMethod
+  0030 3:33 Pop
+  0031 3:51 Dup2
+  0032 3:51 Pop
+  0033 3:58 Number 1
+  0034 3:52 Yield 2
+  0035 3:52 JumpIfTag 0 0042
+  0036 3:52 JumpIfTag 2 0038
+  0037 3:52 EndFinally
+  0038 3:52 YieldReturn 0
+  0039 3:52 SetStrict false
+  0040 3:52 Tag 2
+  0041 3:52 Jump 0053
+  0042 3:52 ToPropertyKey
+  0043 3:51 Closure 7
+  0044 3:51 DefineClassComputedMethod
+  0045 3:51 Pop
+  0046 3:23 SetLocal 1
+  0047 3:23 Nip 1
+  0048 3:23 SetStrict false
+  0049 3:23 SetLocal 0
+  0050 3:23 Pop
+  0051 3:17 Undefined
+  0052 3:17 Tag 0
+  0053 3:80 ResolveGlobal "k"
+  0054 3:84 Number 1
+  0055 3:80 PutGlobalRef "k"
+  0056 3:80 Pop
+  0057 3:17 JumpIfTag 2 0060
+  0058 3:17 EndFinally
+  0059 3:17 Jump 0062
+  0060 3:17 Tag 2
+  0061 3:17 Jump 0065
+  0062 3:1 Undefined
+  0063 3:1 Tag 2
+  0064 3:1 Jump 0065
+  0065 3:1 GeneratorDone 2
+  0066 3:1 JumpIfTag 2 0068
+  0067 3:1 EndFinally
+  0068 3:1 GeneratorReturn 2
+  pattern 0011..0017 -> 0017 items 0 envs 0 strict
+  finally 0002..0051 -> 0053 items 0 envs 0
+  finally 0002..0065 -> 0065 items 0 envs 0
+
+function 5 class constructor "C" length 0 locals 0 strict
+  0000 3:23 Undefined
+  0001 3:23 Return
+
+function 6 method "" length 0 locals 0 strict
+  0000 3:33 Undefined
+  0001 3:33 Return
+
+function 7 method "" length 0 locals 0 strict
+  0000 3:51 Undefined
+  0001 3:51 Return

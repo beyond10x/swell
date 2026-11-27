@@ -1,0 +1,152 @@
+---
+format: aep.planning-md/3
+id: story:class-element-syntax-and-early-errors
+kind: story
+status: implemented
+title: 'Fields, private names, static blocks, .#x and #x in: grammar and early errors, held'
+summary: 886 cases (1,756 runs); lifts the lexer's private-name refusal and holds one refusal per element kind.
+relations:
+- decomposes: epic:slice-08-classes
+- depends_on: story:class-syntax-and-early-errors
+- depends_on: story:new-target-meta-property
+- depends_on: story:super-property-and-super-syntax
+scope:
+- confidence: cited
+  path: crates/compiler/src/expression.rs
+- confidence: cited
+  path: crates/compiler/src/resolve.rs
+- confidence: cited
+  path: crates/syntax/src/ast.rs
+- confidence: cited
+  path: crates/syntax/src/early.rs
+- confidence: cited
+  path: crates/syntax/src/lexer.rs
+- confidence: inferred
+  path: crates/syntax/src/parser/class.rs
+- confidence: cited
+  path: crates/syntax/src/parser/expression.rs
+- confidence: cited
+  path: crates/syntax/src/parser/mod.rs
+- confidence: cited
+  path: crates/syntax/src/scope.rs
+- confidence: cited
+  path: crates/syntax/tests/sources.rs
+- confidence: inferred
+  path: crates/syntax/tests/sources/early-errors/private-name-outside-class.js
+- confidence: inferred
+  path: crates/syntax/tests/sources/held/class-elements.js
+- confidence: inferred
+  path: crates/syntax/tests/sources/held/class-field.js
+- confidence: inferred
+  path: crates/syntax/tests/sources/held/class-static-block.js
+- confidence: inferred
+  path: crates/syntax/tests/sources/held/private-field.js
+- confidence: inferred
+  path: crates/syntax/tests/sources/held/private-method.js
+- confidence: inferred
+  path: crates/syntax/tests/sources/held/private-name-in.js
+- confidence: cited
+  path: crates/syntax/tests/sources/refused/private-name.js
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:32Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
+---
+## Context
+
+Slice 8 of 19, `classes` (`epic:slice-08-classes`; `docs/design/engine.md`, section 12, item 8). This story is the grammar and early errors of the class elements that `story:class-syntax-and-early-errors` refuses at their token: fields (FieldDefinition, public and private, static or not, with or without an initializer, and the automatic semicolon rules around them, `#sec-rules-of-automatic-semicolon-insertion`), private methods and accessors (`#m() {}`, `get #x`, `static async *#m`), static blocks (ClassStaticBlock), the private name token (PrivateIdentifier, with escapes), the private member forms `a.#x` and `a?.#x`, and `#x in a`; with the early errors of `#sec-class-definitions-static-semantics-early-errors` (a private name declared twice except a getter and setter pair of the same placement, `#constructor`, a field named `constructor`, a static field named `prototype` or `constructor`, a field initializer or static block that Contains `arguments` or a SuperCall, AllPrivateIdentifiersValid in a class body, a script, a function body and `Function` code), `delete` of a private reference, the static block's own rules (`await` as an identifier, `return`, its var scope), and a private name in an object literal. Parsed into the element kinds of the `Class` record that `story:class-syntax-and-early-errors` defined, and held: each element kind holds its refusal to the end of the parse through `Parser::hold` (that story's).
+
+It makes, in the tree, the functions of item 1 of "Classes" for these elements: one `FieldInitializer` function per run of static fields (the consecutive static fields between two other elements), numbered at the first token of its first field; one `FieldInitializer` function for the instance elements of a class that has an instance field or a private method that is not static (the instance initializer of item 4, which holds the private method adds as well as the fields), numbered at the first token of the first such element; one `StaticBlock` function per static block, numbered at `static`. It owns the flag that admits `super.x` in field initializers and static blocks (item 5 of "Classes", decision 6 of slice 8), and sets the flag of `new.target` there (`story:new-target-meta-property`'s). It declares each class body's private names for AllPrivateIdentifiersValid; the compiler's private record is `story:private-names-and-private-methods`'s.
+
+Edges: `story:class-syntax-and-early-errors` (the tree, `Parser::hold`), `story:new-target-meta-property` (the `new_target` flag), `story:super-property-and-super-syntax` (the `super_property` flag and the early error of SuperCall). Order 2, built beside `story:class-definition-evaluation`.
+
+The holds this story makes, each at the first token of its first element, through `Parser::hold`: `class field is not supported before slice 8` (a public field; lifted by `story:public-class-fields`), `private method is not supported before slice 8` (a private method or accessor; `story:private-names-and-private-methods`), `private field is not supported before slice 8` and `private name in is not supported before slice 8` (`story:private-fields-and-private-in`), `class static block is not supported before slice 8` (`story:class-static-blocks`). The immediate refusals of `story:class-syntax-and-early-errors` for a field and a static block become holds with the same texts, so this story deletes that story's test `a_field_and_a_static_block_are_refused_at_their_token` and adds held sources in their place. Every held source of this story takes the form of that story's section "Held sources" (decision A of the coordinator's revision 2): it lives in `crates/syntax/tests/sources/held/`, its header names `class` first and then its element holds in the order of their first token, and no later story moves it or edits its header. The lexer's refusal `private name is not supported before slice 8` (`crates/syntax/src/lexer.rs`, `refused("private name", 8)`) is lifted: a private name outside a class is an early error, inside one a hold of its element kind. The refusal `private name` is part of section 12, item 8 (the entry "Each slice" of `docs/plan/waves.md`, checked); two places in `crates` hold its text on the base: the lexer and the fixture `crates/syntax/tests/sources/refused/private-name.js` (`x = #a;`), which becomes an early-error fixture.
+
+The list is `docs/plan/slice-08/story-element-syntax.cases.txt`: the 886 cases of the key `element-syntax` of `docs/plan/slice-08/scan.tsv` (the negative parse cases with a field, a static block, a private name or a private member, and 5 cases that give `eval` or `Function` a private name outside a class; 881 negative). By directory: `language/{statements,expressions}/class/elements` 670, `language/{statements,expressions}/class/dstr` 144 (invalid patterns in private methods), `language/expressions/object/method-definition` 12, the early errors of `#x` in functions and blocks 12, and others. Their 1,756 runs fail on the plan's base run (the full run of 2026-11-26 on `149e12f1`, equal to `conformance/test262/expected.txt` on `62c7cf59`; slice 8: `test262-slice 08 9302 18455 0 0 9302 5 9297 0`): 1,696 on `class is not supported before slice 8`, 50 on `private name is not supported before slice 8`, 10 as counted refusals. A case of the list that ends on a part outside this story goes to `docs/plan/slice-08/close-later.tsv` by the coordinator's commit, as `story:new-target-meta-property` states.
+
+Design it builds on, by name: `docs/design/engine.md` section 3, "Classes", items 1 (the element kinds, the `FieldInitializer` and `StaticBlock` functions, the numbering) and 5 (the flags), "Private names", the rule of AllPrivateIdentifiersValid; section 7 (the parser, its ledger and stack bound). No sentence of the design is missing.
+
+## What later stories reuse
+
+The parse of every element kind into the `Class` record; the `FieldInitializer` and `StaticBlock` functions in the tree (compiled by `story:public-class-fields`, `story:class-static-blocks`, `story:private-names-and-private-methods` and `story:private-fields-and-private-in` through the functions of `story:class-definition-evaluation`); `Expr::PrivateMember`, the private link of an optional chain, `Expr::PrivateIn`; the holds, one line each in `HOLDS`, which the element stories delete as they lift them, and the six held sources, which stay where they are; the context of a field initializer and a static block (`new.target` and SuperProperty admitted, SuperCall and `arguments` refused, `await` reserved in a block).
+
+## Domain relations
+
+- A private name reference → the private name declared by the nearest enclosing class body that declares it (one, or the early error) — inferable (inferred from ECMA-262 `#sec-static-semantics-allprivateidentifiersvalid`; no ess/1 document declares it: `spec/domains/host.yaml` holds no engine value, and ESS does not restate ECMA-262, `AGENTS.md`, "Rules").
+
+## Change
+
+Failing tests first: the fixtures and tests below are written before the code and fail on the base.
+
+- Lexer (`crates/syntax/src/lexer.rs`): `#` followed by an identifier start (an escape included) is the private name token; `#` otherwise is the grammar error it is; the `refused("private name", 8)` branch goes.
+- Elements (`crates/syntax/src/parser/class.rs`, in functions of their own beside the method parse: `field`, `static_block`, `private_method`): fields (a key followed by `=`, `;`, `}` or a line break where ASI applies; `static`, `get`, `set` and `async` as field names, with the line-break rules of the cases `fields-asi-*` and `grammar-field-*`), private methods and accessors (through `method_head` with a private key), static blocks (a block in its own context: a new var scope, `await` reserved as an identifier, no `return`, no `arguments`, SuperProperty and `new.target` admitted, SuperCall not; `crates/syntax/src/scope.rs` the scope of the block); field initializers in the context of a method of the class (`new.target` and SuperProperty admitted, SuperCall and `arguments` not, `yield` and `await` as identifiers by the rules of the class body); the run functions of Context; each hold of Context, at the field's or block's call, replacing the `refuse_at` of `story:class-syntax-and-early-errors`.
+- Member forms (`crates/syntax/src/parser/expression.rs`): `member_name` (`.#x`), `optional_link` (`?.#x`), and `#x` as the left operand of `in` (only directly before `in`, at the precedence of a relational expression; `#x in #y`, `(#x) in y` and `#x` alone are errors). The tree (`crates/syntax/src/ast.rs`): `Expr::PrivateMember` and `Expr::PrivateIn` inserted after the variant `OptionalCall` of `Expr`, the private link appended to the links of an optional chain; their arms after the arms of `Expr::SuperMember` and `Expr::SuperCall` in `HeapBytes for Expr` and `Expr::children`. In `swell-compiler` their arms (`expression.rs` and the walk of `resolve.rs`, after the arms of `Expr::SuperMember` and `Expr::SuperCall`) answer `CompileError::Tree` (no source reaches the compiler while its kind is held: the compiler test of "Held sources", item 4, of `story:class-syntax-and-early-errors` reads this story's held sources, so this story adds no compiler test); `story:private-names-and-private-methods` replaces the arm of `PrivateMember`, `story:private-fields-and-private-in` that of `PrivateIn`. In `compiler/src/expression.rs` the arm of `PrivateMember` stands directly after the arm of `Expr::SuperCall`, which `story:derived-classes-and-super-call` replaces: those two stories of order 3 edit adjacent arms, and each names the other with the fix "keep both arms".
+- Early errors (`crates/syntax/src/early.rs`, in a function of its own, `class_element_early_errors`, called from `class_early_errors` of `story:class-syntax-and-early-errors`, and `all_private_identifiers_valid`): the rules of the first paragraph, each with its message; AllPrivateIdentifiersValid over the private names each class body declares (a list per class body, charged to the ledger and bounded by the source, the getter and setter pair rule), applied to a script, a function body, `Function` code and a class body; eval code applies it with no enclosing names until `story:private-names-in-eval-code` gives it the names of the caller's environment. A private reference is a simple assignment target: `Expr::PrivateMember { .. }` joins the arm `Expr::Member { .. } | Expr::Index { .. }` of `target` (`early.rs`), beside the `Expr::SuperMember { .. }` that `story:super-property-and-super-syntax` (an edge) puts there.
+- `HOLDS` (`parser/mod.rs`, "Held sources", item 1, of `story:class-syntax-and-early-errors`): five lines appended after `("class heritage", 8),`, in this order: `("class field", 8),`, `("private method", 8),`, `("private field", 8),`, `("private name in", 8),`, `("class static block", 8),`. The story that lifts a hold deletes its line: `story:public-class-fields`, `story:private-names-and-private-methods`, `story:private-fields-and-private-in` (two lines), `story:class-static-blocks`.
+- Stack bound: a class nests in a field initializer and in a static block (`class { x = class { x = ... } }`, `class { static { class { static { ... } } } }`); two kinds join `NESTING_KINDS` (`[&str; 65]`, from 63 after `story:class-syntax-and-early-errors`), with their sources in `nested` of `crates/syntax/tests/sources.rs`. Both hold `class` and then `class field` or `class static block`; they pass `fits_the_stack_bound` through `admitted` as `story:class-syntax-and-early-errors` changed it ("Held sources", item 5: `Some(true)` for the refusal of a line of `HOLDS`), in this story's tree and after `story:class-definition-evaluation` has lifted `class`; this story edits no line of `admitted`.
+- Fixtures and tests: 19 early-error fixtures `crates/syntax/tests/sources/early-errors/{class-field,private-name,static-block}-*.js` (18 new, one per rule, and `refused/private-name.js` moved to `early-errors/private-name-outside-class.js`), each with its message. 6 new held sources in `crates/syntax/tests/sources/held/`: `class-field.js` (`class C { x = 1; }`, header `held "class", "class field"`), `class-static-block.js` (`class C { static {} }`, `held "class", "class static block"`), `private-method.js` (`class C { #m() {} }`, `held "class", "private method"`), `private-field.js` (`class C { #x; }`, `held "class", "private field"`), `private-name-in.js` (`class C { #x; static has(o) { return #x in o; } }`, `held "class", "private field", "private name in"`: `#x in` needs a declared `#x`, AllPrivateIdentifiersValid, so this source holds the field before its own construct), and `class-elements.js` (every element kind and form above, with `.#x`, `?.#x` and `#x in`; its header the six constructs it holds in the order of their first token, `held "class", "class field", "private method", "private field", "private name in", "class static block"` when the source puts them in that order). No refused fixture is added. The test `a_field_and_a_static_block_are_refused_at_their_token` of `story:class-syntax-and-early-errors` is deleted (its two refusals are holds now, read through `held/class-field.js` and `held/class-static-block.js`). No compiler test is added: `compile::held_sources_compile_once_nothing_in_them_is_held` reads the six sources.
+- Bounds, as `AGENTS.md` and the `AGENTS.md` of the folder that holds the repository ("Tests stay fast", "A job in the pool ends within 10 minutes", "No Python for permanent tools") state them: a test is terminated at 60 s and counts as failed; the gate fails when the wall time of its test steps passes 120 s; a test stays under 1.5 CPU seconds alone in the default mode and under 2.5 at `SWELL_FULL_COUNTS=1`, measured with the test binary run directly with `--exact <name> --test-threads 1` under `time` (user plus system); the two new nesting kinds keep each part of the stack-bound test under its bound, measured, and the unit names the time of each part it moved. Nothing of this story runs in the engine, so no test has a collect-every-safe-point count. A product several tests share is built once inside one test function or is a committed file, never per test; no test makes a network request or a model call; the unit runs the test binaries of its own change, never the whole gate and never a whole-workspace test run. Builds and tests go through the pool: `cargo` is the shim of the pool, anything else that compiles or tests is prefixed `slot`; a pool job ends after 10 minutes unless it names its time (`slot --timeout 30m` or `SLOT_TIMEOUT=30m`, 30 minutes at most); a script that measures, probes or waits runs without the prefix. No `unsafe`, no third-party crate, no panic, `unwrap`, `expect` or unchecked indexing; no Python in any tool, test or command; intermediate files in the scratch directory or `.out/`.
+- Size: about 950 lines (lexer 40, element parse, run functions and ASI 290, member and `in` forms 60, early errors 250, tree and arms 50, fixtures and nesting kinds 260): one session.
+
+## Requirements
+
+- No line of `conformance/host/requirements.txt` moves here: `grep -c 'pending slice 8$' conformance/host/requirements.txt` prints `1` on `61f2a8e2` and after this story; only `story:host-ensure-can-add-private-element` moves those lines.
+- The run loop is not touched; no layout changes; the `frontend_ledger::` tests pass.
+
+Writes: `crates/syntax/src/{lexer,ast,early,scope}.rs`, `crates/syntax/src/parser/{class,expression,mod}.rs` (the element parse and holds; `member_name`, `optional_link`, the `in` operand; five lines of `HOLDS`), `crates/syntax/tests/sources.rs` (`NESTING_KINDS` and `nested`; the test `a_field_and_a_static_block_are_refused_at_their_token` deleted; `fits_the_stack_bound` and `admitted` are read, not edited), `crates/syntax/tests/sources/early-errors/{class-field,private-name,static-block}-*.js` (new), `crates/syntax/tests/sources/held/{class-field,class-static-block,private-method,private-field,private-name-in,class-elements}.js` (new), `crates/syntax/tests/sources/refused/private-name.js` (moved to `early-errors/`); `crates/compiler/src/{expression,resolve}.rs` (the two arms each). A unit that meets a file outside this line that its change cannot compile or pass without makes the smallest change there and reports it. Not written: `crates/syntax/src/parser/{function,statement}.rs`, `crates/syntax/src/lib.rs`, `crates/compiler/src/{class,bytecode,disasm,statement}.rs`, `crates/compiler/tests/compile.rs`, `crates/swell`, `crates/test262`, `conformance/`, `website/`, `docs/`.
+
+Shared with `story:class-definition-evaluation`, built at the same time with no edge between them, each at its own named site: `parser/class.rs` (here the functions `field`, `static_block`, `private_method` and their `hold` calls; there the deletion of the `hold("class", ..)` call); `HOLDS` in `parser/mod.rs` (here five lines appended after `("class heritage", 8),`; there `("class", 8),`, the line before it, deleted: one unchanged line between the two hunks, so no conflict); `compiler/src/expression.rs` and `compiler/src/resolve.rs` (here the arms of `PrivateMember` and `PrivateIn` after those of `SuperMember` and `SuperCall`; there the `Class` arms after `Expr::Function` and `class_scope`). No held source of this story changes its answer when that story merges first: `class` is the first construct of each header, and once it is lifted the element hold after it is answered. Ordered after this story by edges: `story:derived-classes-and-super-call` (`parser/class.rs`, the hold `class heritage`; `parser/expression.rs`; `early.rs`; the arm `Expr::SuperCall` before this story's arm `PrivateMember`), `story:public-class-fields`, `story:class-static-blocks`, `story:private-names-and-private-methods` (the arm `PrivateMember`), `story:private-fields-and-private-in` (the arm `PrivateIn`); each of the last four deletes its hold call and its line of `HOLDS`.
+
+## Acceptance
+
+The tests named in Change pass, run by the binaries of this change and not as a whole step: `slot cargo nextest run --locked -p swell-syntax --test main` and the same with `SWELL_FULL_COUNTS=1` (`early_error_sources_fail_with_their_message`, `valid_sources_parse_in_both_modes`, `refused_sources_name_their_slice`, `held_sources_answer_their_first_construct_still_held` over the six new held sources, the stack-bound parts); `slot cargo nextest run --locked -p swell-compiler --test main` (`compile::held_sources_compile_once_nothing_in_them_is_held` among them); `slot cargo nextest run --locked -p swell --test main -E 'test(/^scripts::/) | test(/^eval::/) | test(/^dynamic_function::/) | test(/^frontend_ledger::/) | test(/^language::/)'`; `slot cargo nextest run --locked -p swell-test262 --test main`; each exits 0, in this story's tree and after `story:class-definition-evaluation` is merged first. `ls crates/syntax/tests/sources/early-errors/{class-field,private-name,static-block}-*.js | wc -l` prints `19` (0 on the base); `ls crates/syntax/tests/sources/held | wc -l` prints 6 more than on the unit's base (4 after `story:class-syntax-and-early-errors`); `ls crates/syntax/tests/sources/refused | wc -l` prints 1 fewer than on the unit's base; `grep -c 'NESTING_KINDS: \[&str; 65\]' crates/syntax/tests/sources.rs` prints `1` (0 on the base); `grep -c 'fn a_field_and_a_static_block_are_refused_at_their_token' crates/syntax/tests/sources.rs` prints `0` (1 on the base). `slot task clippy`, `slot task forbid-unsafe-check` and `sh taskfiles/test-main.sh check` exit 0; `git diff --stat "$BASE" -- Cargo.lock "*/Cargo.toml"` prints nothing (`BASE` the join the unit starts from). The text: `grep -rn '"private name", 8\|private name is not supported' crates | wc -l` prints `0` (2 on the base: `lexer.rs` and `refused/private-name.js`); `grep -rn 'hold("class field", 8\|hold("private method", 8\|hold("private field", 8\|hold("private name in", 8\|hold("class static block", 8' crates | wc -l` prints `5` (0 on the base); `grep -c '("class field", 8),\|("private method", 8),\|("private field", 8),\|("private name in", 8),\|("class static block", 8),' crates/syntax/src/parser/mod.rs` prints `5` (0 on the base: the five lines of `HOLDS`). `git diff --quiet "$BASE" -- conformance/host/requirements.txt` exits 0 and `grep -c 'pending slice 8$' conformance/host/requirements.txt` prints `1`. Time: every test this story adds stays under its bound as the unit measured it, and each part of the stack-bound test stays under 1.5 CPU seconds; the report lists the times and the sum, and a time over its bound fails this acceptance.
+
+test262. The full run is not the unit's. With the list as committed on the wave branch when the wave closes, `git show "$WAVE:docs/plan/slice-08/story-element-syntax.cases.txt" > .out/story-element-syntax.cases.txt` (`WAVE` the wave branch the unit merges into) and the guard `docs/plan/slice-08/guard-syntax.cases.txt` (the 2,469 passing negative parse cases of `test/language/`), `cat .out/story-element-syntax.cases.txt docs/plan/slice-08/guard-syntax.cases.txt | LC_ALL=C sort -u > .out/part.cases.txt` and `sh docs/plan/slice-08/part.sh "$CHECKOUT" .out/test262-part .out/part.cases.txt` (`CHECKOUT` `.cache/test262/<commit of conformance/test262/PIN>`; 3,355 cases, 6,306 runs over the plan's base run), then, in the background, `slot --timeout 30m cargo run --locked --release -q -p swell-test262 -- count --test262 .out/test262-part --design docs/design/engine.md --features conformance/test262/features.txt --runs .out/test262-part/runs.tsv > .out/test262-part/lines.txt` (one pool job, as `story:new-target-meta-property` states), and the base run the coordinator made on the join the unit starts from copied to `.out/test262-base/runs.tsv`: (a) `sh docs/plan/slice-08/check.sh .out/story-element-syntax.cases.txt .out/test262-base/runs.tsv .out/test262-part/runs.tsv` exits 0 (over the plan's base run, restricted to the part, it exits 1, prints 1,756 lines `failing` and `passed 2469 bound 2469 B 2469 F 886 R 886`; it prints `missing` for a list case the part lacks and exits 1 on an empty list); (b) `awk -F'\t' '$6 ~ /(class|private name) is not supported/' .out/test262-part/runs.tsv | wc -l` prints `0` (1,746 over the plan's base run). On the join, the coordinator's full run, made in parts, passes (a) over the whole run.
+
+## Out of scope
+
+Running fields, private methods, private fields, static blocks and `#x in` (their stories); private names in eval code (`story:private-names-in-eval-code`); decorators and `nonextensible-applies-to-private` (excluded features, `conformance/test262/features.txt`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `elements` of wave big-2 delivered the story on `impl/elements` (`bd71f105`,
+correction at `ae0397e9`), merged into `wave/big-2` at `5b25b85`. Where the delivery differs
+from the text above:
+
+- A YieldExpression or an AwaitExpression in the code of a field initializer is a SyntaxError
+  at its `yield` or `await` (`yield expression in a class field initializer`, `await expression
+  in a class field initializer`), a stated difference from the pinned draft's
+  `Initializer[+In, ?Yield, ?Await]`: a field initializer is the body of a function of its own
+  that is neither a generator nor an `async` function. The computed keys beside it read `yield`
+  and `await` with the [Yield] and [Await] around the class, as the draft does. In a static
+  block the parser clears both, and the early errors refuse `await` there. Test:
+  `sources::a_field_initializer_refuses_yield_and_await_expressions`.
+- `await` as an identifier is named by the code whose [Await] reserves it: `await may not be an
+  identifier in a class static block` in a static block, in a class nested in it and its field
+  initializers and in an arrow function there that is not `async`; `await may not be an
+  identifier in an async function` in an `async` function or arrow function, a static block's
+  included. Test: `sources::await_as_an_identifier_names_the_code_that_reserves_it`.
+- A static block has an arguments object when a direct `eval` in it, or in an arrow function in
+  it, can observe one, and only then; a field initializer and an arrow function have none.
+  Test: `scope::tests::a_static_block_has_an_arguments_object_only_for_a_direct_eval`.
+- A static private method makes no function of the instance elements. Test:
+  `parser::class::tests::a_static_private_method_makes_no_instance_elements`.
+- The tree gained two fields the text does not name: `ClassElement::Field { function, .. }`
+  (the `FieldInitializer` of the field's run, or the one of the instance elements) and
+  `Class { instance_elements, .. }`. `Class::children` visits a field's initializer through its
+  run's function only, in the order of the function numbers. A field whose key is computed is
+  numbered after the functions inside its key.
+- `crates/syntax/src/token.rs` is written, outside the Writes line: `TokenKind::PrivateName`.
+  `parser/function.rs` is not written: the context of a field initializer and a static block
+  is saved and restored by `element_context_open` and `element_context_close` in
+  `parser/class.rs`.
+- `#x in` holds `private name in` at the private name in the parse of the binary operators
+  (`Parser::private_in`), not in a function of `parser/class.rs`.
+- Counts of the base that differ from the text: `NESTING_KINDS` was `[&str; 64]` on the unit's
+  base (the text: 63) and is `[&str; 66]`, so the acceptance's `grep -c` reads `[&str; 66]`;
+  `crates/syntax/tests/sources/held/` went from 16 files to 24 (the text: 6 more), the two more
+  being `class-new-target-in-field-initializer.js` and `class-new-target-in-static-block.js`;
+  `crates/syntax/tests/sources/refused/` went from 11 files to 10.
+- The adversary's pass added 14 cases, one of them red before the correction (the field
+  initializer's `yield` and `await`, 42 mismatches); all 14 stay.

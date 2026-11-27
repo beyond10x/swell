@@ -1,0 +1,5 @@
+test/language/expressions/assignment/dstr/array-elem-init-fn-name-fn.js
+test/language/expressions/new.target/escaped-new.js
+test/language/statements/for-await-of/async-func-decl-dstr-array-elem-init-fn-name-fn.js
+test/language/statements/for-await-of/async-gen-decl-dstr-array-elem-init-fn-name-fn.js
+test/language/statements/for-of/dstr/array-elem-init-fn-name-fn.js

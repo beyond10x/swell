@@ -86,7 +86,11 @@ pub(crate) fn slot_names(
 
 /// The exit of a lexical scope entered by [`Compiler::enter_scope`]: the record it made, if any,
 /// is popped.
-fn leave_scope(record: bool, span: Span, t: &mut Tasks<'_, '_>) -> Result<(), CompileError> {
+pub(crate) fn leave_scope(
+    record: bool,
+    span: Span,
+    t: &mut Tasks<'_, '_>,
+) -> Result<(), CompileError> {
     if record {
         t.push(Task::Emit(Instruction::PopEnv, span))?;
         t.push(Task::EnvsDown)?;
@@ -163,6 +167,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
             // entry of the block ([`Compiler::block_functions`]) instantiates
             // (`#sec-function-definitions-runtime-semantics-evaluation`).
             Stmt::Empty | Stmt::Debugger | Stmt::FunctionDeclaration(_) => {}
+            // `#sec-class-definitions-runtime-semantics-evaluation`: BindingClassDeclarationEvaluation,
+            // ClassDefinitionEvaluation (`class.rs`), then InitializeBoundName of the name in the
+            // block's, the function's or eval code's scope, or the global environment's
+            // declarative record; the completion is empty.
+            Stmt::Class(class) => {
+                self.class_definition(class, class.span, &mut t)?;
+                let store = self.plain_store(Site::VarDecl(id, 0))?;
+                t.push(Task::Emit(store, span))?;
+                t.push(Task::Emit(Instruction::Pop, span))?;
+            }
             // `#sec-expression-statement-runtime-semantics-evaluation`.
             Stmt::Expression(e) => {
                 t.push(Task::Expr(*e))?;

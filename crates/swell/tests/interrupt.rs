@@ -74,6 +74,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
                 brand: Brand(1),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()
             .unwrap()
@@ -88,6 +89,7 @@ fn host_95_interrupt_on_a_faulted_agent_returns() {
                     brand: Brand(2),
                     data: Some(Box::new(Stale(freed))),
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

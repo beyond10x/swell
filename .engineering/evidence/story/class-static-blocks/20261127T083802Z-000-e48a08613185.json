@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:02Z",
+  "actor": "human:operator",
+  "artifact": "story:class-static-blocks",
+  "kind": "story",
+  "revision": 14,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit a84725a, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/class_static_blocks.rs (swell::class_static_blocks::*) and the cases of docs/plan/slice-08/story-static-blocks.cases.txt in conformance/test262/expected.txt"
+  }
+}

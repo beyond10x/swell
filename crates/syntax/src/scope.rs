@@ -18,10 +18,10 @@
 //! - LexicallyDeclaredNames and LexicallyScopedDeclarations
 //!   (`#sec-static-semantics-lexicallydeclarednames`,
 //!   `#sec-static-semantics-lexicallyscopeddeclarations`) of the top level of the script and of
-//!   each function body ([`Scope::lexical`]): the `let` and `const` declarations standing in the
-//!   list itself, a function declaration there being var scoped
+//!   each function body ([`Scope::lexical`]): the `let`, `const` and class declarations standing
+//!   in the list itself, a function declaration there being var scoped
 //!   (TopLevelLexicallyScopedDeclarations); and of a block's statement list or the clauses of a
-//!   `case` block ([`Ast::lexical_names`]): its `let` and `const` declarations and its function
+//!   `case` block ([`Ast::lexical_names`]): its `let`, `const` and class declarations and its function
 //!   declarations, which are no VarScopedDeclarations of the function or the script
 //!   (`#sec-block-static-semantics-lexicallyscopeddeclarations`,
 //!   `#sec-block-static-semantics-varscopeddeclarations`). The walk below therefore takes a
@@ -73,10 +73,20 @@ impl Ast {
     }
 }
 
-/// The names the statement `s` binds when it is a `let` or `const` declaration or a function
-/// declaration standing in a block.
+/// The names the statement `s` binds when it is a `let`, `const` or class declaration or a
+/// function declaration standing in a block.
 fn push_lexical(ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
     let declaration = ast.stmt(s).map(|n| &n.stmt);
+    if let Some(Stmt::Class(class)) = declaration {
+        if let Some(name) = &class.name {
+            names.push(LexicalName {
+                name: name.clone(),
+                constant: false,
+                declaration: s,
+            });
+        }
+        return;
+    }
     if let Some(Stmt::FunctionDeclaration(f)) = declaration {
         if let Some(name) = ast.function(*f).and_then(|x| x.name.as_ref()) {
             names.push(LexicalName {
@@ -218,8 +228,11 @@ impl Collect {
     }
 
     /// The scope of the body whose walk ends; `function` is the function, `None` for the
-    /// script; an arrow function has no arguments object
-    /// (`#sec-functiondeclarationinstantiation`, step 16). The scratch is credited.
+    /// script; an arrow function has no arguments object (`#sec-functiondeclarationinstantiation`,
+    /// step 16), nor has a field initializer (`docs/design/engine.md`, section 3, "Classes").
+    /// A static block makes one when a direct `eval` in its code, or in an arrow function in it,
+    /// can observe one, and only then: a reference to `arguments` in it is an early error
+    /// (`#sec-class-definitions-static-semantics-early-errors`). The scratch is credited.
     fn finish(self, function: Option<&Function>, m: &Meter<'_>) -> Scope {
         // `#sec-functiondeclarationinstantiation`, steps 15 to 18: no arguments object when a
         // parameter is named `arguments`, or, in a list with no initializer, a function
@@ -227,7 +240,7 @@ impl Collect {
         // direct `eval` may reference it in code no analysis sees (decision 3, "Names", item
         // 4), and an arrow in the body may use it.
         let arguments_object = function.is_some_and(|f| {
-            f.kind != FunctionKind::Arrow
+            !matches!(f.kind, FunctionKind::Arrow | FunctionKind::FieldInitializer)
                 && (self.reference_seen.contains("arguments")
                     || self.contains_direct_eval
                     || self.inner_arguments)
@@ -298,10 +311,27 @@ fn push_body(m: &Meter<'_>, stack: &mut Vec<Step>, body: &[StmtId]) -> Result<()
     Ok(())
 }
 
-/// The names the statement `s` binds when it is a `let` or `const` declaration, each a copy
-/// charged to `m`, onto `names`.
+/// The names the statement `s` binds when it is a `let`, `const` or class declaration, each a
+/// copy charged to `m`, onto `names`.
 fn push_lexical_charged(m: &Meter<'_>, ast: &Ast, s: StmtId, names: &mut Vec<LexicalName>) {
-    let Some(Stmt::Var(kind, declarators)) = ast.stmt(s).map(|n| &n.stmt) else {
+    let statement = ast.stmt(s).map(|n| &n.stmt);
+    if let Some(Stmt::Class(class)) = statement {
+        if let Some(bound) = &class.name
+            && let Ok(name) = m.string(&bound.name)
+        {
+            let lexical = LexicalName {
+                name: Name {
+                    name,
+                    span: bound.span,
+                },
+                constant: false,
+                declaration: s,
+            };
+            let _ = m.push(names, lexical);
+        }
+        return;
+    }
+    let Some(Stmt::Var(kind, declarators)) = statement else {
         return;
     };
     if !kind.is_lexical() {
@@ -477,8 +507,80 @@ mod tests {
     use std::vec::Vec;
     use std::{format, println};
 
+    use crate::ast::FunctionKind;
     use crate::ledger::{Counting, Meter, map_entry_bytes};
     use crate::{ParseOptions, parse_script};
+
+    /// A static block makes an arguments object when a direct `eval` in its code can observe
+    /// one, and only then (`docs/design/engine.md`, section 3, "Classes": a reference to
+    /// `arguments` in the block is an early error): its own direct `eval`, or one in an arrow
+    /// function in it, which hands it up as an arrow function in a function does. A field
+    /// initializer and an arrow function have none. The sources hold a class, so they are read
+    /// through the parse itself, as the tree test of `parser/class.rs` reads them.
+    #[test]
+    fn a_static_block_has_an_arguments_object_only_for_a_direct_eval() {
+        let cases = [
+            (
+                "class C { static { eval(\"arguments\") } }",
+                FunctionKind::StaticBlock,
+                true,
+            ),
+            (
+                "class C { static { eval } }",
+                FunctionKind::StaticBlock,
+                false,
+            ),
+            (
+                "class C { static { (0, eval)(\"arguments\") } }",
+                FunctionKind::StaticBlock,
+                false,
+            ),
+            (
+                "class C { static { () => eval(\"arguments\") } }",
+                FunctionKind::StaticBlock,
+                true,
+            ),
+            (
+                "class C { static { () => eval(\"arguments\") } }",
+                FunctionKind::Arrow,
+                false,
+            ),
+            (
+                "class C { x = eval(\"arguments\"); }",
+                FunctionKind::FieldInitializer,
+                false,
+            ),
+            (
+                "class C { static x = () => eval(\"arguments\"); }",
+                FunctionKind::FieldInitializer,
+                false,
+            ),
+        ];
+        let mut wrong = Vec::new();
+        for (text, kind, expected) in cases {
+            let source: Vec<u16> = text.encode_utf16().collect();
+            let mut ledger = Counting::default();
+            let meter = Meter::new(&mut ledger);
+            let mut parsed = match crate::parser::parse(&source, 1_000, &meter) {
+                Ok(parsed) => parsed,
+                Err(error) => panic!("{text}: {error:?}"),
+            };
+            super::analyse(&mut parsed.ast, &parsed.body, &meter);
+            let found: Vec<bool> = parsed
+                .ast
+                .functions()
+                .iter()
+                .filter(|f| f.kind == kind)
+                .map(|f| f.scope.arguments_object)
+                .collect();
+            if found != [expected] {
+                wrong.push(format!(
+                    "{text} {kind:?}: expected [{expected}], got {found:?}"
+                ));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    }
 
     /// A source that declares 10,000 distinct names with `var` and refers to each: while the
     /// scope analysis runs, its two sets (`var_seen` and `reference_seen`) hold every name, each

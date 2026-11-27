@@ -39,8 +39,11 @@ pub struct Limits {
 /// bytes per re-entry (a host function 7,506, a getter 5,535, `Function.prototype.call` 7,455,
 /// a `map` callback 8,817). This is that plus a fifth, for the frames of another compiler
 /// version, rounded up to a whole KiB. The frame of the run loop (`Agent::execute`,
-/// `interp/dispatch.rs`) is 336 bytes of it: every instruction that needs locals runs in a
-/// function of its own, so an instruction adds no locals to that frame. Before, it held the
+/// `interp/dispatch.rs`) is a small part of it: every instruction that needs locals runs in a
+/// function of its own, so an instruction adds no locals to that frame. Measured 2026-11-26 on
+/// x86_64 with rustc 1.99.1, from the first `sub $N,%rsp` of the function in the test binary of
+/// `tests/main.rs` (`objdump -d -C`): 392 bytes in the profile dev, 808 in `stack-debug`, and in
+/// release `execute` is inlined into `Agent::run`, whose frame is 648. Before, it held the
 /// locals of every instruction: 19,280 of the 31,375 bytes per re-entry at `247333c`, when
 /// this was 37 KiB.
 const STACK_BYTES_PER_REENTRY: usize = 14 * 1024;

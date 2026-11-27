@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T19:44:45Z",
+  "actor": "human:operator",
+  "artifact": "story:new-target-meta-property",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/newtarget at f73a936c, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax 61 tests run: 61 passed (61 at the full counts); swell-compiler 17 passed; swell main 1226 passed, 1 skipped, in the default mode and with collect-every-safe-point; swell lib 250 passed; task clippy exit 0; cargo fmt --check exit 0; by the unit on the same head: test-stack-profiles 4 passed in release and in stack-debug; test262 part test262 total 4792 0 0 4792 4792 0 0"
+  }
+}

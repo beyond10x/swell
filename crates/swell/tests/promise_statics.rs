@@ -274,44 +274,91 @@ fn a_throw_of_the_iterator_closes_nothing_and_a_throw_of_resolve_closes_it() {
 }
 
 /// The number of pending promises of
-/// [`the_values_of_a_pending_promise_all_are_charged_until_it_settles`].
-/// 1,000 in the default mode; with the feature `collect-every-safe-point`, where every
-/// instruction of the loops that make and settle the promises collects the heap, 20 (50 took
-/// 2.5 s of nextest time on the build node).
+/// [`the_values_of_a_pending_promise_all_are_charged_until_it_settles`] in the gate: 1,000 in
+/// the default mode; with the feature `collect-every-safe-point`, where every instruction of
+/// the loops that make and settle the promises collects the heap, 12 (50 took 2.5 s of nextest
+/// time on the build node). The test runs four times its count of promises (a first round of
+/// twice as many, the race round, the measured round) at about 0.11 s each in that mode in the
+/// test profile, opt-level 0: 12 took 1.3 CPU seconds alone on 2026-11-27, and 20 took 2.2 s,
+/// about half of it making the promises and two fifths settling them. A box charged twice and
+/// credited once still leaves 144 bytes per promise against the 32 of the room of the Array of
+/// values, whatever the count.
 const PENDING: u32 = if cfg!(feature = "collect-every-safe-point") {
-    20
+    12
 } else {
     1_000
 };
 
+/// The count of [`the_values_of_a_pending_promise_all_are_charged_until_it_settles`]:
+/// [`PENDING`], and 20 with the feature `collect-every-safe-point` in the lane `slow`
+/// (`SWELL_FULL_COUNTS=1`), the count before 2026-11-27, under the lane's bound of 2.5 CPU
+/// seconds alone there.
+fn pending_promises() -> u32 {
+    if cfg!(feature = "collect-every-safe-point")
+        && std::env::var("SWELL_FULL_COUNTS").is_ok_and(|value| value == "1")
+    {
+        20
+    } else {
+        PENDING
+    }
+}
+
 /// "A built-in function with slots" and the list of values (`#sec-performpromiseall`, step 4.d,
-/// "Append undefined to values"): `Promise.all` over [`PENDING`] promises that stay pending
-/// makes `heap_bytes()`, after a collection that keeps them, exceed the reading before by at
-/// least [`PENDING`] times [`ELEMENT_BOX_BYTES`]; once every promise is resolved and the
-/// checkpoint has run, one `collect()` brings it back within the bytes of the combined promise
-/// and its Array of values (a Value per element, the Array's room at most twice its length).
-/// A first round grows the arenas first. The test prints the three readings.
+/// "Append undefined to values"): `Promise.all` over [`pending_promises`] promises that stay
+/// pending makes `heap_bytes()`, after a collection that keeps them, rise above the reading
+/// before by at least that count times [`ELEMENT_BOX_BYTES`] more than `Promise.race` over as
+/// many does (race makes the same reactions and derived promises, and no element function);
+/// once every promise is resolved and the checkpoint has run, one `collect()` leaves it above
+/// the reading before by no more than race leaves it, with an Array of as many values pushed
+/// after its settle, plus the room of the Array of values (a Value per element, at most twice
+/// its length).
+///
+/// It holds at any size of the realm (`story:tests-hold-at-any-size-of-the-realm`): a first
+/// round of `Promise.all` over twice as many promises grows the arenas, and each round's `make`
+/// drops every object of the round before it (`ps`, `resolvers`, `combined` and `values` are
+/// assigned again), so no arena grows between the readings of a round. Before, the first round
+/// was the measured one's size and its `combined` with its Array of values lived on into the
+/// measured round; with the seven set methods of `story:set-methods` in the realm and no
+/// padding, in the collect mode, the arena of objects grew from 512 to 1,024 slots between the
+/// reading before and the pending one (98,576 bytes above before after the settle, against 640).
+/// And the reading after was compared with before alone: the settle frees more than the boxes
+/// (with the larger first round alone, after was 5,136 bytes below before in the collect mode
+/// and 267,776 in the default one), so boxes that stayed charged after the settle passed. The
+/// control round of race takes that out. The test prints the six readings.
 #[test]
 fn the_values_of_a_pending_promise_all_are_charged_until_it_settles() {
+    let promises = pending_promises();
     let (mut agent, realm) = fresh(limits());
-    let make = format!(
-        "var resolvers = [], ps = [], combined;\n\
-         for (var i = 0; i < {PENDING}; i++) ps.push(new Promise(function (r) {{ resolvers.push(r); }}));"
-    );
+    let make = |count: u32| {
+        format!(
+            "var resolvers = [], ps = [], combined = undefined, values = undefined;\n\
+             for (var i = 0; i < {count}; i++) ps.push(new Promise(function (r) {{ resolvers.push(r); }}));"
+        )
+    };
     let settle = "for (var i = 0; i < resolvers.length; i++) resolvers[i](i); resolvers = [];";
-    answer(&mut agent, &realm, &make);
-    answer(&mut agent, &realm, "combined = Promise.all(ps); 0");
-    answer(&mut agent, &realm, settle);
-    checkpoint(&mut agent);
-    answer(&mut agent, &realm, &make);
-    let before = collected(&mut agent);
-    answer(&mut agent, &realm, "combined = Promise.all(ps); 0");
-    let pending = collected(&mut agent);
-    answer(&mut agent, &realm, settle);
-    checkpoint(&mut agent);
-    let after = collected(&mut agent);
+    let pushed = format!("values = []; for (var i = 0; i < {promises}; i++) values.push(i); 0");
+    let round = |agent: &mut Agent<TestHost>, count: u32, combinator: &str, then: &str| {
+        answer(agent, &realm, &make(count));
+        let before = collected(agent);
+        answer(
+            agent,
+            &realm,
+            &format!("combined = Promise.{combinator}(ps); 0"),
+        );
+        let pending = collected(agent);
+        answer(agent, &realm, settle);
+        checkpoint(agent);
+        answer(agent, &realm, then);
+        let after = collected(agent);
+        (before, pending, after)
+    };
+    round(&mut agent, 2 * promises, "all", "0");
+    let race = round(&mut agent, promises, "race", &pushed);
+    let (before, pending, after) = round(&mut agent, promises, "all", "0");
     println!(
-        "heap_bytes: before {before}, Promise.all of {PENDING} pending {pending}, after {after}"
+        "heap_bytes: race before {}, pending {}, after {}; \
+         Promise.all of {promises} before {before}, pending {pending}, after {after}",
+        race.0, race.1, race.2
     );
     assert_eq!(
         answer(
@@ -322,13 +369,22 @@ fn the_values_of_a_pending_promise_all_are_charged_until_it_settles() {
         "0"
     );
     checkpoint(&mut agent);
-    assert_eq!(answer(&mut agent, &realm, "ps"), PENDING.to_string());
+    assert_eq!(answer(&mut agent, &realm, "ps"), promises.to_string());
+    // pending - before >= race pending - race before + the boxes, without a subtraction.
     assert!(
-        pending >= before + u64::from(PENDING) * ELEMENT_BOX_BYTES,
-        "{pending} against {before}"
+        pending + race.0 >= before + race.1 + u64::from(promises) * ELEMENT_BOX_BYTES,
+        "{pending} - {before} against race {} - {}",
+        race.1,
+        race.0
     );
-    let array = 2 * u64::from(PENDING) * size_of::<Value>() as u64;
-    assert!(after <= before + array, "{after} against {before}");
+    // after - before <= race after - race before + the room, without a subtraction.
+    let array = 2 * u64::from(promises) * size_of::<Value>() as u64;
+    assert!(
+        after + race.0 <= before + race.2 + array,
+        "{after} - {before} against race {} - {}",
+        race.2,
+        race.0
+    );
 }
 
 thread_local! {
@@ -947,6 +1003,7 @@ fn a_host_object_with_the_aggregate_error_kind_has_no_errors() {
                     brand: Brand(201),
                     data: None,
                     error_kind: Some(ErrorKind::AggregateError),
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-26T18:48:26Z",
+  "actor": "human:operator",
+  "artifact": "story:class-syntax-and-early-errors",
+  "kind": "story",
+  "revision": 12,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/classsyntax at 7494b14c, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax 59 passed (59 at the full counts), swell-compiler 17 passed, swell main 1154 passed 1 skipped, task clippy exit 0, cargo fmt --check exit 0, tree clean at 7494b14c"
+  }
+}

@@ -241,7 +241,8 @@ impl<H: Host> Agent<H> {
         let room = self.kept_room();
         let mark = self.keep(Value::Object(properties));
         // 2. Let keys be ? properties.[[OwnPropertyKeys]](): a step per key, the list charged
-        // before it exists; no code runs.
+        // before it exists. A Proxy's trap runs code; its keys are kept below before any more
+        // does.
         let list = match self.own_property_keys(properties) {
             Ok(list) => list,
             Err(abrupt) => {
@@ -483,28 +484,21 @@ impl<H: Host> Agent<H> {
     }
 
     /// `Object.prototype.isPrototypeOf ( value )` (`#sec-object.prototype.isprototypeof`). A
-    /// step per object the walk passes; [[GetPrototypeOf]] runs no code, so nothing is kept.
+    /// step per object the walk passes. The [[GetPrototypeOf]] of a Proxy runs its trap, which
+    /// may collect, so obj, new when the this value is a primitive, is kept across the walk.
     fn object_is_prototype_of(&mut self, this: Value, args: &[Value]) -> Completion<Value> {
         // 1. If value is not an Object, return false.
-        let Value::Object(mut value) = argument(args, 0) else {
+        let Value::Object(value) = argument(args, 0) else {
             return Ok(Value::Boolean(false));
         };
         // 2. Let obj be ? ToObject(this value).
         let object = self.to_object(this)?;
-        // 3. Repeat,
-        loop {
-            self.charge_steps(1)?;
-            // a. Set value to ? value.[[GetPrototypeOf]]().
-            // b. If value is null, return false.
-            let Some(prototype) = self.get_prototype_of(value)? else {
-                return Ok(Value::Boolean(false));
-            };
-            // c. If SameValue(obj, value) is true, return true.
-            if prototype == object {
-                return Ok(Value::Boolean(true));
-            }
-            value = prototype;
-        }
+        // 3. Repeat: a. Set value to ? value.[[GetPrototypeOf]](). b. If value is null, return
+        // false. c. If SameValue(obj, value) is true, return true.
+        let mark = self.keep(Value::Object(object));
+        let found = self.prototype_chain_holds(value, object);
+        self.release(mark);
+        Ok(Value::Boolean(found?))
     }
 
     /// `Object.prototype.toLocaleString ( [ reserved1 [ , reserved2 ] ] )`

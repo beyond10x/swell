@@ -35,6 +35,7 @@ pub use outcome::*;
 
 use crate::heap::arena::Access;
 use crate::heap::string::CodeUnits;
+use crate::object::host_overrides::Overridden;
 use crate::object::property::{Descriptor, Key, Property, Slot};
 use crate::object::{ObjectKind, ObjectRecord};
 use crate::realm::intrinsics::Intrinsic;
@@ -265,7 +266,7 @@ impl<H: Host> Agent<H> {
 
     fn scoped_new_host_object(
         &mut self,
-        spec: HostObjectSpec,
+        spec: HostObjectSpec<H>,
     ) -> Result<Completion<ObjectRef>, HostError> {
         self.alive()?;
         // The prototype's handle is checked before the run's termination (decision 5); a
@@ -287,12 +288,21 @@ impl<H: Host> Agent<H> {
         };
         Ok(self.running().and_then(|()| {
             let owned = spec.data.as_deref().map_or(0, size_of_val);
+            // An object with an override table owns the box of the table, its facts and the
+            // host's data (`object/host_overrides.rs`) in place of the data.
+            let (owned, data) = match spec.overrides {
+                Some(table) => (
+                    owned.saturating_add(size_of::<Overridden>()),
+                    Some(Overridden::boxed(table, spec.data)),
+                ),
+                None => (owned, spec.data),
+            };
             let owned = u64::try_from(owned).unwrap_or(u64::MAX);
             let record = ObjectRecord::new(
                 prototype,
                 ObjectKind::Host(HostObject {
                     brand: spec.brand,
-                    data: spec.data,
+                    data,
                     error_kind: spec.error_kind,
                 }),
             );
@@ -434,7 +444,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The engine's key of the host's `key`.
-    fn key_of(&mut self, key: PropertyKey) -> Completion<Key> {
+    pub(crate) fn key_of(&mut self, key: PropertyKey) -> Completion<Key> {
         match key {
             PropertyKey::String(string) => self.key_from_string(string),
             PropertyKey::Symbol(symbol) => Ok(Key::Symbol(symbol)),
@@ -442,7 +452,7 @@ impl<H: Host> Agent<H> {
     }
 
     /// The host's key of the engine's `key`, handed out.
-    fn property_key_out(&mut self, key: Key) -> Completion<PropertyKey> {
+    pub(crate) fn property_key_out(&mut self, key: Key) -> Completion<PropertyKey> {
         let key = match self.key_value(key)? {
             Value::Symbol(symbol) => PropertyKey::Symbol(symbol),
             Value::String(string) => PropertyKey::String(string),
@@ -562,7 +572,7 @@ macro_rules! scoped_methods {
             /// A new host object (decision 15). A stale or foreign prototype answers `Err`.
             pub fn new_host_object(
                 &mut self,
-                spec: HostObjectSpec,
+                spec: HostObjectSpec<H>,
             ) -> Result<Completion<ObjectRef>, HostError> {
                 self.agent.scoped_new_host_object(spec)
             }

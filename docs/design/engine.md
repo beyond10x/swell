@@ -491,8 +491,9 @@ constructor) and no `prototype`. A direct `eval` in an arrow sees the same `this
 The mechanism:
 
 1. `this` is taken when the arrow is made. The closure instruction of an arrow stores the
-   `this` value of the frame that makes it in the function object, which the collector traces;
-   a call of the arrow puts that value in its frame's `this` and runs no OrdinaryCallBindThis.
+   `this` value of the frame that makes it in a box of the function object (item 4), which the
+   collector traces; a call of the arrow puts that value in its frame's `this` and runs no
+   OrdinaryCallBindThis.
    The `This` instruction and the `this` a direct `eval` takes from its caller's frame
    (`dynamic_code.rs`) stay as they are, so an arrow in an arrow, and eval code in an arrow,
    get it too. This equals the standard while every function's `this` binding is initialized
@@ -521,7 +522,77 @@ The mechanism:
    Slice 8 therefore changes item 1 for the arrows of a derived constructor only: there `this`
    becomes a slot of the constructor's function environment, uninitialized until `super()`
    returns (the state of item 2 of "Lexical bindings"), which those arrows read and a `super()`
-   in one of them initializes, in place of a value copied when the arrow is made.
+   in one of them initializes, in place of a value copied when the arrow is made; item 6 of
+   "Classes" says how they read it.
+4. What an arrow takes, and where each lives. Added on 2026-11-26 for slice 8. An arrow takes
+   four things from the code around it:
+   - `this`. Copied, as item 1 says. In a derived constructor, the arrow's code reads the
+     constructor's `this` binding instead (item 6 of "Classes").
+   - `new.target`. Copied: the NewTarget of the frame that makes the arrow, which a [[Construct]]
+     frame holds and every other frame does not, eval code taking its caller's.
+   - The function its `this` comes from. Copied: the `function` of the frame that makes the arrow.
+     That is the nearest enclosing function that is not an arrow, or none at the top of a script
+     or in a function made by `Function`.
+   - The home object. Not copied: it is read as that function's `home_object`, which MakeMethod
+     fixes before any code of the method runs.
+
+   `arguments` stays a name (item 2), and the private environment comes through the arrow's
+   [[Environment]] ("Private names", item 3).
+
+   The mechanism: `lexical_this` (`crates/swell/src/object/ecmascript_function.rs:76`) gives way
+   to `arrow: Option<Box<ArrowContext>>`, where `ArrowContext` holds `this: Value`,
+   `new_target: Option<ObjectRef>` and `function: Option<ObjectRef>`. The box is charged with the
+   record as owned bytes when the arrow is made and traced by `EcmascriptFunction::trace`
+   (`ecmascript_function.rs:82`). A call of the arrow puts the box's `this` and NewTarget in its
+   frame, and the box's function as the frame's `function`. So the `function` of every frame
+   (`interp/frame.rs:141`) is the function whose environment GetThisEnvironment answers
+   (`sec-getthisenvironment`): the callee for a function that is not an arrow, the box's function
+   for an arrow, the caller's for eval code (item 5), and none for a script. The super instructions,
+   SuperCall and PerformEval read only that field.
+
+   Reason: the copies equal the standard, since a function environment's [[NewTarget]] and
+   [[FunctionObject]] are set when its call starts and never change (`sec-newfunctionenvironment`).
+   The field is set and traced today (`frame.rs:141`, `:229`; `ecmascript_function.rs:361`) and
+   read at one other site (`interp/generator.rs:79`, the prototype of a generator object), so the
+   change costs no byte of a frame.
+
+   Rejected:
+   - The three in the function environment record of the surrounding function. `env/function.rs`
+     keeps them on the frame, and it would need a record per call of every function that makes an
+     arrow.
+   - Three fields inline in `EcmascriptFunction`, where every function would carry them.
+   - The arrow itself as its frame's `function`. Every reader would then have to step from an
+     arrow to its box.
+5. Eval code: which function its frame stands for, and PerformEval's four flags. Added on
+   2026-11-26 for slice 8. PerformEval reads four facts of GetThisEnvironment (`sec-performeval`):
+   - inFunction: it is a function environment;
+   - inMethod: HasSuperBinding, its function's [[HomeObject]] is not undefined;
+   - inDerivedConstructor: its function's [[ConstructorKind]] is derived;
+   - inClassFieldInitializer: its function's [[ClassFieldInitializerName]] is not empty.
+
+   The mechanism: the eval frame's `function` (`crates/swell/src/dynamic_code.rs:374`, `None`
+   today) becomes the caller frame's `function` for a direct `eval`, and stays `None` for an
+   indirect one. By item 4, that is the function GetThisEnvironment answers. `eval_code_of` and
+   `parse_eval_code` derive the flags from it:
+   - inFunction: the function is there;
+   - inMethod: its `home_object` is set;
+   - inDerivedConstructor: its class box (item 3 of "Classes") says derived;
+   - inClassFieldInitializer: its template's field flag (`FunctionTemplate`,
+     `crates/compiler/src/bytecode.rs:1071`) is set, on the template of a `FieldInitializer`
+     function.
+
+   An indirect `eval` has all four false. The four reach `swell_syntax::parse_eval_with`
+   (`dynamic_code.rs:325`) as one value with the strictness of the caller, and the eval frame
+   takes its caller's NewTarget too. [[ClassFieldInitializerName]] is that one bit: PerformEval is
+   its only reader and asks only whether it is empty. The name a field gives an anonymous function
+   is compiled in (item 4 of "Classes").
+
+   Reason: the frame's `function` is there, traced and unread, and a template flag costs no byte
+   of a frame or an object.
+
+   Rejected:
+   - The flag on the initializer's frame, which grows every frame's charged bytes.
+   - [[FunctionObject]] in the function environment record, a record per call.
 
 **A parameter list that is not simple.** Added on 2026-11-22 for slice 6. What a script sees, the
 standard's (`sec-functiondeclarationinstantiation`, steps 19 to 30;
@@ -803,6 +874,29 @@ throw and a termination included. A frame that is suspended (a generator; an asy
 from slice 10) keeps the charges it holds, which move with it, until its generator completes,
 a termination drops it while it runs, or the sweep that frees the object holding it credits them
 ("Suspended frames" below, item 3).
+
+Before each key's turn, `ForInNext` reads whether the key is still a property ("A property
+that is deleted before it is processed is ignored", `#sec-enumerate-object-properties`) with
+the methods the enumeration itself called, [[GetOwnProperty]] and [[GetPrototypeOf]]; it never
+calls HasProperty, so no `has` trap runs. A chain in which the walk met no Proxy is read
+along [[GetPrototypeOf]] from the object, with a step per prototype as OrdinaryHasProperty
+charges: it costs the steps and bytes HasProperty cost, no code runs and nothing is kept.
+When the walk of EnumerateObjectProperties meets a Proxy, it keeps on the kept stack, in room
+charged before anything is kept and given back on every way out, the keys visited so far,
+each object of the chain and each object's own keys, and it records the chain of objects it
+goes through: the object, then each prototype in the order [[GetPrototypeOf]] answered them,
+the ordinary objects before the first Proxy included. That list is charged by its capacity
+before it grows and is held by the loop's enumerator, which the collector traces; it is
+credited when the enumerator leaves the operand stack, with its frame, or with a collected
+generator that held that frame. The loop follows the chain its walk recorded, once: before
+each key's turn it asks [[GetOwnProperty]] of the objects of that chain, in order, until one
+has the key, with a step before each object after the first, and it calls no
+[[GetPrototypeOf]] again, so each object of the chain is asked for its prototype once, by the
+walk. A key is ignored only when no object of the chain has it at its turn; a key that an
+earlier object of the chain gained after the walk is still visited. A change of a prototype in
+the chain during the loop (`Object.setPrototypeOf`, a `setPrototypeOf` trap) changes neither
+the objects the loop reads nor their order. A cycle of `getPrototypeOf` answers ends in the
+walk, at the step budget or at the memory budget, whichever comes first.
 
 **Depth bounds,** each a limit the host sets, each ending in an outcome:
 
@@ -1507,6 +1601,508 @@ gets (one or two), and a reaction job per settlement. A call of one of these met
 step of a builtin call; the call of the sync iterator's method is a re-entry as any call from a
 builtin, and a sync generator resumed by it is resumed from Rust (item 6 of "Suspended frames").
 
+**Classes.** Added on 2026-11-26 for slice 8. Its place: the paragraphs of this decision follow
+the order of delivery (slices 2, 6, 7 and 10 above), and section 12 delivers slice 8 after slices
+10, 4 and 9, so classes come last; "Private names" follows because a class body is the scope its
+private names belong to. What a script sees, the standard's:
+
+- ClassDefinitionEvaluation (`sec-runtime-semantics-classdefinitionevaluation`) evaluates the
+  heritage in a scope that holds the class's own name uninitialized, with the PrivateEnvironment
+  around the class (`class C extends C {}` throws a `ReferenceError`). It makes the prototype and
+  the constructor F and evaluates the elements in source order: methods are defined, computed keys
+  are evaluated and converted by ToPropertyKey, field initializers and static blocks become
+  functions that do not run yet. Then it initializes the class's own name, adds the static private
+  methods to F, and runs the static elements in source order: each static field is defined and
+  each static block is called with `this` F (`language/statements/class/static-init-sequence.js`:
+  field, block, field, block).
+- Class code is strict (`sec-strict-mode-code`). F's [[Call]] throws a `TypeError` of F's realm
+  (`sec-ecmascript-function-objects-call-thisargument-argumentslist`, step 2).
+- A base constructor's [[Construct]] makes `this` from NewTarget and runs InitializeInstanceElements
+  before its parameters are bound (`sec-ecmascript-function-objects-construct-argumentslist-newtarget`,
+  OrdinaryCallBindThis and InitializeInstanceElements before OrdinaryCallEvaluateBody).
+  InitializeInstanceElements adds the private methods first and then defines the fields in order
+  (`sec-initializeinstanceelements`).
+- A derived constructor's `this` is uninitialized until `super(...)` returns
+  (`sec-super-keyword-runtime-semantics-evaluation`). Its result:
+  - the object its code returns;
+  - its `this` when it returns `undefined` or ends;
+  - a `TypeError` for any other returned value;
+  - a `ReferenceError` when `this` is still uninitialized.
+
+  Both errors are of the caller's realm, because [[Construct]] removes the callee's context
+  before these checks (`built-ins/Function/internals/Construct/derived-return-val-realm.js`,
+  `derived-this-uninitialized-realm.js`).
+
+What a host sees: only the hook of "Private names". Each item states the rule first and then the
+mechanism.
+
+1. The class tree. The parser gives the compiler `Stmt::Class` and `Expr::Class`, each with one
+   `Class` record:
+   - the BindingIdentifier, if any;
+   - the heritage, if any;
+   - the constructor;
+   - the elements in source order;
+   - the span of the whole class.
+
+   An element is static or not. It is one of:
+   - a method (its key, its function, and whether it is a method, a getter or a setter);
+   - a field (its key and its initializer);
+   - a static block.
+
+   A key is a literal, a computed expression or a private name.
+
+   The record says whether the class has a written `constructor` (`default_constructor`), which
+   the resolver reads to place the hidden `this` of a default derived constructor (item 6).
+   Where `super` stands is one state of the parser with three values: outside a method, in a
+   method (a SuperProperty stands), in the constructor of a class with a heritage (a SuperCall
+   stands too). An arrow keeps the state of the code around it; eval code takes it from
+   PerformEval's flags.
+
+   Every piece of code that the standard makes a function is a `Function` record with a
+   `FunctionId` (`crates/syntax/src/ast.rs:34`, `:686`). Three kinds join those of `FunctionKind`
+   (`ast.rs:620`):
+   - `ClassConstructor`: the written constructor, or the default one the parser makes when there
+     is none. Its span is the class's, since F's [[SourceText]] is the source text of the class.
+   - `FieldInitializer`: the initializers of one run of fields (item 4), not of one field. Scope
+     analysis reads them as one body, the function's own code.
+   - `StaticBlock`.
+
+   A function the parser makes takes the number of its first token: a run of fields at the first
+   token of its first field, a default constructor at the class's `{`. Rejected: one function per
+   field in the tree. Item 4 rejects that form at run time, so the tree would number functions the
+   compiler never makes.
+2. ClassDefinitionEvaluation is compiled code. The class is a sequence of instructions in the code
+   around it, each a step, in the clause's order:
+   1. The class scope: the class's own name, uninitialized and immutable, and one hidden binding
+      per computed field key, placed by the rules of "Lexical bindings" (a record when a function
+      of the class or a lookup by name reaches it, which the field initializers do). Then the
+      heritage, evaluated in it, and `ClassHeritage`, `[h] -> [constructorParent, protoParent]`,
+      which runs steps 8.d to 8.h of the clause on its value (`null`, a constructor, its
+      `prototype` an object or `null`; a `TypeError` otherwise). Then the private record of
+      "Private names" (item 3), with a new Private Name per private identifier the class
+      declares.
+   2. The prototype, with protoParent as its [[Prototype]]. F, made from the constructor's
+      template with the prototype as its [[HomeObject]], constructorParent as its [[Prototype]],
+      its name at creation and the class box of item 3. F's `prototype` property (not writable)
+      and the prototype's `constructor`.
+   3. The elements in source order:
+      - a method is made with its home object (MakeMethod, as `DefineMethod` does today,
+        `crates/compiler/src/bytecode.rs:227`) and defined on the prototype or on F, not
+        enumerable;
+      - a private method's function is made and stored in its hidden binding of the private
+        record;
+      - a computed field key is evaluated, converted by `ToPropertyKey` (`bytecode.rs:239`) and
+        stored in its hidden binding;
+      - a field initializer or a static block makes nothing yet.
+   4. The class's own name is initialized with F. If the class has instance elements, their
+      initializer (item 4) is made and stored in F's box. The static private methods are added to
+      F. Each static run of fields and each static block is called, in source order (item 4).
+   5. The private record and the class scope are left, and F is the value. A throw in any step
+      leaves the two records as a throw leaves a block's.
+
+   Class code is strict on every instruction (delivered on 2026-11-27 with
+   `story:class-definition-evaluation`). The bodies of the constructor, the methods, the
+   accessors, the field initializers and the static blocks are functions of their own and carry
+   `strict` in their templates. The computed keys and the heritage are compiled into the frame
+   around the class, whose flag `strict` (`interp/frame.rs`) `execute_next` reads once per
+   instruction. So the compiler marks where that code starts and ends:
+   - `SetStrict(true)` where a class starts in non-strict code, before its scope is entered, and
+     `SetStrict(false)` after its scope is left. A class inside class code, or in strict code,
+     emits neither. The instruction writes the running frame's `strict`. The heritage goes after
+     the class scope is entered and before `ClassPrototype`, between the two instructions.
+   - Every other way into an instruction gives the flag the value of that instruction's place in
+     the source:
+     - a handler (`catch`, `finally`, a pattern's, the throw and return handlers of `yield*` and
+       of the async functions) carries the strictness of its target in its record,
+       `Handler::strict`, and `enter_handler` writes it into the frame with the program counter;
+     - a return completion (a `return` of a generator resumed at a `yield` in a key) leaves the
+       class code through `exit_return`, which emits `SetStrict` with the code's own strictness
+       before it jumps to a `finally` or to the end;
+     - a suspended frame moves whole into its holder and back (`interp/suspend.rs`), so a frame
+       suspended in a key resumes strict;
+     - an exception that leaves the frame leaves it to its caller, whose own flag holds.
+   - Cost: no field in `Frame`, and no test of the strictness on the path of an instruction that
+     does not need it. `SetStrict` and `SetClassName` each run in a function of their own, on no
+     re-entry path, so the frames of `execute` and `enter_handler` keep their size in the
+     unoptimised profiles (measured by the unit: dev 392 and 760 bytes, `stack-debug` 808 and
+     808, before and after).
+   - No other code that is strict by its place inside non-strict code runs in the frame around
+     it: the parameter defaults of a function with a `"use strict"` body are in that function's
+     frame, field initializers and static blocks are functions of their own, and direct eval
+     runs in a frame of its own with its own flag.
+
+   An anonymous class under a computed key of an object literal (`({ [k]: class {} })`) takes the
+   key's name before its elements run (NamedEvaluation, step 4 of the named form of the clause):
+   the resolver marks the class constructor in `Resolution::named_by_key`, and the compiler emits
+   `SetClassName` right after `MakeClassConstructor`, while the key stands two below the
+   constructor on the stack. A static method keyed `name` then wins over the key's name, and
+   `Reflect.ownKeys(C)` lists `length`, `name`, `prototype` first. A function or an arrow
+   function under a computed key keeps its `SetFunctionName` after the value. A later position
+   that takes a run-time name (a field with a computed key, static or not) uses the same route:
+   the class constructor joins `named_by_key` where the resolver walks the position, and the key
+   stays where `SetClassName` finds it. A private name is no such position: `#x = class {}` takes
+   the name `#x` at compile time.
+3. The class constructor's box (decision 7 of slice 8). A class constructor is an
+   `EcmascriptFunction` (`crates/swell/src/object/ecmascript_function.rs:52`) whose new field
+   `class: Option<Box<ClassConstructor>>` is set. The struct lives in a new file,
+   `object/class_constructor.rs`. The story that creates it gives it every slot slice 8 needs:
+   - `kind`, base or derived: [[ConstructorKind]];
+   - `instance_elements: Option<ObjectRef>`: the instance elements' initializer of item 4, which
+     stands for [[Fields]] and [[PrivateMethods]] together.
+
+   The other slots live elsewhere:
+   - [[IsClassConstructor]] is the presence of the box.
+   - [[HomeObject]] stays in `home_object` (`ecmascript_function.rs:62`), as for every method.
+   - [[ClassFieldInitializerName]] is a flag of the template (item 5 of "`this` and `arguments` in
+     an arrow function").
+
+   The box is charged with the record as owned bytes and credited by the sweep that frees it, as
+   the slots of a built-in function are ("A built-in function with slots", decision 4). The kind
+   site, `EcmascriptFunction::trace` (`ecmascript_function.rs:82`), traces the initializer.
+
+   Size: `lexical_this: Option<Value>` (`ecmascript_function.rs:76`) gives way to the arrow's box
+   (item 4 of the arrow paragraph), so two boxes of 8 bytes each replace one field of 16 bytes.
+   `EcmascriptFunction` keeps its size, and the record its 200 bytes (`object/generator.rs:62`),
+   until [[PrivateElements]] makes it 208. That `Option<Value>` takes 16 bytes, through a niche of
+   `Value`'s tag, is the expected layout, not a measurement.
+
+   Reason: one story owns the struct, so the later stories fill its slots and add no field.
+
+   Rejected:
+   - [[Fields]] and [[PrivateMethods]] as two lists in the box that Rust walks at construction.
+     Rust cannot run an initializer and go on (item 4). The lists would also need the Private Name
+     type at order 2, before private names exist.
+   - The slots inline in `EcmascriptFunction`, where every function would carry them.
+4. Field initializers and static elements are compiled calls (decision 3 of slice 8). The rule:
+   - The instance elements of a class are one function, their initializer. It is made once per
+     evaluation of the class, as a method whose home object is the prototype, from a
+     `FieldInitializer` template with the field flag set. It is stored in the box. Its code:
+     1. Every private method and accessor of the class is added to `this` (item 5 of "Private
+        names").
+     2. Every field that is not static is defined in source order. The initializer is evaluated,
+        or `undefined`. An anonymous function is named by the field's name (NamedEvaluation,
+        `sec-runtime-semantics-classfielddefinitionevaluation`). The value is defined by
+        `DefineField` or `DefineComputedField` (`bytecode.rs:217`, `:242`) for a public key, the
+        computed one read from its hidden binding, and by the private add for a private key.
+     3. The code returns `undefined`.
+   - `InitInstance`, `[o] -> [r]`, reads the box of the running frame's function (item 4 of the
+     arrow paragraph). It pushes a call frame of the initializer with `this` o and no arguments, at
+     the step and the depth check of any call (`push_call_frame`,
+     `crates/swell/src/interp/dispatch.rs:1533`). When the box holds no initializer, it pushes
+     `undefined`. The compiler follows it with `Pop`. The return of that frame pushes `undefined`
+     on the caller's operand stack (`return_from_frame`, `dispatch.rs:78`), and the `Pop` discards
+     it.
+   - A base class constructor's template begins with `This; InitInstance; Pop` when its class has
+     instance elements, before its parameters are bound. A derived constructor runs the same after
+     every SuperCall (item 7).
+   - Static elements: the class-definition code (item 2, step 4) calls, in source order, one
+     function per run of consecutive static fields and one per static block. Each is called as
+     `<F>; <the function, made as a method with home object F>; Call(0); Pop` (`Call`'s stack
+     `[this, f, args]`, `dispatch.rs:1415`).
+     - A run's function is a `FieldInitializer` template with the field flag set. It defines the
+       run's fields on `this` and adds no private methods: those are added to F before the first
+       run.
+     - A static block's function is a `StaticBlock` template without the flag. It is the body
+       function of ClassStaticBlockDefinitionEvaluation
+       (`sec-runtime-semantics-classstaticblockdefinitionevaluation`), with a `var` scope of its
+       own. It makes an arguments object when its code can observe one: only through a direct
+       `eval` ("Names", item 4), because `arguments` in the block is an early error
+       (`language/statements/class/static-init-invalid-arguments.js`).
+   - A `FieldInitializer` template makes no arguments object: every reference to `arguments` in
+     it is an early error, and eval code there refuses it (PerformEval's inClassFieldInitializer).
+   - A field initializer keeps the [Yield] and [Await] of its class body, as the pinned draft's
+     `Initializer[+In, ?Yield, ?Await]` reads, but its code (a class nested in it included, the
+     functions in it not) holds no YieldExpression and no AwaitExpression: the parser refuses each
+     at its `yield` or `await` with `yield expression in a class field initializer` or `await
+     expression in a class field initializer`. This is a stated difference from the pinned draft,
+     which has no early error against them: a field initializer is the body of a function of its
+     own that is neither a generator nor an `async` function, so no step of
+     ClassFieldDefinitionEvaluation could run one there. The computed keys beside it read `yield`
+     and `await` with the [Yield] and [Await] around the class. In a static block the parser
+     clears both, and the early errors refuse `await` there.
+
+   The forms against each other, for n fields that are not static, of a class evaluated once and
+   constructed k times:
+   - (a) One function per field, each called and popped by compiled code: n function objects per
+     evaluation, each a record of 200 bytes and its template; n frames per construction, each
+     `frame_bytes()` (`interp/frame.rs:159`) and its locals; per field at least 2 steps (the call
+     and its `Pop`) on top of the field's own instructions.
+   - (b) One function per run, chosen: one function object per evaluation for the instance
+     elements; one frame per construction, with 3 steps (`This` or `Dup`, `InitInstance`, `Pop`)
+     and the initializer's `Return`. Each field costs its own instructions, at least 2
+     (the value and `DefineField`). On the static side, one function object per run, made, called
+     once and left to the collector: one record and 4 steps per run.
+   - (c) One function per placement, all static fields and blocks of a class in one function with
+     the blocks inlined: rejected, for a reason other than cost. One function gives
+     PerformEval's inClassFieldInitializer one answer, but eval code must see true in a static
+     field and false in a static block, and a block needs its own `var` scope and arguments
+     object.
+
+   Reason for (b): no script can tell (b) from (a).
+   - Class code is strict, so a field initializer's own `var` scope is reachable only by a direct
+     `eval`, whose `var` names stay in its own record (`sec-performeval`, strictEval).
+   - An initializer has no `arguments`.
+   - No script gets hold of an initializer function: it is no value of a binding or a property,
+     and strict code has no `caller`.
+
+   (b) spends the same instructions per field as (a), and one frame per construction where (a)
+   spends n. A script lengthens n only by its source text, and every instruction is a step.
+   `static-init-sequence.js` holds by construction: the order of the calls is the order of the
+   source.
+
+   Decision 7 of slice 8: no list of static elements and no walk of one exist. The order is
+   compiled code, emitted by the story that compiles the class. [[ClassFieldInitializerName]] is
+   the field flag of the template.
+
+   Rejected: a seam in Rust that pushes the initializers' frames from a loop over a list of fields.
+   `return_from_frame` (`dispatch.rs:78-92`) pushes every returned value on the caller's operand
+   stack, and a Rust loop cannot push the next frame after the first returns.
+5. `super.x` finds [[HomeObject]] through the running frame's function. GetThisEnvironment and
+   GetSuperBase (`sec-super-keyword-runtime-semantics-evaluation`, MakeSuperPropertyReference)
+   read the function whose environment answers GetThisEnvironment. With item 4 of the arrow
+   paragraph, that is the `function` of every frame: the method, or for an arrow and eval code the
+   function they stand for. The base is that function's `home_object` and its [[GetPrototypeOf]],
+   which is ordinary: a home object is an object literal, a prototype or a class constructor. The
+   receiver is the `this` binding, read before the key as the clause orders; in a derived
+   constructor that is the checked read of item 6. Object literals (order 1) and classes use the
+   same instructions.
+
+   Who makes `super.x` legal (decision 6 of slice 8): the production MethodDefinition admits a
+   SuperProperty in its code, for object literals and classes alike, the class constructor
+   included (`sec-method-definitions-static-semantics-early-errors` holds no rule against it; the
+   rules of FunctionBody refuse it elsewhere). The parser's flag is set in one place,
+   `method_head`, which every MethodDefinition passes. So the story of `super` owns it for class
+   methods too. The flag for field initializers and static blocks belongs to the story of class
+   element syntax. The flag that admits a SuperCall in the constructor of a class with a heritage
+   (`sec-class-definitions-static-semantics-early-errors`) belongs to the story of derived classes.
+6. The `this` of a derived constructor is a binding (decision 1 of slice 8). It is a hidden
+   binding of the derived constructor's function scope, named `this`, a reserved word that no
+   IdentifierReference spells. It is placed by the rules that exist:
+   - a checked local slot (`GetLocalChecked`, `bytecode.rs:488`);
+   - a slot of the function environment (`GetEnvChecked`, `bytecode.rs:501`), when the
+     constructor holds an arrow or a direct `eval` ("Lexical bindings", item 1). A direct eval
+     makes its record named ("Names", item 3).
+
+   Every arrow inside a derived constructor, and inside such an arrow, takes the binding,
+   whether or not its code reads `this` (delivered on 2026-11-27 with
+   `story:derived-classes-and-super-call`). The resolver gives the arrow the `this` site when it
+   opens the arrow's scope, before it reads the arrow's body: a read of `this` can sit in a
+   nested arrow or in a direct `eval` with no `this` token in sight, and finding it would take a
+   second pass over the body. The price is the binding's slot in the function environment:
+   measured, 184 live bytes more per kept construction (1,101 against 917 bytes per instance
+   over 100 kept instances, the same arrow in a base constructor) and no step more.
+
+   How code reaches it:
+   - The template's first instruction makes it uninitialized, before the parameters are bound,
+     since `constructor(a = super())` is legal and records start `undefined`
+     (`crates/swell/src/env/mod.rs:341`). `Uninitialize` is the local form
+     (`bytecode.rs:474`), `UninitializeEnv { hops, slot }` the record form.
+   - Every `this` in the constructor's own code and in the arrows within it is a checked read of
+     the binding. An arrow's read crosses its [[Environment]] by hops and slot, so an arrow made
+     before `super()` reads the object after the constructor returned
+     (`language/expressions/class/constructor-this-tdz-during-initializers.js`).
+   - Eval code in the constructor (inDerivedConstructor) looks the name `this` up ("Names",
+     rule 1). Class code is strict, so no `with` record lies on the way.
+   - The frame's `this` field is not read in a derived constructor.
+
+   Reason: the binding is the standard's [[ThisBindingStatus]] of the constructor's function
+   environment, kept where the engine keeps every binding that a closure or eval code reaches.
+
+   Rejected:
+   - The slot on the constructor's frame, reached through the arrow's box: a heap object cannot
+     hold a frame, and a frame index goes stale when the frame is popped (the case above calls the
+     arrow after that).
+   - The arrow's box holding the constructor's record: a second path to a record that the arrow's
+     [[Environment]] already reaches, 16 more bytes per arrow and a line of trace, and eval code
+     would still need its own way.
+7. SuperCall without a re-entry (decision 2 of slice 8). `super(args)` compiles to:
+   1. `GetSuperConstructor`, `[] -> [c]`: the running frame's function's [[GetPrototypeOf]]
+      (`sec-getsuperconstructor`), before the arguments are evaluated (the clause's order; no
+      test262 case fixes it).
+   2. The arguments.
+   3. `SuperCall(n)`, or `SuperCallSpread` for a spread. It checks IsConstructor after the
+      arguments (`language/expressions/super/call-proto-not-ctor.js`). It pushes c's construct
+      frame on the running loop with the running frame's NewTarget, as `New` pushes one
+      (`push_construct_frame`, `dispatch.rs:1584`, which gets the NewTarget as a parameter):
+      - a base parent gets `this` from OrdinaryCreateFromConstructor(NewTarget,
+        "%Object.prototype%");
+      - a derived parent gets no object.
+      A built-in, bound, proxy or host constructor is constructed from Rust, as `New` constructs
+      it today.
+   4. `BindThis`, `[r] -> [r]`: it initializes the binding of item 6 in its form, and throws the
+      `ReferenceError` of BindThisValue when the binding is already initialized
+      (`sec-bindthisvalue`). It is three instructions, one per form: `BindThis(slot)` for a
+      local, `BindThisEnv { hops, slot }` for a record, `BindThisName(name)` in eval code.
+   5. `Dup; InitInstance; Pop`, with the initializer of the running frame's function's box.
+      InitializeInstanceElements takes F from GetThisEnvironment, the class whose constructor runs
+      `super()`, not the parent.
+
+   Each level of a chain is one frame of the loop (`frame_depth`) and no re-entry. A chain of
+   1,000 derived classes holds at most one frame per class and one initializer's frame at once,
+   and spends at least 5 steps per level. The default derived constructor is a template that
+   keeps its arguments (`binds_parameters`, `bytecode.rs:1104`, with no parameter, so the call
+   keeps every argument in its locals). Its template is `Uninitialize 0; GetSuperConstructor;
+   SuperCallKept(1); BindThis 0; Dup; InitInstance; Pop; KeepThis 0; Return`. The hidden `this`
+   of item 6 takes local slot 0, so the kept arguments start at local slot 1. `SuperCallKept(1)`
+   passes them on from there as the list, with no iterator
+   (`language/statements/class/subclass/default-constructor-spread-override.js`) and a step per
+   argument as `RestArguments` (`bytecode.rs:463`), charged at once for their count. The default
+   base constructor is `This; InitInstance; Pop`, then the return of `undefined`.
+
+   The standard makes both default constructors built-in functions (CreateBuiltinFunction in
+   ClassDefinitionEvaluation), and no script tells a template from one:
+   - [[Call]] throws the same `TypeError` of F's realm;
+   - `Function.prototype.toString` gives the source text of the class;
+   - the realm is the same.
+
+   Rejected: one instruction that constructs from Rust and then binds and initializes. It is a
+   re-entry per level (`reentry_depth`, `STACK_BYTES_PER_REENTRY`), which the chain of 1,000
+   would pay 1,000 times.
+8. The derived return. Every `Return` the compiler emits for a derived constructor, at the end of
+   the body and as the last instruction of `exit_return` (`crates/compiler/src/lib.rs:864`), after
+   the `finally` blocks, follows a `KeepThis`. `KeepThis` copies the binding of item 6, when it is
+   initialized, into the frame's `this`. It is two instructions, `KeepThis(slot)` for a local and
+   `KeepThisEnv { hops, slot }` for a record, whose hops count from the environment the `return`
+   stands in. Eval code never returns from a constructor, so there is no form by name.
+
+   The frame's `constructed` (`interp/frame.rs:152`) records which [[Construct]] the frame runs:
+   - none, for a call;
+   - a base construction, with its object;
+   - a derived construction.
+
+   The clause is applied with the caller's realm current, in one of two places. For a frame that
+   is not the base of its run, `return_from_frame` (`dispatch.rs:78`) applies it after the pop
+   and after it has set the caller's realm. For the base frame of a run (a [[Construct]] from
+   Rust: a bound function, `Reflect.construct`, the host's construct call) `return_from_frame`
+   makes no error. `run_frame` restores the realm that was current when it started, and from
+   Rust that is the realm of the callee's own activation (`enter_code` pushes one with the
+   function's realm), so an error made in `construct_function` after `run_frame` returned would
+   still be of the callee's realm (measured with a bound function's [[Construct]]). There
+   `construct_function` returns the derived answer as it is, and `construct`
+   (`crates/swell/src/object/ecmascript_function.rs`) makes the error after `leave_code`. For a
+   derived frame:
+   - an object is the result;
+   - any value other than `undefined` throws a `TypeError`;
+   - otherwise the frame's `this`, when it is an object;
+   - otherwise a `ReferenceError`.
+
+   Both errors are made in the caller's realm in either place, as the realm cases above require.
+   The frame-bytes test measures the new field, which is expected at the size of
+   `Option<ObjectRef>`.
+
+   Rejected: the checks in an instruction before `Return`. It runs in the callee's realm.
+9. Budgets. Every instruction above is a step. The class box, the instance elements' initializer
+   and the private record are charged when made. A static run's function is charged when made and
+   credited by the sweep that frees it. No buffer lives across a call into script. The number of
+   elements is bounded by the source and compiled; no loop in Rust runs over them.
+
+**Private names.** Added on 2026-11-26 for slice 8. What a script sees, the standard's:
+
+- Each evaluation of a class makes a new Private Name per private identifier it declares
+  (`sec-private-names`, ClassDefinitionEvaluation). A getter and a setter of one name share it.
+- `o.#x` finds the element of o whose key is that Private Name (`sec-privateelementfind`,
+  `sec-privateget`, `sec-privateset`), and throws a `TypeError` when there is none. `#x in o`
+  answers whether there is one, and throws a `TypeError` when o is no object
+  (`sec-relational-operators-runtime-semantics-evaluation`).
+- Adding the same field or method twice to one object throws a `TypeError` (`sec-privatefieldadd`,
+  `sec-privatemethodoraccessoradd`). The add does not read [[Extensible]].
+- Private elements are no properties: no [[OwnPropertyKeys]], no trap of a `Proxy` and no listing
+  of a host sees them.
+- A private identifier that no enclosing class declares is an early error
+  (`sec-static-semantics-allprivateidentifiersvalid`). In eval code it is checked against the names
+  of the running PrivateEnvironment and its outer ones (`sec-performeval`).
+
+What a host sees: `host_ensure_can_add_private_element` (HOST-119) before an add to a host object
+with an override table, and nowhere else. The requirement that the story of the hook adds is
+`HOST-223`.
+
+1. The Private Name and its arena. A Private Name is a `PrivateNameRef`: a handle
+   (`crates/swell/src/heap/arena.rs:33`) into an arena of its own, `Heap.private_names`, beside the
+   arenas of `heap/mod.rs:278`. Its record holds its description, a `StringRef`. It is no `Value`
+   (`value.rs:21`), which is the host's type: a host and every `match` over values would see it. A
+   binding holds it as a third variant of `SlotValue`, `PrivateName(PrivateNameRef)`
+   (`interp/frame.rs:83`). Only the slots of a private record hold that variant, and their names
+   start with `#`, which no IdentifierName does, so no lookup by name reaches them.
+
+   Size: the variant is expected to keep `SlotValue` at 16 bytes, with the handle laid out beside
+   the niche of `Value`'s tag. This was not built; the test `a_slot_is_as_large_as_a_value`
+   (`frame.rs:249`) decides. If it shows 24 bytes, the private record keeps its Private Names in a
+   boxed list of its own beside its slots, and `SlotValue` stays as it is.
+
+   Rejected: a Symbol, which is a `Value` a script or host can be handed.
+2. [[PrivateElements]]. `ObjectRecord` (`object/mod.rs:168`) gets
+   `private_elements: Option<Box<PrivateElements>>`, so the record grows from 200 to 208 bytes:
+   `RECORD_BYTES` in `object/generator.rs:62` and in `object/async_generator.rs:135` both change.
+   The box holds a list of entries, each a Private Name with one of:
+   - a field (its value);
+   - a method (its function);
+   - an accessor (an optional getter and an optional setter).
+
+   The list is charged before it grows and recorded in `Grown` (`object/mod.rs:144`), as a
+   property map's growth is. PrivateElementFind compares in order and spends a step per comparison
+   past `SMALL` (`object/property.rs:188`). Every object has the box: ordinary, proxy and host
+   objects alike, since the adds act on the object itself, through no trap.
+
+   One add function in a new file, `object/private_names.rs`, serves both adds:
+   1. For a host object with an override table, it calls the hook (HOST-119), and a `Throw` from it
+      is the add's throw (`HOST-223`).
+   2. An entry that is already there is a `TypeError`.
+   3. The entry is appended.
+
+   Rejected: private elements in the property map under a key of a new kind. Every listing, every
+   trap and every host walk of the map would have to filter them.
+3. The private environment is a record of the environment chain. ClassDefinitionEvaluation's
+   classPrivateEnvironment is a declarative record, the private record. Item 2 of "Classes" pushes
+   it inside the class scope after the heritage, because the heritage sees the PrivateEnvironment
+   around the class. Its slots:
+   - one per private identifier, holding the Private Name;
+   - one per private method, getter or setter, holding its function, made once per evaluation of
+     the class (PrivateMethodOrAccessorAdd adds that one function to every instance).
+
+   It is a record whenever the class declares a private name. Code in the class body after the
+   heritage resolves `#x` at compile time to hops and a slot, as a captured name. That covers the
+   methods, the initializers, the static blocks, the computed keys and the arrows in them. An
+   arrow reads it through its [[Environment]], as it reads any captured name.
+
+   Reason: for every code that can name a private identifier, the standard's PrivateEnvironment
+   runs beside the LexicalEnvironment and is captured with it. Inside the class body both are the
+   class's, in the heritage both are the outer ones, and a function captures both when it is made.
+   So one chain carries both. `Function` code has the global environment and no
+   PrivateEnvironment (`sec-createdynamicfunction`), so it has no private names.
+
+   Rejected: a PrivateEnvironment chain of its own, beside the frame's and in every function
+   object. It costs a field per frame and per function, and a second chain to trace.
+4. Resolution in eval code (decision 5 of slice 8). PerformEval walks the caller's LexicalEnvironment
+   chain once, a step per record, and lists each slot whose name starts with `#` as its text, its
+   hops and its slot; an inner name hides an outer one of the same text. The list is charged
+   while it lives.
+   - The parse gets the texts, for AllPrivateIdentifiersValid.
+   - The compile entry of eval code gets the positions. Eval code then uses the same instructions
+     as other code, with hops counted as the eval code's own records plus the caller's hops.
+   - The list holds no handle, so nothing in it needs a root, and it is dropped after the compile.
+
+   Rejected:
+   - An instruction that looks a private name up by its text at run time: n steps per access, and
+     a second form of every private instruction.
+   - The private environment of the function an arrow's `this` comes from. For an arrow in an inner
+     class's heritage or computed key, that function lies outside the inner class and misses its
+     names.
+5. Instructions. Each names the private name's hops and slot:
+   - `GetPrivate`, `[o] -> [v]` (PrivateGet);
+   - `SetPrivate`, `[o, v] -> [v]` (PrivateSet);
+   - `PrivateIn`, `[o] -> [b]`;
+   - `AddPrivateField`, `[o, v] -> [o]`;
+   - `AddPrivateMethod`, `[o] -> [o]`, which names the hops and slot of the function too.
+
+   A private getter or setter is called as a getter of a property is called today.
+6. What the collector traces. A `SlotValue::PrivateName` is marked wherever a `SlotValue` is
+   traced, in a record and in a frame. The record of a Private Name marks its description. Each
+   entry of [[PrivateElements]] marks its Private Name and its values at the object record's site
+   (`object/mod.rs ObjectRecord::trace`). For that, the collector gets `Item::PrivateName`
+   (`heap/collect.rs:46`) and a workspace in `Mark`, and `PrivateNameRecord::trace` becomes the
+   22nd entry of `KIND_SITES` (21 today, `heap/collect.rs:351`). No Private Name is a root. It
+   lives while a record, a frame, a suspended frame or an object's elements hold it.
+
 ## 4. Values and the heap without unsafe code
 
 **Value.** A Rust enum: `Undefined`, `Null`, `Boolean`, `Number(f64)`, and `String`, `Symbol`,
@@ -1584,6 +2180,19 @@ instead of an abort. Over the budget: `new ArrayBuffer` and the typed array cons
 lower bound, since the run ends at the first growth refused whatever was left below it, so the
 host makes room (roots dropped and a collection, or its own charges given back) before the next
 entry (`host-interface.md`, decision 10, HOST-188 to HOST-190; added on 2026-11-22).
+
+The reading `heap_bytes()` after a script depends on what the budget made the agent do, and
+not only on what the script left live. The arenas count their capacity, and a collection is
+due when the bytes allocated since the last one pass a threshold. So an agent with room
+grows an arena where an agent close to its budget ends its entry in
+`Terminated(MemoryBudget)` and collects at the next safe point instead. Two agents that ran
+the same script can therefore differ by an arena's growth: 114,688 bytes between an agent
+under 64 MiB and one whose budget is 128 KiB above its own reading, at the realm paddings
+`SWELL_TEST_REALM_FUNCTIONS` = 11 and 12 (`proxy_shape_traps::memory_sweep`). The host sees
+this through `heap_bytes()`; `live_bytes()` after a collection does not differ. Script sees
+only whether a later entry ends in the memory budget. A test that uses one agent's reading
+as another agent's budget reads it from an agent under that same budget (added on
+2026-11-27, `story:private-names-and-private-methods`).
 
 The rule, for every slice: storage is charged before it is allocated, and work before it is
 done. A structure's bytes are charged to the memory budget before the structure exists or
@@ -3035,18 +3644,18 @@ The rule:
 | 5 | `regexp` | 2,724 | 5,441 |
 | 6 | `bindings-and-iteration` | 3,898 | 7,351 |
 | 7 | `generators` | 1,472 | 2,801 |
-| 8 | `classes` | 9,302 | 18,455 |
-| 9 | `collections-proxy-reflect` | 1,787 | 3,545 |
+| 8 | `classes` | 9,339 | 18,529 |
+| 9 | `collections-proxy-reflect` | 1,858 | 3,678 |
 | 10 | `promises-and-async` | 3,759 | 7,258 |
 | 11 | `modules` | 1,281 | 1,833 |
-| 12 | `bigint` | 359 | 716 |
+| 12 | `bigint` | 381 | 760 |
 | 13 | `binary-data` | 3,061 | 6,078 |
 | 14 | `shared-memory` | 598 | 1,192 |
 | 15 | `iterator-helpers-and-resources` | 1,094 | 2,170 |
 | 16 | `weak-references` | 82 | 164 |
 | 17 | `tail-calls` | 35 | 35 |
 | 18 | `annex-b` | 1,134 | 1,451 |
-| 19 | `staging` | 1,363 | 2,550 |
+| 19 | `staging` | 1,233 | 2,299 |
 | | slices 1 to 19 | 44,931 | 85,794 |
 | 20 | `temporal` (excluded at first) | 4,617 | 9,234 |
 | 21 | `intl402` (excluded at first) | 1,662 | 3,324 |
@@ -3132,6 +3741,18 @@ of the same paragraph ("A case that comes into a slice from one delivered later"
 on 2026-11-26 with the same check (`awk -f slices.awk` over this block and the inventory's
 `meta.tsv`, counting slice `04`): `04 1681 3320`, the slice line of `slot task test262` on the
 code of the slice, every run passed. Every moved case goes to slice 9 or 12 and every case that
+comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
+lines still sum to 53,801 and 103,360.
+
+Slice 9 had 1,787 cases and 3,545 runs by its rules (its `dir` and `feature` lines, the lines of
+the closes of slices 2, 3, 4, 5, 6 and 10 that gave it cases, and the order of delivery). 1,858
+cases and 3,678 runs are what slice 9 counts after its close: 59 cases (118 runs) that need a
+later slice move by the lines of the paragraph "Slice 9's cases that need a later slice", 37 to
+slice 8 and 22 to 12, and 130 cases (251 runs) come into it from slice 19 by the lines of the
+same paragraph ("A case that comes into a slice from one delivered later" above). Measured on
+2026-11-27 with the same check (`awk -f slices.awk` over this block and the inventory's
+`meta.tsv`, counting slice `09`): `09 1858 3678`, the slice line of `slot task test262` on the
+code of the slice, every run passed. Every moved case goes to slice 8 or 12 and every case that
 comes in leaves slice 19, so slices 1 to 19 still hold 44,931 cases and 85,794 runs and the 22
 lines still sum to 53,801 and 103,360.
 
@@ -3791,6 +4412,104 @@ line, since each has the line `feature Reflect.construct 9` (slice 9 passes 170 
 start and 268 now). No case of another slice delivered after 4 failed at the start and passes
 in every run now.
 
+**Slice 9's cases that need a later slice.** Measured at the close of slice 9 (2026-11-27,
+`story:slice-09-conformance-close`), with the run lines of the runner on the code of the slice
+(`slot --timeout 30m task test262-expected`, its `runs.tsv`), on the wave branch after the last
+other story of the slice was merged (`bc45e92`): 22 of the 1,787 cases of slice 9 fail, each in
+every one of its runs (44 runs), and none on a part of slice 9: the first failure of each run is
+the refusal `BigInt literal is not supported before slice 12`. They are the 22 cases that
+`docs/plan/slice-09/close-later.tsv` sends to slice 12, and each was read: with its later part it
+needs nothing of slice 9 that its sibling cases without that part do not pass with.
+`Map/prototype/getOrInsertComputed/this-not-object-throw` calls the method with `1n` as its
+receiver; of each of the seven set methods of `Set/prototype/` (`difference`, `intersection`,
+`isDisjointFrom`, `isSubsetOf`, `isSupersetOf`, `symmetricDifference`, `union`),
+`called-with-object` passes `1n` as the other set, `require-internal-slot` calls the method with
+`1n` as its receiver, and `size-is-a-number` sets the `size` of the other set to `0n`; the other
+cases of those directories pass. The 37 cases that the same file sends to slice 8 pass in every
+run on this code, but cannot pass in slice 9: each failed at the start of the slice in every one
+of its runs (74 runs) on a refusal of slice 8 (`class is not supported before slice 8` 36,
+`new.target is not supported before slice 8` 1), holds that token in the case file itself
+(`class` 36, 7 of them with `super` too; `new.target` 1), and passes only because the code of
+slice 8 merged so far is on the same branch. Slice 8 is delivered after slice 9, so they move to
+slice 8; the plan of slice 8 counts them as its incoming cases (`docs/plan/slice-08/incoming.tsv`).
+All 59 move, each a line of `conformance/test262/moves.tsv` with kind `part` and a token of
+`conformance/test262/later-parts.tsv` as its evidence, held by `test262-moves-check`: 58 lines are
+new, with `from` 9; 1 is the line of a case moved to slice 9 earlier,
+`language/expressions/optional-chaining/new-target-optional-call` (`from` 2, by the close of
+slice 2, evidence `Reflect`), which keeps its `from` and gets the `to` 8 and the evidence
+`new.target`, and its line of the block `dir <file> 9` becomes `dir <file> 8`. The later parts
+gain no token. The block gains 58 lines `dir <file> <slice>`, 22 to slice 12 and 36 to slice 8,
+one for a single file each, since every directory that holds one of them holds cases of slice 9
+that stay. The groups, by target slice (lines of the list; in brackets the lines with `from` 9):
+
+- to slice 8, 37 (36): `class` 36 (`allows-set-like-class`, `receiver-not-set`,
+  `set-like-class-order` and `subclass-receiver-methods` of each of the seven set methods, and
+  `subclass-symbol-species` and `subclass` of `difference`, `intersection`,
+  `symmetricDifference` and `union`), `new.target` 1
+  (`optional-chaining/new-target-optional-call`, `from` 2);
+- to slice 12, 22 (22): `1n` 15 (`Map/prototype/getOrInsertComputed/this-not-object-throw` and
+  the `called-with-object` and `require-internal-slot` cases of the seven set methods), `0n` 7
+  (their `size-is-a-number` cases).
+
+The counts sum to the 59 lines this change adds to or changes in the list, 58 of them with
+`from` 9.
+
+130 cases (251 runs) come into slice 9, by the rule "A case that comes into a slice from one
+delivered later" above. Each is counted by the block in slice 19 (`dir test/staging/ 19`), failed
+at the start of the slice (`cf7f253`, the commit the first story of the slice was merged onto) on
+a part of slice 9, passes in every run on the code of the slice, has no `feature` or `flag` line
+of a slice delivered after 9, and needs no part of a later slice, read by the tokens of
+`conformance/test262/later-parts.tsv` (comments removed, as `test262-moves-check` reads a case):
+a token of a later slice in the case excludes it; a token of a later slice in a harness file it
+includes excludes it unless every line of that file that holds the token only asks whether the
+global exists (`typeof X === 'function'`, with `instanceof X` behind it on the same line), which
+needs nothing of the later slice. Of the harness files only `harness/deepEqual.js` has such
+tokens: `BigInt` (line 241) and the eleven typed-array constructors (lines 264 to 274). 31 of the
+130 come in this way, each with `deepEqual.js` as the only place of its later tokens; 99 hold no
+token of a later slice anywhere. `harness/propertyHelper.js` is not such a file: `Uint8Array`
+stands in line 42 (`Uint8Array.prototype`, behind the `typeof` of line 40) and `BigInt` in line
+236 (`BigInt(0)` in the `bigint` branch of a `switch` on the type of a value), so
+`staging/sm/Array/unscopables`, which includes it and otherwise meets the rule, stays in slice 19.
+By directory under `test/staging/`: `sm/Array/` 24, `sm/Proxy/` 17, `sm/object/` 14,
+`sm/Reflect/` 10, `sm/RegExp/` 10, `sm/generators/` 8, `sm/Map/` 7, `sm/Function/` 6,
+`sm/extensions/` 6, `sm/Symbol/` 5, the directory itself 4 (`set-is-subset-*`), `set-methods/` 3,
+`sm/String/` 3, `sm/strict/` 2, and 1 each of `sm/AsyncGenerators/`, `sm/Date/`, `sm/Error/`,
+`sm/WeakMap/`, `sm/async-functions/`, `sm/class/`, `sm/destructuring/`, `sm/expressions/`,
+`sm/lexical-environment/`, `sm/misc/` and `sm/regress/`. Every case of
+`test/staging/set-methods/` and of `test/staging/sm/WeakMap/` comes in, and each of the two
+directories gets one line `dir <directory>/ 9`; each of the other 126 cases gets a line `dir
+<file> 9`. All 130 are listed in `docs/plan/slice-09/close-into-09.tsv` with the slice they
+leave, the line that takes them, the runner's message of their first failed run at the start and
+the part of slice 9 they failed on; each passes in every one of its runs (the close's check (4)
+over that file), and none has a line of `moves.tsv`. The failure at the start is read case by
+case from the run lines of the full run of `cf7f253`. The message of 118 names the part: `Proxy`
+is not defined 66, `Map` 29 (24 of them among the 31, 22 of which name `Map` only in
+`deepEqual.js`, which keeps a `Map` of the values it has seen), `Reflect` 12, `Set` 10, `WeakMap` 1. The message of 12 names none, and the part is read from the case's source
+(the fifth field of `close-into-09.tsv`): an `assert.throws` that got a `ReferenceError` for
+`Reflect` 5 (the four `create-function-parse-before-getprototype` cases, which call
+`Reflect.construct`, and `Reflect/argumentsList`), for `Proxy` 3 (`Function/has-instance`,
+`RegExp/source`, `regress/regress-1383630`) or for `Map` 1 (`Map/iterator-thisv-error`);
+`Reflect/surfaces`, whose `typeof Reflect` was `"undefined"`; `Array/isArray`, whose
+`new (pickGlobal()).Proxy(...)` threw `the value is not a constructor`; and
+`extensions/proxy-enumeration`, which looks for `Proxy` among the own names of the global
+object. Four other cases failed at the start, pass in every run now and have no `feature` or
+`flag` line and no token of a later slice, and stay in their slice with no line, since they
+failed on a part of slice 8: `language/expressions/new.target/escaped-target` (slice 8; the
+refusal `new.target is not supported before slice 8`; it spells `target` with a Unicode escape
+for its `a`, so no token matches) and `staging/sm/PrivateName/error-outside-class`,
+`illegal-in-identifier-context` and `illegal-in-object-context` (slice 19; a counted refusal of
+the private names they compile with `eval`). 8,370 other cases of slices delivered after 9
+failed at the start and pass in every run now, and stay in their slice with no line, each with a
+`feature` line of a slice delivered after 9 or a token of one that the rule above does not pass:
+8,236 of slice 8 (4,496 with a `feature` line of slice 8; 3,740 with a token of slice 8 and no
+`feature` line, 107 of which also hold `BigInt` and `Uint8Array` through
+`harness/propertyHelper.js`), 129 of slice 19 (2 with a `feature` line, 127 with a token, by the
+first of their tokens in the order of the later parts: `class` 109, `new.target` 11, `super` 5,
+`BigInt` 1 (`sm/Array/unscopables`, through `propertyHelper.js`), `.__proto__` 1), 2 of slice 18
+and 1 each of slices 11, 15 and 17 (each with a `feature` line of its slice). Slice 19 passes 866
+cases on the base of this close and 736 after it: the 130 that come in leave it, and no run
+changed its outcome between the two runs.
+
 ```swell-slices
 order delivery 1,2,3,6,5,7,10,4,9,8,11,12,13,14,15,16,17,18,19,20,21
 dir test/harness/ 1
@@ -4336,7 +5055,7 @@ dir test/language/expressions/optional-chaining/iteration-statement-for-of-type-
 dir test/language/expressions/optional-chaining/iteration-statement-for.js 6
 dir test/language/expressions/optional-chaining/iteration-statement-while.js 6
 dir test/language/expressions/optional-chaining/member-expression.js 8
-dir test/language/expressions/optional-chaining/new-target-optional-call.js 9
+dir test/language/expressions/optional-chaining/new-target-optional-call.js 8
 dir test/language/expressions/optional-chaining/optional-call-preserves-this.js 6
 dir test/language/expressions/optional-chaining/optional-chain-expression-optional-expression.js 6
 dir test/language/expressions/optional-chaining/optional-chain-prod-arguments.js 6
@@ -5738,6 +6457,192 @@ dir test/staging/sm/global/parseFloat-01.js 4
 dir test/staging/sm/global/parseInt-01.js 4
 dir test/staging/sm/global/parseInt-default-to-decimal.js 4
 dir test/staging/sm/object/toPrimitive-callers.js 4
+dir test/built-ins/Map/prototype/getOrInsertComputed/this-not-object-throw.js 12
+dir test/built-ins/Set/prototype/difference/called-with-object.js 12
+dir test/built-ins/Set/prototype/difference/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/difference/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/intersection/called-with-object.js 12
+dir test/built-ins/Set/prototype/intersection/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/intersection/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/isDisjointFrom/called-with-object.js 12
+dir test/built-ins/Set/prototype/isDisjointFrom/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/isDisjointFrom/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/isSubsetOf/called-with-object.js 12
+dir test/built-ins/Set/prototype/isSubsetOf/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/isSubsetOf/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/isSupersetOf/called-with-object.js 12
+dir test/built-ins/Set/prototype/isSupersetOf/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/isSupersetOf/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/symmetricDifference/called-with-object.js 12
+dir test/built-ins/Set/prototype/symmetricDifference/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/symmetricDifference/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/union/called-with-object.js 12
+dir test/built-ins/Set/prototype/union/require-internal-slot.js 12
+dir test/built-ins/Set/prototype/union/size-is-a-number.js 12
+dir test/built-ins/Set/prototype/difference/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/difference/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/difference/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/difference/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/difference/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/difference/subclass.js 8
+dir test/built-ins/Set/prototype/intersection/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/intersection/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/intersection/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/intersection/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/intersection/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/intersection/subclass.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/isDisjointFrom/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/isSubsetOf/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/isSupersetOf/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/symmetricDifference/subclass.js 8
+dir test/built-ins/Set/prototype/union/allows-set-like-class.js 8
+dir test/built-ins/Set/prototype/union/receiver-not-set.js 8
+dir test/built-ins/Set/prototype/union/set-like-class-order.js 8
+dir test/built-ins/Set/prototype/union/subclass-receiver-methods.js 8
+dir test/built-ins/Set/prototype/union/subclass-symbol-species.js 8
+dir test/built-ins/Set/prototype/union/subclass.js 8
+dir test/staging/set-is-subset-of-empty-index.js 9
+dir test/staging/set-is-subset-on-set-like.js 9
+dir test/staging/set-is-subset-table-receiver-cleared.js 9
+dir test/staging/set-is-subset-table-transition.js 9
+dir test/staging/set-methods/ 9
+dir test/staging/sm/Array/concat-proxy.js 9
+dir test/staging/sm/Array/concat-spreadable-basic.js 9
+dir test/staging/sm/Array/for_of_2.js 9
+dir test/staging/sm/Array/for_of_3.js 9
+dir test/staging/sm/Array/for_of_4.js 9
+dir test/staging/sm/Array/from_basics.js 9
+dir test/staging/sm/Array/from_constructor.js 9
+dir test/staging/sm/Array/from_iterable.js 9
+dir test/staging/sm/Array/from_mapping.js 9
+dir test/staging/sm/Array/from_proxy.js 9
+dir test/staging/sm/Array/from_string.js 9
+dir test/staging/sm/Array/group-propertkey-is-length.js 9
+dir test/staging/sm/Array/group.js 9
+dir test/staging/sm/Array/includes.js 9
+dir test/staging/sm/Array/indexOf-packed-array.js 9
+dir test/staging/sm/Array/isArray.js 9
+dir test/staging/sm/Array/join-no-has-trap.js 9
+dir test/staging/sm/Array/pop-no-has-trap.js 9
+dir test/staging/sm/Array/shift-no-has-trap.js 9
+dir test/staging/sm/Array/sort-delete-ascending-order.js 9
+dir test/staging/sm/Array/sort_holes.js 9
+dir test/staging/sm/Array/sort_proxy.js 9
+dir test/staging/sm/Array/to-length.js 9
+dir test/staging/sm/Array/unshift-with-enumeration.js 9
+dir test/staging/sm/AsyncGenerators/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/Date/toString-generic.js 9
+dir test/staging/sm/Error/constructor-ordering.js 9
+dir test/staging/sm/Function/arguments-iterator.js 9
+dir test/staging/sm/Function/bound-length-and-name.js 9
+dir test/staging/sm/Function/bound-non-constructable.js 9
+dir test/staging/sm/Function/builtin-no-construct.js 9
+dir test/staging/sm/Function/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/Function/has-instance.js 9
+dir test/staging/sm/Map/NaN-as-key.js 9
+dir test/staging/sm/Map/constructor-iterator-primitive.js 9
+dir test/staging/sm/Map/forEach-selfhosted-behavior.js 9
+dir test/staging/sm/Map/getter-name.js 9
+dir test/staging/sm/Map/iterable.js 9
+dir test/staging/sm/Map/iterator-thisv-error.js 9
+dir test/staging/sm/Map/symbols.js 9
+dir test/staging/sm/Proxy/define-writable-as-non-writable.js 9
+dir test/staging/sm/Proxy/delete-non-extensible.js 9
+dir test/staging/sm/Proxy/getPrototypeOf.js 9
+dir test/staging/sm/Proxy/hasInstance.js 9
+dir test/staging/sm/Proxy/json-stringify-replacer-array-revocable-proxy.js 9
+dir test/staging/sm/Proxy/ownkeys-allowed-types.js 9
+dir test/staging/sm/Proxy/ownkeys-linear.js 9
+dir test/staging/sm/Proxy/ownkeys-trap-duplicates.js 9
+dir test/staging/sm/Proxy/proxy-constructNonObject.js 9
+dir test/staging/sm/Proxy/proxy-no-receiver-overwrite.js 9
+dir test/staging/sm/Proxy/proxy-proto-lazy-props.js 9
+dir test/staging/sm/Proxy/proxy-with-revoked-arguments.js 9
+dir test/staging/sm/Proxy/regress-bug1062349.js 9
+dir test/staging/sm/Proxy/report-writable-as-non-writable.js 9
+dir test/staging/sm/Proxy/revocable-proxy-prototype.js 9
+dir test/staging/sm/Proxy/revoke-as-side-effect.js 9
+dir test/staging/sm/Proxy/revoke-no-name.js 9
+dir test/staging/sm/Reflect/argumentsList.js 9
+dir test/staging/sm/Reflect/deleteProperty.js 9
+dir test/staging/sm/Reflect/getOwnPropertyDescriptor.js 9
+dir test/staging/sm/Reflect/getPrototypeOf.js 9
+dir test/staging/sm/Reflect/has.js 9
+dir test/staging/sm/Reflect/propertyKeys.js 9
+dir test/staging/sm/Reflect/set.js 9
+dir test/staging/sm/Reflect/setPrototypeOf.js 9
+dir test/staging/sm/Reflect/surfaces.js 9
+dir test/staging/sm/Reflect/target.js 9
+dir test/staging/sm/RegExp/constructor-constructor.js 9
+dir test/staging/sm/RegExp/constructor-ordering-2.js 9
+dir test/staging/sm/RegExp/flag-accessors.js 9
+dir test/staging/sm/RegExp/flags.js 9
+dir test/staging/sm/RegExp/match-trace.js 9
+dir test/staging/sm/RegExp/replace-trace.js 9
+dir test/staging/sm/RegExp/search-trace.js 9
+dir test/staging/sm/RegExp/source.js 9
+dir test/staging/sm/RegExp/split-trace.js 9
+dir test/staging/sm/RegExp/toString.js 9
+dir test/staging/sm/String/iterator_edge_cases.js 9
+dir test/staging/sm/String/match-GetMethod.js 9
+dir test/staging/sm/String/string-pad-start-end.js 9
+dir test/staging/sm/Symbol/enumeration-order.js 9
+dir test/staging/sm/Symbol/enumeration.js 9
+dir test/staging/sm/Symbol/property-basics.js 9
+dir test/staging/sm/Symbol/property-reflection.js 9
+dir test/staging/sm/Symbol/toPrimitive.js 9
+dir test/staging/sm/WeakMap/ 9
+dir test/staging/sm/async-functions/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/class/newTargetProxyNative.js 9
+dir test/staging/sm/destructuring/order.js 9
+dir test/staging/sm/expressions/destructuring-array-done.js 9
+dir test/staging/sm/extensions/array-pop-proxy.js 9
+dir test/staging/sm/extensions/proxy-array-target-length-definition.js 9
+dir test/staging/sm/extensions/proxy-enumeration.js 9
+dir test/staging/sm/extensions/proxy-strict.js 9
+dir test/staging/sm/extensions/reviver-mutates-holder-array.js 9
+dir test/staging/sm/extensions/reviver-mutates-holder-object.js 9
+dir test/staging/sm/generators/create-function-parse-before-getprototype.js 9
+dir test/staging/sm/generators/delegating-yield-1.js 9
+dir test/staging/sm/generators/delegating-yield-11.js 9
+dir test/staging/sm/generators/delegating-yield-5.js 9
+dir test/staging/sm/generators/delegating-yield-6.js 9
+dir test/staging/sm/generators/delegating-yield-7.js 9
+dir test/staging/sm/generators/delegating-yield-8.js 9
+dir test/staging/sm/generators/delegating-yield-9.js 9
+dir test/staging/sm/lexical-environment/unscopables-proxy.js 9
+dir test/staging/sm/misc/new-with-non-constructor.js 9
+dir test/staging/sm/object/bug-1206700.js 9
+dir test/staging/sm/object/defineProperties-order.js 9
+dir test/staging/sm/object/defineProperty-proxy.js 9
+dir test/staging/sm/object/entries.js 9
+dir test/staging/sm/object/freeze-proxy.js 9
+dir test/staging/sm/object/getOwnPropertyDescriptor.js 9
+dir test/staging/sm/object/getOwnPropertySymbols-proxy.js 9
+dir test/staging/sm/object/getOwnPropertySymbols.js 9
+dir test/staging/sm/object/preventExtensions-proxy.js 9
+dir test/staging/sm/object/property-descriptor-order.js 9
+dir test/staging/sm/object/propertyIsEnumerable-proxy.js 9
+dir test/staging/sm/object/seal-proxy.js 9
+dir test/staging/sm/object/toPrimitive.js 9
+dir test/staging/sm/object/values.js 9
+dir test/staging/sm/regress/regress-1383630.js 9
+dir test/staging/sm/strict/primitive-assignment.js 9
+dir test/staging/sm/strict/primitive-this-getter.js 9
 dir test/built-ins/Number/ 4
 dir test/built-ins/Math/ 4
 dir test/built-ins/Date/ 4
@@ -6211,18 +7116,18 @@ Its output on this document:
 05 2724 5441
 06 3898 7351
 07 1472 2801
-08 9302 18455
-09 1787 3545
+08 9339 18529
+09 1858 3678
 10 3759 7258
 11 1281 1833
-12 359 716
+12 381 760
 13 3061 6078
 14 598 1192
 15 1094 2170
 16 82 164
 17 35 35
 18 1134 1451
-19 1363 2550
+19 1233 2299
 20 4617 9234
 21 1662 3324
 x-stage3 2591 5008

@@ -4,16 +4,17 @@ id: epic:slice-09-collections-proxy-reflect
 kind: epic
 status: draft
 title: 'Slice 9, collections-proxy-reflect: Map, Set, Proxy, Reflect'
-summary: 'Map, Set, WeakMap, WeakSet, Proxy and Reflect: 1,744 cases and 3,459 runs.'
-relations:
-- depends_on: epic:slice-08-classes
-revision: 1
+summary: 'Map, Set, WeakMap, WeakSet, Proxy and Reflect: 1,785 cases and 3,541 runs.'
+revision: 5
 ---
 ## Context
 
-Slice 9 of 19, `collections-proxy-reflect` (`docs/design/engine.md`, section 12). It needs slices 1 to 8
-in the design's order of dependencies; the design states no reason for the order beyond that
-(iteration is slice 6's, and the collections are iterable). It builds `Map`, `Set`, `WeakMap`,
+Slice 9 of 19, `collections-proxy-reflect` (`docs/design/engine.md`, section 12). The design
+orders it after slices 1 to 8 and states no reason for the order beyond that (iteration is slice
+6's, and the collections are iterable). The wave plan builds it before slice 8 (`class`): the
+close of this slice moves the cases that need `class` or `super` by rule lines
+(`story:slice-09-conformance-close`: 37 cases), and stories of slice 8 depend on stories of this
+slice, so this epic has no edge to slice 8's. It builds `Map`, `Set`, `WeakMap`,
 `WeakSet`, `Proxy` and `Reflect`. Governing decisions (`docs/design/engine.md`, decision N): 4 (keyed
 hash in hash maps, collector), 3 (a `Proxy` trap chain is a re-entry), 9 (host objects override
 the same internal methods as a `Proxy`), 13.
@@ -31,17 +32,29 @@ the same internal methods as a `Proxy`), 13.
 - The invariants of 6.1.7.3 that a `Proxy` trap result must satisfy (the same invariants the engine
   checks on a host object's override, decision 9).
 
-### Open, to be settled by this epic's first story
+### Open when the epic was written, and where each was settled
 
 - How `WeakMap` and `WeakSet` entries are cleared by the collector. Decision 4 says weak references
   are cleared after marking (9.9) and names `WeakRef` and `FinalizationRegistry`; it does not name
   the collection of `WeakMap` and `WeakSet` entries, which this slice builds before slice 16.
-- Where the SipHash and the host-seeded key first exist (decision 4; `swell-num` is built in slice 4).
-- Which of the 39 features with no `swell-slices` line fall inside this slice.
+  Settled in `story:weak-map-and-weak-set`: ephemeron marking, and the entries are cleared in
+  one pass after marking.
+- Where the SipHash and the host-seeded key first exist (decision 4). Settled before this slice:
+  `crates/num/src/siphash.rs`, keyed by the host's `hash_key` (HOST-145), is what the engine's
+  hash map (`crates/swell/src/heap/map.rs`) uses.
+- Which of the 39 features with no `swell-slices` line fall inside this slice. Settled in
+  `story:slice-09-conformance-close`: a case is counted where the block's lines put it, and the
+  close reports the features of the slice's cases that have no line.
 
 ## Counts
 
-- Slice 9 (`collections-proxy-reflect`): 1,744 cases, 3,459 runs (section 12 table).
+- Slice 9 (`collections-proxy-reflect`): 1,858 cases, 3,678 runs after its close (section 12
+  table of `docs/design/engine.md`; `test262-slice 09 1858 3678 0 0 1858 1858 0 0`). Before the
+  close it held 1,787 cases and 3,545 runs, with the 2 cases the close of slice 4 moved in. The
+  close moved 59 cases (118 runs) to later slices with evidence: 37 to slice 8 (`class` 36,
+  `new.target` 1) and 22 to slice 12 (`1n` 15, `0n` 7). It took in 130 cases (251 runs) of
+  `test/staging/` from slice 19 (`docs/plan/slice-09/close-into-09.tsv`). The epic first said
+  1,744 and 3,459, then 1,785 and 3,541 on `62c7cf59`.
 - Directories the design names for it (paths under `test/`, cases): `Set` 381, `Proxy` 308, `Map` 202.
 - Lines of the `swell-slices` block that assign cases to this slice:
   - `dir test/built-ins/Map/ 9`
@@ -73,8 +86,10 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 
 - `WeakRef`, `FinalizationRegistry`, `$262.gc`: slice 16.
 - `Promise` and the async builtins: slice 10. `Iterator` helpers: slice 15.
-- Web IDL legacy platform objects, `WindowProxy`, `document.all` and host overrides of the internal
-  methods: surf's binding layer (decision 9, "Not in scope").
+- Web IDL legacy platform objects, `WindowProxy`, `document.all` and the Web IDL bindings that use
+  the table of overrides: surf's (decision 9, "Not in scope"). The table itself, its dispatch and
+  the checks of what an override answers are in this slice (`story:host-object-overrides`; HOST-41,
+  HOST-112, HOST-113, HOST-114 and HOST-222 have their tests, and none is pending for slice 9).
 - `Temporal` (slice 20), ECMA-402 (slice 21), stage 3 features, concurrent agents.
 
 ## Constraints
@@ -91,7 +106,7 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 
 `slot task check` exits 0 on `main`, and in that run:
 
-1. The conformance runner's line for slice 9 reads 1,744 cases and 3,459 runs that exist, and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
+1. The conformance runner's line for slice 9 reads the cases and runs of the section 12 table after the moves of the close (1,785 cases and 3,541 runs before them), and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
 2. No pass count of an earlier slice or of any directory line in `conformance/test262/expected.txt` is lower than before the slice.
 3. `conformance/test262/expected.txt` is committed with the lines of that run, and `AGENTS.md` and `README.md` carry the gate's numbers.
 4. A case of this slice that is found to need a later slice is moved by a rule line in the `swell-slices` block of the design with its reason, in the same change that moves the counts of both slices; none is skipped silently.

@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T05:23:31Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-walk-in-parts-under-the-cpu-bound",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/realmwalk at fa63ea96, build node, before the merge into wave/big-2",
+    "reference": "task check on the build node at fa63ea9: build, clippy and every step to conform-engine passed (19 test binaries 2305 passed, 1 ignored; test-collect 1818 passed; test-faults 1; conform-engine 16; step test 11.6 s); test262-check red with the stale sources digest of wave/big-2 (the unit changes no file the digest covers); test262-moves-check exit 0 and gate-selftest 99 passed, 0 failed, run apart on the same head"
+  }
+}

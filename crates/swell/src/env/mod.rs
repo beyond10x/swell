@@ -268,8 +268,8 @@ impl EnvironmentRecord {
         if let Some(outer) = self.outer {
             mark.push(Item::Environment(outer));
         }
-        for value in self.slots.iter().filter_map(|slot| slot.value()) {
-            mark.value(value);
+        for slot in &self.slots {
+            slot.trace(mark);
         }
         for (key, value) in self.added.bindings.iter() {
             key.trace(mark);
@@ -283,9 +283,7 @@ impl EnvironmentRecord {
             Some(RecordNames::Global(global)) => {
                 for (key, binding) in global.bindings.iter() {
                     key.trace(mark);
-                    if let Some(value) = binding.value.value() {
-                        mark.value(value);
-                    }
+                    binding.value.trace(mark);
                 }
             }
             None => {}
@@ -446,7 +444,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Value> {
         match self.slot_state(env, hops, slot)? {
             SlotValue::Value(value) => Ok(value),
-            SlotValue::Uninitialized => Err(self.fault()),
+            SlotValue::Uninitialized | SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -521,6 +519,33 @@ impl<H: Host> Agent<H> {
     /// The [[OuterEnv]] of `env`.
     pub(crate) fn outer_environment(&mut self, env: Handle) -> Completion<Option<Handle>> {
         Ok(self.environment(env)?.outer)
+    }
+
+    /// Whether a declarative record on the chain from `env` outward names a slot `key` in the
+    /// table of its compiled code. An Object Environment Record (a `with` object, the global
+    /// object) is passed without a read of its object: no trap or getter runs. One step per
+    /// record and the steps of each table's scan, as [`Agent::resolve_name`] spends them.
+    pub(crate) fn chain_names_slot(&mut self, env: Option<Handle>, key: Key) -> Completion<bool> {
+        let mut current = env;
+        while let Some(handle) = current {
+            self.charge_steps(1)?;
+            let (outer, found, steps) = {
+                let record = self.environment(handle)?;
+                let (named, steps) = match (record.binding_object, record.slot_names()) {
+                    (None, Some(names)) => names.find(key),
+                    _ => (None, 0),
+                };
+                (record.outer, named.is_some(), steps)
+            };
+            if steps > 0 {
+                self.charge_steps(steps)?;
+            }
+            if found {
+                return Ok(true);
+            }
+            current = outer;
+        }
+        Ok(false)
     }
 
     /// ResolveBinding of `key` (`#sec-resolvebinding`, `#sec-getidentifierreference`) from the
@@ -704,6 +729,9 @@ impl<H: Host> Agent<H> {
                         let name = self.key_text(key);
                         Err(self.not_initialized(&name))
                     }
+                    // A slot that holds a Private Name is named with its `#`, which no lookup
+                    // by name asks for: reaching it is a logic error.
+                    SlotValue::PrivateName(_) => Err(self.fault()),
                 },
                 Some(Bound::Added(index)) => self.added_value(env, index).map(Some),
                 None => Ok(None),
@@ -744,6 +772,7 @@ impl<H: Host> Agent<H> {
                         let name = self.key_text(key);
                         Err(self.not_initialized(&name))
                     }
+                    (SlotValue::PrivateName(_), _) => Err(self.fault()),
                     (_, SlotKind::Const) => {
                         let name = self.key_text(key);
                         self.assign_const(&name)

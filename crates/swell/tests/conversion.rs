@@ -260,6 +260,7 @@ fn to_primitive_calls_valueof_and_tostring_in_hint_order() {
                     brand: Brand(1),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

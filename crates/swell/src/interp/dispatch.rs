@@ -18,7 +18,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use swell_compiler::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_THROW};
 
-use super::frame::{Entry, Enumerator, SlotValue};
+use super::frame::{Constructed, Entry, Enumerator, SlotValue};
 use crate::env::{NameReference, NameTable, SlotNames};
 use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
@@ -27,6 +27,7 @@ use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key};
+use crate::ops::objects::Enumeration;
 use crate::ops::operators::{BinaryOperator, number_bitwise_not, number_unary_minus};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
@@ -71,14 +72,24 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The return of the running frame with `value` ([[Call]] step 8 and [[Construct]] step 10:
-    /// a constructor's code that returns no object answers its `this`). `Some` when it was the
-    /// base frame; otherwise the value goes on the caller's operand stack, and the interrupt is
-    /// checked.
+    /// The return of the running frame with `value` ([[Call]] step 8 and [[Construct]] steps 10
+    /// to 12: a base constructor's code that returns no object answers its `this`). `Some` when
+    /// it was the base frame; otherwise the value goes on the caller's operand stack, and the
+    /// interrupt is checked. A derived constructor's frame (`Constructed::Derived`) answers the
+    /// object it returned, or its `this` for `undefined`, when there is one; otherwise, past
+    /// the base, the error of the rule is made here with the caller's realm current
+    /// ([`Agent::derived_return`]), and at the base by the Rust caller
+    /// (`object::ecmascript_function::construct`), after the callee's activation is left
+    /// (`docs/design/engine.md`, "Classes", item 8).
     fn return_from_frame(&mut self, base: usize, value: Value) -> Completion<Option<Value>> {
         let frame = self.pop_frame()?;
         let value = match (frame.constructed, value) {
-            (Some(this), value) if !matches!(value, Value::Object(_)) => Value::Object(this),
+            (Constructed::Base(this), value) if !matches!(value, Value::Object(_)) => {
+                Value::Object(this)
+            }
+            (Constructed::Derived, Value::Undefined) if matches!(frame.this, Value::Object(_)) => {
+                frame.this
+            }
             _ => value,
         };
         if self.interp.frames.len() <= base {
@@ -86,6 +97,9 @@ impl<H: Host> Agent<H> {
         }
         let realm = self.top_frame()?.realm;
         self.set_realm_slot(Some(realm));
+        if frame.constructed == Constructed::Derived && !matches!(value, Value::Object(_)) {
+            return Err(self.derived_return(value));
+        }
         self.push_value(value)?;
         self.check_interrupt()?;
         Ok(None)
@@ -133,11 +147,12 @@ impl<H: Host> Agent<H> {
     }
 
     /// Continue at `handler` of the running frame with the thrown `value`: the operand stack and
-    /// the environments as they were at the try statement, then the exception (a `catch`
-    /// block) or the throw completion record (a `finally` block, and the close of an array
-    /// pattern, whose stack is cut above its record, `interp/array_patterns.rs`). A `catch`
-    /// block ends the throw's site record; the others keep it, since their end throws the
-    /// value again.
+    /// the environments as they were at the try statement, the strictness of the handler's
+    /// place (a throw from the code of a class can reach a handler outside it), then the
+    /// exception (a `catch` block) or the throw completion record (a `finally` block, and the
+    /// close of an array pattern, whose stack is cut above its record,
+    /// `interp/array_patterns.rs`). A `catch` block ends the throw's site record; the others
+    /// keep it, since their end throws the value again.
     fn enter_handler(
         &mut self,
         handler: swell_compiler::bytecode::Handler,
@@ -162,6 +177,7 @@ impl<H: Host> Agent<H> {
         let frame = self.top_frame()?;
         frame.env = env;
         frame.pushed_envs = pushed;
+        frame.strict = handler.strict;
         frame.pc = usize::try_from(handler.target).unwrap_or(usize::MAX);
         let realm = frame.realm;
         self.set_realm_slot(Some(realm));
@@ -257,6 +273,7 @@ impl<H: Host> Agent<H> {
             I::Number(index) => self.number_constant(index),
             I::String(index) => self.string_constant(index),
             I::This => self.this_value(),
+            I::NewTarget => self.new_target_value(),
             I::Closure(index) => self.closure(index),
             I::ArrowClosure(index) => self.arrow_closure(index),
 
@@ -294,9 +311,22 @@ impl<H: Host> Agent<H> {
             I::PutNamed(index) => self.put_named(index, strict),
             I::GetIndex => self.get_index(),
             I::PutIndex => self.put_index(strict),
+            // ---- private names (`interp/private.rs`) ----
+            I::GetPrivate { .. }
+            | I::SetPrivate { .. }
+            | I::AddPrivateMethod { .. }
+            | I::NewPrivateName { .. } => self.private_instruction(),
             I::PropertyKey => self.property_key(),
             I::DeleteNamed(index) => self.delete_named(index, strict),
             I::DeleteIndex => self.delete_index(strict),
+            // ---- Super References (`interp/super_ref.rs`) ----
+            I::SuperBase => self.super_base(),
+            I::GetSuperNamed(index) => self.get_super_named(index),
+            I::GetSuperIndex => self.get_super_index(),
+            I::PutSuperNamed(index) => self.put_super_named(index, strict),
+            I::PutSuperIndex => self.put_super_index(strict),
+            I::SuperKey => self.super_key(),
+            I::DeleteSuper => self.delete_super(),
 
             // ---- literals ----
             I::NewObject => self.new_object_literal(),
@@ -307,6 +337,21 @@ impl<H: Host> Agent<H> {
             I::DefineSetter(index) => self.define_accessor(index, false),
             I::DefineMethod(index) => self.define_method(index),
             I::InitProto => self.init_proto(),
+            // ---- classes (`interp/class.rs`) ----
+            I::ClassPrototype
+            | I::ClassHeritage
+            | I::MakeClassConstructor { .. }
+            | I::DefineClassMethod(_)
+            | I::DefineClassGetter(_)
+            | I::DefineClassSetter(_)
+            | I::DefineClassComputedMethod
+            | I::DefineClassComputedGetter
+            | I::DefineClassComputedSetter
+            | I::StoreInitializer(_)
+            | I::MakeMethod(_)
+            | I::InitInstance
+            | I::SetStrict(_)
+            | I::SetClassName => self.class_instruction(),
             I::DefineIndex(index) => self.define_index(index),
             I::ArrayLength(length) => self.set_array_length(length),
             // ---- computed keys and spreads (`interp/object_literal.rs`) ----
@@ -324,6 +369,17 @@ impl<H: Host> Agent<H> {
             I::CallSpread => self.call_spread(),
             I::CallEvalSpread => self.call_eval_spread(strict),
             I::NewSpread => self.new_spread(),
+            // ---- derived classes (`interp/class.rs`) ----
+            I::GetSuperConstructor
+            | I::SuperCall(_)
+            | I::SuperCallSpread
+            | I::SuperCallKept(_)
+            | I::BindThis(_)
+            | I::BindThisEnv { .. }
+            | I::BindThisName(_)
+            | I::KeepThis(_)
+            | I::KeepThisEnv { .. }
+            | I::UninitializeEnv { .. } => self.derived_instruction(),
 
             // ---- operators ----
             I::Typeof => self.typeof_value(),
@@ -490,6 +546,16 @@ impl<H: Host> Agent<H> {
         self.replace(0, this)
     }
 
+    /// `NewTarget`: GetNewTarget (`#sec-getnewtarget`), the running frame's NewTarget or
+    /// `undefined`.
+    fn new_target_value(&mut self) -> Completion<Flow> {
+        let new_target = self
+            .top_frame()?
+            .new_target
+            .map_or(Value::Undefined, Value::Object);
+        self.replace(0, new_target)
+    }
+
     // ---- the operand stack ----
 
     /// `Pop`: the entry leaves through [`Agent::truncate_stack`], so an enumerator credits its
@@ -545,7 +611,7 @@ impl<H: Host> Agent<H> {
         let value = self.top_frame()?.locals.get(position).copied();
         match value {
             Some(SlotValue::Value(value)) => self.replace(0, value),
-            Some(SlotValue::Uninitialized) | None => Err(self.fault()),
+            Some(SlotValue::Uninitialized | SlotValue::PrivateName(_)) | None => Err(self.fault()),
         }
     }
 
@@ -1446,7 +1512,7 @@ impl<H: Host> Agent<H> {
 
     /// The `count` arguments on top of the operand stack, bottom first, left there, in a plain
     /// list: for a frame that copies them into its own charged slots before any code runs.
-    fn peek_arguments(&mut self, count: usize) -> Completion<Vec<Value>> {
+    pub(super) fn peek_arguments(&mut self, count: usize) -> Completion<Vec<Value>> {
         #[cfg(test)]
         note_instruction_copy(count);
         let frame = self.top_frame()?;
@@ -1471,7 +1537,7 @@ impl<H: Host> Agent<H> {
     /// The `count` arguments on top of the operand stack, bottom first, left there, in a list
     /// charged to the memory budget before it is made and credited when it drops. It charges
     /// no step: each value was pushed by an instruction that spent one.
-    fn charged_arguments(&mut self, count: usize) -> Completion<ChargedVec<Value>> {
+    pub(super) fn charged_arguments(&mut self, count: usize) -> Completion<ChargedVec<Value>> {
         #[cfg(test)]
         note_instruction_copy(count);
         let mut args = self.new_charged_vec(count)?;
@@ -1530,7 +1596,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// The call of the ECMAScript function `function` of `Call(count)` on this loop: its frame
-    /// replaces the `count + 2` entries of the call.
+    /// replaces the `count + 2` entries of the call. A class constructor throws the `TypeError`
+    /// of its [[Call]] instead ([`Agent::make_frame`]).
     pub(super) fn push_call_frame(
         &mut self,
         function: ObjectRef,
@@ -1540,7 +1607,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Flow> {
         self.check_frame_depth()?;
         self.step()?;
-        let frame = self.make_frame(function, this, args, None)?;
+        let frame = self.make_frame(function, this, args, Constructed::None, None)?;
         self.drop_entries(count.saturating_add(2))?;
         self.push_frame(frame);
         self.check_interrupt()?;
@@ -1576,29 +1643,37 @@ impl<H: Host> Agent<H> {
         count: usize,
     ) -> Completion<Flow> {
         let args = self.peek_arguments(count)?;
-        self.push_construct_frame(constructor, &args, count)
+        self.push_construct_frame(constructor, constructor, &args, count)
     }
 
-    /// The construction by the ECMAScript function `constructor` of `New(count)` on this loop:
-    /// its frame, with the new object as its `this`, replaces the `count + 1` entries of the
-    /// call.
+    /// The construction by the ECMAScript function `constructor` with NewTarget `new_target` on
+    /// this loop ([[Construct]] of a base constructor,
+    /// `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`): its frame, with
+    /// the object OrdinaryCreateFromConstructor(newTarget, "%Object.prototype%") made as its
+    /// `this` and `new_target` as its NewTarget, replaces the `count + 1` entries of the call.
+    /// `New` and `NewSpread` pass the callee as `new_target`, `SuperCall` the running frame's
+    /// NewTarget. A derived constructor gets no object: its frame is `Constructed::Derived`
+    /// (`docs/design/engine.md`, "Classes", item 7).
     pub(super) fn push_construct_frame(
         &mut self,
         constructor: ObjectRef,
+        new_target: ObjectRef,
         args: &[Value],
         count: usize,
     ) -> Completion<Flow> {
         self.check_frame_depth()?;
-        let this = self.ordinary_create_from_constructor(
-            constructor,
-            Intrinsic::ObjectPrototype,
-            OrdinaryData::Plain,
-        )?;
-        let keep = self.keep(Value::Object(this));
-        let frame = self
-            .step()
-            .and_then(|()| self.make_frame(constructor, Value::Undefined, args, Some(this)));
-        self.release(keep);
+        let constructed = self.construction_of(constructor, new_target)?;
+        let keep = match constructed {
+            Constructed::Base(this) => Some(self.keep(Value::Object(this))),
+            Constructed::None | Constructed::Derived => None,
+        };
+        let new_target = Some(new_target);
+        let frame = self.step().and_then(|()| {
+            self.make_frame(constructor, Value::Undefined, args, constructed, new_target)
+        });
+        if let Some(keep) = keep {
+            self.release(keep);
+        }
         let frame = frame?;
         self.drop_entries(count.saturating_add(1))?;
         self.push_frame(frame);
@@ -1619,13 +1694,14 @@ impl<H: Host> Agent<H> {
                 keys: Vec::new(),
                 next: 0,
                 bytes: 0,
+                chain: ChargedVec::new(),
             },
             _ => {
                 let object = self.to_object(value)?;
                 let keep = self.keep(Value::Object(object));
-                let list = self.enumerate_object_properties(object);
+                let enumeration = self.enumerate_object_properties(object);
                 self.release(keep);
-                let list = list?;
+                let Enumeration { found: list, chain } = enumeration?;
                 match self.interp.frames.last_mut() {
                     Some(frame) => frame.charged = frame.charged.saturating_add(list.bytes),
                     None => {
@@ -1638,6 +1714,7 @@ impl<H: Host> Agent<H> {
                     bytes: list.bytes,
                     keys: list.keys,
                     next: 0,
+                    chain,
                 }
             }
         };
@@ -1648,8 +1725,11 @@ impl<H: Host> Agent<H> {
 
     /// `ForInNext(t)`: the next key of the enumerator that is still a property of the object
     /// ("A property that is deleted before it is processed is ignored",
-    /// `#sec-enumerate-object-properties`), a step per key passed over, or the jump when none is
-    /// left.
+    /// `#sec-enumerate-object-properties`), a step per key passed over, or the jump when none
+    /// is left. Whether it is still one is read by [[GetOwnProperty]], never by a `has` trap:
+    /// along the chain the walk recorded when it met a Proxy ([`Agent::recorded_chain_has`]:
+    /// the loop follows the chain its walk recorded, once), else along [[GetPrototypeOf]] from
+    /// the object (`Agent::enumeration_has_property`).
     fn for_in_next(&mut self, target: u32) -> Completion<Flow> {
         loop {
             let next = {
@@ -1658,22 +1738,62 @@ impl<H: Host> Agent<H> {
                     Some(Entry::Enumerator(enumerator)) => {
                         let key = enumerator.keys.get(enumerator.next).copied();
                         enumerator.next = enumerator.next.saturating_add(1);
-                        Some((key, enumerator.object))
+                        Some((key, enumerator.object, !enumerator.chain.is_empty()))
                     }
                     _ => None,
                 }
             };
-            let (key, object) = match next {
-                Some((Some(key), Some(object))) => (key, object),
-                Some((None, _)) | Some((Some(_), None)) => return self.jump(target),
+            let (key, object, recorded) = match next {
+                Some((Some(key), Some(object), recorded)) => (key, object, recorded),
+                Some((None, _, _)) | Some((Some(_), None, _)) => return self.jump(target),
                 None => return Err(self.fault()),
             };
-            if self.has_property(object, key)? {
+            let present = if recorded {
+                self.recorded_chain_has(key)?
+            } else {
+                self.enumeration_has_property(object, key)?
+            };
+            if present {
                 let value = self.key_value(key)?;
                 self.push_value(value)?;
                 return Ok(Flow::Next);
             }
             self.charge_steps(1)?;
+        }
+    }
+
+    /// Whether `key` is still a property when its turn comes, over the chain of objects the walk
+    /// of the enumerator on top of the running frame's operand stack recorded (the loop
+    /// follows the chain the walk found, once): [[GetOwnProperty]] of each object of it in order,
+    /// and a step before each object after the first, as the walk along [[GetPrototypeOf]]
+    /// charged a step per prototype; no [[GetPrototypeOf]] runs, so each object of the chain is
+    /// asked for its prototype once, by the walk. The enumerator holds the chain and `key` while
+    /// each object's method runs (`Frame::trace`), and is read again after each, so nothing is
+    /// kept here.
+    pub(crate) fn recorded_chain_has(&mut self, key: Key) -> Completion<bool> {
+        let mut index = 0usize;
+        loop {
+            let link = {
+                let frame = self.top_frame()?;
+                match frame.stack.last() {
+                    Some(Entry::Enumerator(enumerator)) => {
+                        Some(enumerator.chain.get(index).copied())
+                    }
+                    _ => None,
+                }
+            };
+            let object = match link {
+                Some(Some(object)) => object,
+                Some(None) => return Ok(false),
+                None => return Err(self.fault()),
+            };
+            if index > 0 {
+                self.charge_steps(1)?;
+            }
+            if self.get_own_property(object, key)?.is_some() {
+                return Ok(true);
+            }
+            index = index.saturating_add(1);
         }
     }
 }
@@ -1846,8 +1966,10 @@ mod tests {
     }
 
     /// The rise of `used()` from before the call of the ECMAScript callee to its first
-    /// statement on the base, before the story.
-    const CALLEE_RISE: u64 = 2_032;
+    /// statement on the base, before the story: 2,032 bytes; 2,048 since
+    /// `story:new-target-meta-property` added the frame's NewTarget (`size_of::<Frame>()` from
+    /// 208 to 224 bytes).
+    const CALLEE_RISE: u64 = 2_048;
 
     /// The steps of the four scripts of
     /// [`call_and_new_hold_one_charged_copy_of_their_arguments_across_a_call`] on the base.

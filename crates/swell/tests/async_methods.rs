@@ -75,37 +75,53 @@ fn an_async_method_returns_a_promise_and_awaits() {
     );
 }
 
-/// MakeMethod (`#sec-makemethod`) gives the method its object as [[HomeObject]], which only
-/// `super` reads (`#sec-super-keyword-runtime-semantics-evaluation`); `super` is refused before
-/// slice 8, in an `async` method as in every method, so the refusal is what a script sees. The
-/// read of [[HomeObject]] through `super` is tested when slice 8 brings `super`.
+/// MakeMethod (`#sec-makemethod`) gives the method its object as [[HomeObject]], which `super`
+/// reads (`#sec-super-keyword-runtime-semantics-evaluation`): in an `async` method as in a plain
+/// one, also when the literal is eval code, `super.x` reads the property of the prototype of
+/// that object, and nothing is refused.
 #[test]
-fn super_in_an_async_method_is_refused_as_in_a_plain_method() {
+fn super_in_an_async_method_reads_its_home_object() {
     let mut agent = agent().unwrap();
     let realm = realm(&mut agent);
     let before = agent.refusals();
     for source in [
-        "({ async m() { return super.x; } })",
-        "({ m() { return super.x; } })",
+        "({ __proto__: { x: 'p' }, async m() { return super.x; } })",
+        "({ __proto__: { x: 'p' }, m() { return super.x; } })",
     ] {
         assert_eq!(
             eval_text(
                 &mut agent,
                 &realm,
                 &format!(
-                    "(function () {{ try {{ eval('{source}'); return 'parsed'; }}\n\
-                       catch (e) {{ return e.name + ': ' + e.message; }} }})()"
+                    "var read = 'pending';\n\
+                     (function () {{ var r = eval(\"{source}\").m();\n\
+                       if (r instanceof Promise) r.then(function (v) {{ read = v; }});\n\
+                       else read = r; }})();\n\
+                     read;"
                 ),
             ),
             Outcome::Normal(
-                "\"SyntaxError: super is not supported before slice 8 (1:".to_string()
-                    + if source.contains("async") { "23" } else { "17" }
-                    + ")\""
+                if source.contains("async") {
+                    "\"pending\""
+                } else {
+                    "\"p\""
+                }
+                .to_string()
             ),
             "{source}"
         );
+        let checkpoint = agent.perform_microtask_checkpoint().unwrap();
+        assert!(
+            matches!(checkpoint, HostOutcome::Normal(_)),
+            "{checkpoint:?}"
+        );
+        assert_eq!(
+            eval_text(&mut agent, &realm, "read"),
+            Outcome::Normal("\"p\"".to_string()),
+            "{source}"
+        );
     }
-    assert_eq!(agent.refusals(), before + 2);
+    assert_eq!(agent.refusals(), before);
 }
 
 /// InstantiateAsyncFunctionObject's shape through DefineMethod

@@ -126,6 +126,7 @@ fn memory_budget_charges_utf16_strings_and_host_data() {
                 brand: Brand(1),
                 data: Some(Box::new(Big { _bytes: [0; 2_048] })),
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()
             .map(|_| ())
@@ -497,8 +498,7 @@ const STACK_CHILD: &str = "SWELL_STACK_CHILD";
 fn on_bounded_stack(test: TestPath, stack: usize, body: fn()) -> Result<(), String> {
     let done = format!("{STACK_CHILD}: {test} on {stack} bytes done");
     if std::env::var_os(STACK_CHILD).is_some() {
-        std::thread::Builder::new()
-            .stack_size(stack)
+        crate::support::host::stack_thread(stack)
             .spawn(body)
             .map_err(|e| e.to_string())?
             .join()
@@ -732,6 +732,7 @@ fn host_176_a_host_charge_gives_back_what_it_charged() {
                 brand: Brand(1),
                 data: Some(Box::new(HeldCharge { _charge: charge })),
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()
             .unwrap();
@@ -1010,6 +1011,7 @@ fn realm_charging(agent: &mut Agent<TestHost>, charge: Option<u64>) -> HostOutco
                 brand: Brand(1),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()?;
         Ok(GlobalObjects { global, this: None })

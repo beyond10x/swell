@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:38:02Z",
+  "actor": "human:operator",
+  "artifact": "story:map-upsert-and-group-by",
+  "kind": "story",
+  "revision": 8,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at b9adbe35, exit 0, on the build node; the unit was merged by commit 6e03591, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/builtins_map_upsert.rs (swell::builtins_map_upsert::*) and the cases of docs/plan/slice-09/story-map-upsert.cases.txt in conformance/test262/expected.txt"
+  }
+}

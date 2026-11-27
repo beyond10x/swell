@@ -168,7 +168,7 @@ fn host_17_deepest_reentry_parses_at_full_nesting() {
 /// the full depth, in the default mode and in the lane `slow` (`SWELL_FULL_COUNTS=1`); 25 in the
 /// gate with the feature `collect-every-safe-point`, where every safe point collects and traces
 /// every live activation (at 100 the four runs took 23.9 s there at a load of 100 to 110 on 17
-/// cores, cargo-nextest). At 25 the script still re-enters through each of the four builtins
+/// cores, cargo-nextest). At 25 the script still re-enters through each of the five routes
 /// at every level, every collection of the deepest levels runs with 25 re-entries live, and the
 /// deepest still parses at full nesting; the stack bound is a property of the default mode's
 /// frames ([`BUILTINS_REENTRY`]).
@@ -182,9 +182,17 @@ fn builtins_reentry() -> u32 {
     }
 }
 
-/// The body of the stack test through builtins: the four runs, one agent each.
+/// The re-entries of [`min_stack_bytes_is_enough_through_builtins`] beside [`THROUGH_BUILTINS`]:
+/// `Math.max` through a `valueOf`, the largest route measured through the groups of builtins
+/// that no other stack test re-enters through (Math, Number, Date, Symbol, the Error
+/// constructors, the Promise builtins and the function constructors but `Function`; 12,512 bytes
+/// per re-entry in the profile `stack-debug` before the merge of `impl/weak`, the route through
+/// `toJSON` 12,640). It holds the dispatch of the builtins (`Agent::run_builtin`) for them.
+const THROUGH_OTHER_GROUPS: [&str; 1] = ["Math.max({ valueOf() { return f(); } })"];
+
+/// The body of the stack test through builtins: the five runs, one agent each.
 fn reach_through_builtins() {
-    for through in THROUGH_BUILTINS {
+    for through in THROUGH_BUILTINS.iter().chain(&THROUGH_OTHER_GROUPS) {
         reach_through(through, builtins_reentry());
     }
 }
@@ -193,8 +201,9 @@ fn reach_through_builtins() {
 /// `crates/swell/src/host/limits.rs` names this test beside its constants): on a thread with
 /// seven eighths of `min_stack_bytes()` ([`stack_with_room`]) for `frame_depth` 10,000,
 /// `reentry_depth` 1,000 and `parser_nesting` 1,000, a script reaches `reentry_depth`
-/// re-entries through each of `Function.prototype.call`, a `map` callback, `toJSON` and a
-/// replacer of `JSON.stringify` (four runs) and parses 1,000 nested brackets at the deepest,
+/// re-entries through each of `Function.prototype.call`, a `map` callback, `toJSON`, a
+/// replacer of `JSON.stringify` and the `valueOf` of an argument of `Math.max`
+/// ([`THROUGH_OTHER_GROUPS`]; five runs) and parses 1,000 nested brackets at the deepest,
 /// without a stack overflow: `min_stack_bytes()` is enough, with an eighth of it to spare. In
 /// the collect mode the depth is [`builtins_reentry`], and the thread has seven eighths of
 /// `min_stack_bytes()` of that depth.
@@ -214,7 +223,12 @@ fn min_stack_bytes_is_enough_through_builtins() {
 #[test]
 fn each_builtin_reentry_counts_against_reentry_depth() {
     for depth in [0_u32, 1, 7] {
-        for through in THROUGH_BUILTINS.iter().copied().chain(["reenter(f)"]) {
+        for through in THROUGH_BUILTINS
+            .iter()
+            .chain(&THROUGH_OTHER_GROUPS)
+            .copied()
+            .chain(["reenter(f)"])
+        {
             let mut limits = limits();
             limits.reentry_depth = depth;
             let mut agent = agent_with(limits).unwrap();
@@ -258,6 +272,7 @@ fn host_49_setup_closure_and_clause_19_globals() {
                         brand: Brand(round),
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()?;
                 Ok(GlobalObjects { global, this: None })
@@ -338,6 +353,7 @@ fn host_53_parse_defines_no_global_binding() {
                     brand: Brand(5),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()?;
             Ok(GlobalObjects { global, this: None })
@@ -377,4 +393,64 @@ fn host_53_parse_defines_no_global_binding() {
         Outcome::Normal("true".to_string())
     );
     assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+}
+
+/// The variable that tells the child of
+/// [`a_stack_test_fails_by_itself_where_no_stack_tests_is_set`] which way to a bounded stack it
+/// takes.
+const GUARD_CHILD: &str = "SWELL_STACK_GUARD_CHILD";
+
+/// The guard of the lane's run at opt-level 1 (task `slow-tests`): with `SWELL_NO_STACK_TESTS`
+/// set, both ways of the tests to a bounded stack, `stack_with_room` and `stack_thread`, panic
+/// with the line that names the way out, so a stack test that the rule of `slow-tests` does not
+/// find fails in that run by itself. Without the variable both pass. Each way runs in a child
+/// process (the test binary started again, this test alone).
+#[test]
+fn a_stack_test_fails_by_itself_where_no_stack_tests_is_set() {
+    use support::host::{NO_STACK_TESTS, NO_STACK_TESTS_LINE, stack_thread};
+    match std::env::var(GUARD_CHILD).as_deref() {
+        Ok("room") => {
+            let _ = stack_with_room(limits());
+            return;
+        }
+        Ok("thread") => {
+            stack_thread(1 << 20).spawn(|| ()).unwrap().join().unwrap();
+            return;
+        }
+        _ => {}
+    }
+    let exe = std::env::current_exe().unwrap();
+    let test = test_path!("a_stack_test_fails_by_itself_where_no_stack_tests_is_set");
+    for way in ["room", "thread"] {
+        for guarded in [true, false] {
+            let mut child = std::process::Command::new(&exe);
+            child
+                .args(["--exact", test.as_str(), "--nocapture", "--test-threads=1"])
+                .env(GUARD_CHILD, way)
+                .env_remove(NO_STACK_TESTS);
+            if guarded {
+                child.env(NO_STACK_TESTS, "1");
+            }
+            let out = child.output().unwrap();
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            assert_eq!(
+                out.status.success(),
+                !guarded,
+                "{way}, guarded {guarded}: {text}"
+            );
+            assert_eq!(
+                text.contains(NO_STACK_TESTS_LINE),
+                guarded,
+                "{way}, guarded {guarded}: {text}"
+            );
+            assert!(
+                text.contains("1 passed") || guarded,
+                "{way}: the child ran no test: {text}"
+            );
+        }
+    }
 }

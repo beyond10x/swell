@@ -21,7 +21,8 @@
 //! An arena is charged by capacity (`engine.md`, "Memory budget"): it grows by its own doubling,
 //! at least [`MIN_SLOTS`] slots, with `try_reserve_exact`, and before it grows `store`
 //! (`heap/mod.rs`) charges each new slot with its workspace ([`slot_bytes`]): an entry of the
-//! free list, a mark word and room for one entry on the worklist ("Collector"). Those bytes stay
+//! free list, a mark word, room for one entry on the worklist ("Collector") and the head word of
+//! the slot's list of pending weak entries (`story:weak-map-and-weak-set`). Those bytes stay
 //! charged while the agent lives; an arena does not shrink, and a freed slot is used again. A
 //! record is charged what it owns beside its slot, and the sweep credits that.
 
@@ -66,9 +67,10 @@ fn max_slots() -> usize {
 }
 
 /// The bytes one slot of an arena of `T` is charged when the arena grows: the slot, one `u32` of
-/// the free list, one `u32` mark word and one `u32` of room on the worklist.
+/// the free list, one `u32` mark word, one `u32` of room on the worklist and one `u32` head word
+/// of the slot's pending weak entries.
 pub(crate) fn slot_bytes<T>() -> u64 {
-    let bytes = size_of::<Slot<T>>().saturating_add(3 * size_of::<u32>());
+    let bytes = size_of::<Slot<T>>().saturating_add(4 * size_of::<u32>());
     u64::try_from(bytes).unwrap_or(u64::MAX)
 }
 
@@ -78,12 +80,16 @@ fn record_slot_bytes<T>() -> u64 {
 }
 
 /// The collector's workspace of one arena, grown with its capacity: a mark word per slot (0
-/// unmarked, otherwise the generation marked plus one) and room on the worklist for one entry
-/// per slot. The collector takes it out of the arena for a mark phase and gives it back.
+/// unmarked, otherwise the generation marked plus one), room on the worklist for one entry per
+/// slot, and a head word per slot (`story:weak-map-and-weak-set`): 0, or the slot of the
+/// objects arena plus one of the first weak table whose entry keyed by this slot waits for the
+/// key to be marked (the list goes on through the entries, `object/weak_collection.rs`). The
+/// collector takes it out of the arena for a mark phase and gives it back.
 #[derive(Default)]
 pub(crate) struct Workspace {
     marks: Vec<u32>,
     work: Vec<u32>,
+    heads: Vec<u32>,
 }
 
 /// What marking a slot found.
@@ -144,12 +150,37 @@ impl Workspace {
     }
 
     /// Whether the slot `index` is marked for the record of `generation`.
-    #[cfg(test)]
     pub(crate) fn is_marked(&self, index: u32, generation: u32) -> bool {
         usize::try_from(index)
             .ok()
             .and_then(|i| self.marks.get(i))
             .is_some_and(|&word| generation.checked_add(1) == Some(word))
+    }
+
+    /// The generation the slot `index` is marked for, if it is marked.
+    pub(crate) fn marked_generation(&self, index: u32) -> Option<u32> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.marks.get(i))
+            .and_then(|word| word.checked_sub(1))
+    }
+
+    /// Make `link` the head of the pending list of the slot `index` and answer the head it
+    /// replaces (0 for none), or `None` for no slot of this arena. Allocates nothing.
+    pub(crate) fn pend(&mut self, index: u32, link: u32) -> Option<u32> {
+        let head = usize::try_from(index)
+            .ok()
+            .and_then(|i| self.heads.get_mut(i))?;
+        Some(core::mem::replace(head, link))
+    }
+
+    /// Take the head of the pending list of the slot `index`, leaving it empty: 0 for an empty
+    /// list or no slot of this arena.
+    pub(crate) fn take_head(&mut self, index: u32) -> u32 {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.heads.get_mut(i))
+            .map_or(0, core::mem::take)
     }
 
     /// Whether the slot `index` is marked.
@@ -212,6 +243,7 @@ impl<T> Arena<T> {
             .saturating_add(bytes(self.free.capacity(), size_of::<u32>()))
             .saturating_add(bytes(self.workspace.marks.capacity(), size_of::<u32>()))
             .saturating_add(bytes(self.workspace.work.capacity(), size_of::<u32>()))
+            .saturating_add(bytes(self.workspace.heads.capacity(), size_of::<u32>()))
             .saturating_add(self.owned)
     }
 
@@ -274,6 +306,15 @@ impl<T> Arena<T> {
         )]
         work.try_reserve_exact(to.saturating_sub(work.len()))
             .map_err(|_| Full)?;
+        let heads = &mut self.workspace.heads;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "charged by `store` before the arena grows: a head word of the pending weak entries per slot, in `Arena::growth_bytes`"
+        )]
+        heads
+            .try_reserve_exact(to.saturating_sub(heads.len()))
+            .map_err(|_| Full)?;
+        heads.resize(to, 0);
         self.capacity = to;
         Ok(())
     }
@@ -430,9 +471,10 @@ impl<T> Arena<T> {
         self.workspace = workspace;
     }
 
-    /// Clear every mark word, in place.
+    /// Clear every mark word and every head word of the pending weak entries, in place.
     pub(crate) fn clear_marks(&mut self) {
         self.workspace.marks.fill(0);
+        self.workspace.heads.fill(0);
     }
 
     /// Free every live record whose slot is not marked, in slot order, answer the bytes they
@@ -453,6 +495,47 @@ impl<T> Arena<T> {
         self.clear_marks();
         credited
     }
+
+    /// For the collector, after the mark phase and before the sweep: call `visit` on every
+    /// marked record, in slot order, with a test whether a handle of this arena is marked (its
+    /// key, and the mark word of its slot for its generation), and answer the sum of what the
+    /// calls answer (`story:map-and-set`: the bytes a collection's table gives back when it
+    /// releases the cursors of iterators that were not marked). Allocates nothing.
+    pub(crate) fn visit_marked_mut(
+        &mut self,
+        mut visit: impl FnMut(&mut T, &dyn Fn(Handle) -> bool) -> u64,
+    ) -> u64 {
+        let key = self.key;
+        let marks = &self.workspace.marks;
+        let is_marked = |handle: Handle| marked_for(key, marks, handle);
+        let mut answered: u64 = 0;
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if !marks.get(index).is_some_and(|&word| word != 0) {
+                continue;
+            }
+            if let Some(record) = slot.value.as_mut() {
+                answered = answered.saturating_add(visit(record, &is_marked));
+            }
+        }
+        answered
+    }
+
+    /// For the collector, after the mark phase and before the sweep: whether `handle` names a
+    /// slot of this arena marked for its generation (`story:weak-map-and-weak-set`: the clearing
+    /// of the weak tables reads the Symbols arena with it while it visits the objects with
+    /// [`Arena::visit_marked_mut`]).
+    pub(crate) fn is_marked(&self, handle: Handle) -> bool {
+        marked_for(self.key, &self.workspace.marks, handle)
+    }
+}
+
+/// Whether `handle` names a slot of the arena `key` whose mark word is its generation plus one.
+fn marked_for(key: u32, marks: &[u32], handle: Handle) -> bool {
+    handle.key == key
+        && usize::try_from(handle.index)
+            .ok()
+            .and_then(|index| marks.get(index))
+            .is_some_and(|&word| handle.generation.checked_add(1) == Some(word))
 }
 
 #[cfg(test)]
@@ -519,6 +602,7 @@ mod tests {
                         brand: Brand(1),
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()
                     .unwrap();

@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-27T07:41:08Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-size-lane-within-its-share",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-lanefour-pass-2",
+    "review": "review-result:adversary-lanefour-pass-2",
+    "outcome": "fixed"
+  }
+}

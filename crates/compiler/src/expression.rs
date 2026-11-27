@@ -26,12 +26,13 @@
 use swell_num::literal::numeric_literal;
 use swell_syntax::ast::{
     AssignOp, BinaryOp, Expr, ExprId, FunctionKind, LogicalOp, PatternElement, PatternKind,
-    PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, UnaryOp, UpdateOp,
+    PatternProperty, PatternTarget, Property, PropertyKey, PropertyValue, Span, SuperKey, UnaryOp,
+    UpdateOp,
 };
 
 use crate::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_RETURN};
 use crate::resolve::{Binding, LexicalPlace, Site, anonymous_function, property_key};
-use crate::{CompileError, Compiler, Short, Task, Tasks, malformed};
+use crate::{CompileError, Compiler, Short, Task, Tasks, ThisUse, malformed};
 
 /// The reference an assignment, an update, a `delete` or a for-in head works on.
 pub(crate) enum Target {
@@ -46,15 +47,33 @@ pub(crate) enum Target {
         object: ExprId,
         key: ExprId,
     },
+    /// `super.name`, the name a `strings` index: the reference `[this, base]`.
+    SuperNamed {
+        name: u32,
+    },
+    /// `super[key]`: the reference `[this, key, base]`.
+    SuperIndex {
+        key: ExprId,
+    },
+    /// `object.#x`, the Private Name of `#x` in slot `slot` of the environment `hops` outward
+    /// (`#sec-makeprivatereference`): the reference `[o]`.
+    Private {
+        object: ExprId,
+        hops: u32,
+        slot: u32,
+    },
 }
 
 impl Target {
     /// How many operand stack entries the evaluated reference takes.
     pub(crate) fn reference_items(&self) -> u32 {
         match self {
-            Target::Binding(Binding::Global(_) | Binding::Dynamic(_)) | Target::Member { .. } => 1,
+            Target::Binding(Binding::Global(_) | Binding::Dynamic(_))
+            | Target::Member { .. }
+            | Target::Private { .. } => 1,
             Target::Binding(_) => 0,
-            Target::Index { .. } => 2,
+            Target::Index { .. } | Target::SuperNamed { .. } => 2,
+            Target::SuperIndex { .. } => 3,
         }
     }
 }
@@ -123,13 +142,40 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 object: *object,
                 key: *index,
             }),
+            Expr::SuperMember(SuperKey::Name(name)) => Ok(Target::SuperNamed {
+                name: self.string(name)?,
+            }),
+            Expr::SuperMember(SuperKey::Computed(key)) => Ok(Target::SuperIndex { key: *key }),
+            Expr::PrivateMember {
+                object,
+                optional: false,
+                ..
+            } => match self.binding(Site::Expr(e))? {
+                Binding::Env { hops, slot } => Ok(Target::Private {
+                    object: *object,
+                    hops,
+                    slot,
+                }),
+                _ => Err(malformed("a private name outside its private record")),
+            },
             _ => Err(malformed("an assignment target that is no reference")),
+        }
+    }
+
+    /// `GetPrivate` of the private reference `e`, `object.#x`: the Private Name read where `#x`
+    /// resolves, a slot of the private record of the innermost class that declares it.
+    fn private_get(&self, e: ExprId) -> Result<Instruction, CompileError> {
+        match self.binding(Site::Expr(e))? {
+            Binding::Env { hops, slot } => Ok(Instruction::GetPrivate { hops, slot }),
+            _ => Err(malformed("a private name outside its private record")),
         }
     }
 
     /// The tasks that evaluate a reference onto the stack; with `convert`, the key of a property
     /// access with an expression is converted at once ([`Instruction::PropertyKey`]), because
-    /// the reference is read before it is written.
+    /// the reference is read before it is written. A Super Reference is the receiver, the key
+    /// and the base, in that order (`#sec-super-keyword-runtime-semantics-evaluation`); its key
+    /// is converted by [`Instruction::SuperKey`] where [`Compiler::get_keeping`] reads it.
     pub(crate) fn reference(
         &mut self,
         target: &Target,
@@ -147,13 +193,24 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::Emit(Instruction::ResolveName(name), span))?;
             }
             Target::Binding(_) => {}
-            Target::Member { object, .. } => t.push(Task::Expr(*object))?,
+            Target::Member { object, .. } | Target::Private { object, .. } => {
+                t.push(Task::Expr(*object))?;
+            }
             Target::Index { object, key } => {
                 t.push(Task::Expr(*object))?;
                 t.push(Task::Expr(*key))?;
                 if convert {
                     t.push(Task::Emit(Instruction::PropertyKey, span))?;
                 }
+            }
+            Target::SuperNamed { .. } => {
+                t.push(Task::Emit(Instruction::This, span))?;
+                t.push(Task::Emit(Instruction::SuperBase, span))?;
+            }
+            Target::SuperIndex { key } => {
+                t.push(Task::Emit(Instruction::This, span))?;
+                t.push(Task::Expr(*key))?;
+                t.push(Task::Emit(Instruction::SuperBase, span))?;
             }
         }
         Ok(t)
@@ -174,6 +231,24 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Target::Index { .. } => {
                 t.push(Task::Emit(Instruction::Dup2, span))?;
                 t.push(Task::Emit(Instruction::GetIndex, span))?;
+            }
+            Target::SuperNamed { name } => {
+                t.push(Task::Emit(Instruction::Dup2, span))?;
+                t.push(Task::Emit(Instruction::GetSuperNamed(*name), span))?;
+            }
+            Target::SuperIndex { .. } => {
+                t.push(Task::Emit(Instruction::SuperKey, span))?;
+                t.push(Task::Emit(Instruction::GetSuperIndex, span))?;
+            }
+            Target::Private { hops, slot, .. } => {
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                t.push(Task::Emit(
+                    Instruction::GetPrivate {
+                        hops: *hops,
+                        slot: *slot,
+                    },
+                    span,
+                ))?;
             }
         }
         Ok(t)
@@ -223,6 +298,12 @@ impl<'a, 'm> Compiler<'a, 'm> {
             Target::Binding(Binding::Dynamic(name)) => Instruction::PutNameRef(self.string(name)?),
             Target::Member { name, .. } => Instruction::PutNamed(*name),
             Target::Index { .. } => Instruction::PutIndex,
+            Target::SuperNamed { name } => Instruction::PutSuperNamed(*name),
+            Target::SuperIndex { .. } => Instruction::PutSuperIndex,
+            Target::Private { hops, slot, .. } => Instruction::SetPrivate {
+                hops: *hops,
+                slot: *slot,
+            },
             // A `const` binding throws for every assignment, a `let` one before its declaration.
             Target::Binding(Binding::Lexical {
                 at, name, constant, ..
@@ -257,6 +338,8 @@ impl<'a, 'm> Compiler<'a, 'm> {
         match &node.expr {
             // `#sec-this-keyword-runtime-semantics-evaluation`.
             Expr::This => t.push(emit(Instruction::This))?,
+            // `#sec-meta-properties-runtime-semantics-evaluation`: GetNewTarget.
+            Expr::NewTarget => t.push(emit(Instruction::NewTarget))?,
             // `#sec-identifiers-runtime-semantics-evaluation`: ResolveBinding, then GetValue.
             Expr::Identifier(_) => {
                 let instruction = match self.binding(Site::Expr(id))? {
@@ -413,6 +496,9 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 };
                 t.push(emit(make))?;
             }
+            // `#sec-class-definitions-runtime-semantics-evaluation`: ClassDefinitionEvaluation
+            // (`class.rs`), F the value.
+            Expr::Class(class) => self.class_definition(class, span, &mut t)?,
             Expr::Unary { op, operand } => self.unary(*op, *operand, span, &mut t)?,
             Expr::Update {
                 op,
@@ -597,6 +683,59 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     t.push(emit(Instruction::Call(n)))?;
                 }
             }
+            // `#sec-super-keyword-runtime-semantics-evaluation`: the receiver (the `this` of
+            // GetThisEnvironment), the key's value, GetSuperBase, then GetValue of the Super
+            // Reference.
+            Expr::SuperMember(key) => {
+                t.push(emit(Instruction::This))?;
+                match key {
+                    SuperKey::Name(name) => {
+                        t.push(emit(Instruction::SuperBase))?;
+                        t.push(emit(Instruction::GetSuperNamed(self.string(name)?)))?;
+                    }
+                    SuperKey::Computed(e) => {
+                        t.push(Task::Expr(*e))?;
+                        t.push(emit(Instruction::SuperBase))?;
+                        t.push(emit(Instruction::GetSuperIndex))?;
+                    }
+                }
+            }
+            // `#sec-property-accessors-runtime-semantics-evaluation`, MemberExpression .
+            // PrivateIdentifier, and the link `?.#x` of an optional chain: GetValue of the
+            // private reference (PrivateGet).
+            Expr::PrivateMember {
+                object, optional, ..
+            } => {
+                let get = self.private_get(id)?;
+                t.push(Task::Expr(*object))?;
+                if *optional {
+                    t.push(Task::ChainCheck(1, span))?;
+                }
+                t.push(emit(get))?;
+            }
+            // `#sec-super-keyword-runtime-semantics-evaluation`, SuperCall (`docs/design/engine.md`,
+            // "Classes", item 7): GetSuperConstructor before the arguments, the construction
+            // with the running frame's NewTarget, BindThisValue, then InitializeInstanceElements
+            // with F the constructor GetThisEnvironment answers; the value is `this`.
+            Expr::SuperCall(arguments) => {
+                t.push(emit(Instruction::GetSuperConstructor))?;
+                if self.has_spread(arguments.iter()) {
+                    self.argument_array(arguments, span, &mut t)?;
+                    t.push(emit(Instruction::SuperCallSpread))?;
+                } else {
+                    t.extend(arguments.iter().map(|e| Task::Expr(*e)))?;
+                    let n = u32::try_from(arguments.len())
+                        .map_err(|_| CompileError::TooMany("arguments"))?;
+                    t.push(emit(Instruction::SuperCall(n)))?;
+                }
+                let bind = self.this_instruction(ThisUse::Bind)?;
+                t.push(emit(bind))?;
+                t.push(emit(Instruction::Dup))?;
+                t.push(emit(Instruction::InitInstance))?;
+                t.push(emit(Instruction::Pop))?;
+            }
+            // `story:private-fields-and-private-in` replaces this arm.
+            Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
             // `#sec-new-operator-runtime-semantics-evaluation`.
             Expr::New { callee, arguments } => {
                 t.push(Task::Expr(*callee))?;
@@ -1387,7 +1526,10 @@ impl<'a, 'm> Compiler<'a, 'm> {
         match p.value {
             PropertyValue::Init(e) => {
                 t.push(Task::Expr(e))?;
-                if anonymous_function(self.ast, e).is_some() {
+                // An anonymous class names itself from the key before its elements
+                // ([`Instruction::SetClassName`], `class.rs`); a function is named here.
+                let class = matches!(self.ast.expr(e).map(|x| &x.expr), Some(Expr::Class(_)));
+                if !class && anonymous_function(self.ast, e).is_some() {
                     t.push(Task::Emit(Instruction::SetFunctionName, p.span))?;
                 }
                 t.push(Task::Emit(Instruction::DefineComputedField, p.span))?;
@@ -1440,7 +1582,7 @@ impl<'a, 'm> Compiler<'a, 'm> {
         t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
         let node = self.ast.expr(callee).ok_or_else(|| malformed("a callee"))?;
-        let (link, chain) = match &node.expr {
+        let (link, link_id, chain) = match &node.expr {
             Expr::OptionalChain(inner) => {
                 let inner_node = self
                     .ast
@@ -1452,15 +1594,16 @@ impl<'a, 'm> Compiler<'a, 'm> {
                         | Expr::Index { .. }
                         | Expr::OptionalMember { .. }
                         | Expr::OptionalIndex { .. }
+                        | Expr::PrivateMember { .. }
                 ) {
                     t.push(Task::Emit(Instruction::Undefined, span))?;
                     t.push(Task::Expr(callee))?;
                     return Ok(());
                 }
                 t.push(Task::ChainOpen(Short::Pair))?;
-                (inner_node, Some(node.span))
+                (inner_node, *inner, Some(node.span))
             }
-            _ => (node, None),
+            _ => (node, callee, None),
         };
         match &link.expr {
             Expr::Member { object, property } | Expr::OptionalMember { object, property } => {
@@ -1482,6 +1625,37 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(Task::Emit(Instruction::Dup, span))?;
                 t.push(Task::Expr(*index))?;
                 t.push(Task::Emit(Instruction::GetIndex, span))?;
+            }
+            // A private reference gives its base as this value, also after `?.`.
+            Expr::PrivateMember {
+                object, optional, ..
+            } => {
+                let get = self.private_get(link_id)?;
+                t.push(Task::Expr(*object))?;
+                if *optional {
+                    t.push(Task::ChainCheck(1, link.span))?;
+                }
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                t.push(Task::Emit(get, span))?;
+            }
+            // GetThisValue of a Super Reference is its receiver (`#sec-getthisvalue`).
+            Expr::SuperMember(key) if chain.is_none() => {
+                t.push(Task::Emit(Instruction::This, span))?;
+                t.push(Task::Emit(Instruction::Dup, span))?;
+                match key {
+                    SuperKey::Name(name) => {
+                        t.push(Task::Emit(Instruction::SuperBase, span))?;
+                        t.push(Task::Emit(
+                            Instruction::GetSuperNamed(self.string(name)?),
+                            span,
+                        ))?;
+                    }
+                    SuperKey::Computed(e) => {
+                        t.push(Task::Expr(*e))?;
+                        t.push(Task::Emit(Instruction::SuperBase, span))?;
+                        t.push(Task::Emit(Instruction::GetSuperIndex, span))?;
+                    }
+                }
             }
             // A name looked up by name gives its record's WithBaseObject as this value.
             Expr::Identifier(_) if chain.is_none() => match self.binding(Site::Expr(callee))? {
@@ -1583,6 +1757,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
                     t.push(Task::Expr(*object))?;
                     t.push(Task::Expr(*index))?;
                     t.push(emit(Instruction::DeleteIndex))?;
+                }
+                // Step 5.a: a Super Reference throws a `ReferenceError` once it is made; the key
+                // is evaluated and not converted.
+                Expr::SuperMember(key) => {
+                    t.push(emit(Instruction::This))?;
+                    match key {
+                        SuperKey::Name(name) => {
+                            t.push(emit(Instruction::String(self.string(name)?)))?;
+                        }
+                        SuperKey::Computed(e) => t.push(Task::Expr(*e))?,
+                    }
+                    t.push(emit(Instruction::DeleteSuper))?;
                 }
                 Expr::OptionalChain(inner) => {
                     match self.delete_chain(*inner, operand_node.span, span)? {

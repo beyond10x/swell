@@ -6,8 +6,9 @@
 //! A Global Environment Record is its [[ObjectRecord]], its [[GlobalThisValue]] and its
 //! [[DeclarativeRecord]]. The first two are the realm record's `global` and `global_this`
 //! (`realm/mod.rs`, set by SetRealmGlobalObject, `#sec-setrealmglobalobject`); the
-//! [[DeclarativeRecord]] holds the `let` and `const` bindings of the realm's scripts (slice 6;
-//! `class` comes with slice 8): a declarative record of the `environments` arena whose bindings
+//! [[DeclarativeRecord]] holds the `let`, `const` and class bindings of the realm's scripts
+//! (slice 6; a class declaration of a script binds here since `story:class-definition-evaluation`,
+//! mutable as a `let` binding, and its evaluation initializes it): a declarative record of the `environments` arena whose bindings
 //! are kept by name, each with its state (uninitialized until its declaration ran, the temporal
 //! dead zone) and whether it is `const`, found through a keyed list and never deleted
 //! (`docs/design/engine.md`, decision 3, "Lexical bindings", item 4). [`RealmGlobalEnv`] holds
@@ -257,6 +258,8 @@ impl<H: Host> Agent<H> {
                     let text = self.key_text(name);
                     Err(self.not_initialized(&text))
                 }
+                // Only a private record holds a Private Name: a logic error here.
+                SlotValue::PrivateName(_) => Err(self.fault()),
             };
         }
         let global = self.global_binding_object(realm)?;

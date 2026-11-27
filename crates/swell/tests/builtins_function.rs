@@ -328,8 +328,7 @@ const STACK_BYTES: usize = 256 * 1024;
 fn on_small_stack(test: TestPath, body: fn()) {
     let done = format!("{STACK_CHILD}: {test} done");
     if std::env::var_os(STACK_CHILD).is_some() {
-        std::thread::Builder::new()
-            .stack_size(STACK_BYTES)
+        crate::support::host::stack_thread(STACK_BYTES)
             .spawn(body)
             .unwrap()
             .join()

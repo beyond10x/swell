@@ -148,6 +148,8 @@ pub(crate) enum Intrinsic {
     RegExpPrototype,
     /// `%RegExpStringIteratorPrototype%` (22.2.9.2), `story:regexp-match-all-and-escape`.
     RegExpStringIteratorPrototype,
+    /// `%Proxy%` (28.2.1), `story:proxy-objects-and-access-traps`.
+    Proxy,
     /// `%GeneratorFunction.prototype%` (27.3.3), `story:generator-functions-and-suspended-frames`.
     GeneratorFunctionPrototype,
     /// `%GeneratorPrototype%` (27.5.1).
@@ -166,6 +168,18 @@ pub(crate) enum Intrinsic {
     Promise,
     /// `%Promise.prototype%` (27.5.5).
     PromisePrototype,
+    /// `%Map%` (24.1.1), `story:map-and-set`.
+    Map,
+    /// `%Map.prototype%` (24.1.3).
+    MapPrototype,
+    /// `%MapIteratorPrototype%` (24.1.5.2).
+    MapIteratorPrototype,
+    /// `%Set%` (24.2.2), `story:map-and-set`.
+    Set,
+    /// `%Set.prototype%` (24.2.4).
+    SetPrototype,
+    /// `%SetIteratorPrototype%` (24.2.6.2).
+    SetIteratorPrototype,
     /// `%AsyncFunction.prototype%` (27.7.3), `story:async-functions-and-await`.
     AsyncFunctionPrototype,
     /// `%AsyncFunction%` (`#sec-async-function-constructor`), `story:async-function-constructor`.
@@ -213,6 +227,16 @@ pub(crate) enum Intrinsic {
     Date,
     /// `%Date.prototype%` (21.4.4).
     DatePrototype,
+    /// `%Reflect%` (28.1), `story:reflect-namespace`: the global `Reflect`.
+    Reflect,
+    /// `%WeakMap%` (24.3.1), `story:weak-map-and-weak-set`: the global `WeakMap`.
+    WeakMap,
+    /// `%WeakMap.prototype%` (24.3.3).
+    WeakMapPrototype,
+    /// `%WeakSet%` (24.4.1): the global `WeakSet`.
+    WeakSet,
+    /// `%WeakSet.prototype%` (24.4.3).
+    WeakSetPrototype,
 }
 
 /// What the builtins of a realm are made with while CreateIntrinsics runs, before the realm
@@ -271,10 +295,12 @@ pub(crate) struct Intrinsics {
     regexp: ObjectRef,
     regexp_prototype: ObjectRef,
     regexp_string_iterator_prototype: ObjectRef,
+    proxy: ObjectRef,
     generator_prototypes: crate::builtins::generator::GeneratorPrototypes,
     generator_function: ObjectRef,
     promise: ObjectRef,
     promise_prototype: ObjectRef,
+    collections: crate::builtins::map::CollectionIntrinsics,
     async_function_prototype: ObjectRef,
     async_function: ObjectRef,
     async_iteration_prototypes: crate::builtins::async_iteration::AsyncIterationPrototypes,
@@ -282,6 +308,11 @@ pub(crate) struct Intrinsics {
     async_generator_function: ObjectRef,
     date: ObjectRef,
     date_prototype: ObjectRef,
+    reflect: ObjectRef,
+    weak_map: ObjectRef,
+    weak_map_prototype: ObjectRef,
+    weak_set: ObjectRef,
+    weak_set_prototype: ObjectRef,
 }
 
 impl Intrinsics {
@@ -327,11 +358,18 @@ impl Intrinsics {
             Intrinsic::RegExp => self.regexp,
             Intrinsic::RegExpPrototype => self.regexp_prototype,
             Intrinsic::RegExpStringIteratorPrototype => self.regexp_string_iterator_prototype,
+            Intrinsic::Proxy => self.proxy,
             Intrinsic::GeneratorFunctionPrototype => self.generator_prototypes.function_prototype,
             Intrinsic::GeneratorPrototype => self.generator_prototypes.prototype,
             Intrinsic::GeneratorFunction => self.generator_function,
             Intrinsic::Promise => self.promise,
             Intrinsic::PromisePrototype => self.promise_prototype,
+            Intrinsic::Map => self.collections.map,
+            Intrinsic::MapPrototype => self.collections.map_prototype,
+            Intrinsic::MapIteratorPrototype => self.collections.map_iterator_prototype,
+            Intrinsic::Set => self.collections.set,
+            Intrinsic::SetPrototype => self.collections.set_prototype,
+            Intrinsic::SetIteratorPrototype => self.collections.set_iterator_prototype,
             Intrinsic::AsyncFunctionPrototype => self.async_function_prototype,
             Intrinsic::AsyncFunction => self.async_function,
             Intrinsic::AsyncIteratorPrototype => self.async_iteration_prototypes.async_iterator,
@@ -345,6 +383,11 @@ impl Intrinsics {
             Intrinsic::AsyncGeneratorFunction => self.async_generator_function,
             Intrinsic::Date => self.date,
             Intrinsic::DatePrototype => self.date_prototype,
+            Intrinsic::Reflect => self.reflect,
+            Intrinsic::WeakMap => self.weak_map,
+            Intrinsic::WeakMapPrototype => self.weak_map_prototype,
+            Intrinsic::WeakSet => self.weak_set,
+            Intrinsic::WeakSetPrototype => self.weak_set_prototype,
         }
     }
 
@@ -402,11 +445,18 @@ impl Intrinsics {
             self.regexp,
             self.regexp_prototype,
             self.regexp_string_iterator_prototype,
+            self.proxy,
             self.generator_prototypes.function_prototype,
             self.generator_prototypes.prototype,
             self.generator_function,
             self.promise,
             self.promise_prototype,
+            self.collections.map,
+            self.collections.map_prototype,
+            self.collections.map_iterator_prototype,
+            self.collections.set,
+            self.collections.set_prototype,
+            self.collections.set_iterator_prototype,
             self.async_function_prototype,
             self.async_function,
             self.async_iteration_prototypes.async_iterator,
@@ -416,6 +466,11 @@ impl Intrinsics {
             self.async_generator_function,
             self.date,
             self.date_prototype,
+            self.reflect,
+            self.weak_map,
+            self.weak_map_prototype,
+            self.weak_set,
+            self.weak_set_prototype,
         ] {
             mark.object(object);
         }
@@ -593,6 +648,7 @@ impl<H: Host> Agent<H> {
         let iterator_prototypes = self.create_iterator_prototypes(making)?;
         let regexp_string_iterator_prototype =
             self.create_regexp_string_iterator_prototype(making, iterator_prototypes.iterator)?;
+        let proxy = self.create_proxy_constructor(making)?;
         let generator_prototypes =
             self.create_generator_prototypes(making, iterator_prototypes.iterator)?;
         let generator_function = self.create_generator_function_constructor(
@@ -601,6 +657,8 @@ impl<H: Host> Agent<H> {
             generator_prototypes.function_prototype,
         )?;
         let (promise, promise_prototype) = self.create_promise_constructor(making)?;
+        let collections =
+            self.create_collection_intrinsics(making, iterator_prototypes.iterator)?;
         let async_function_prototype = self.create_async_function_prototype(making)?;
         let async_function =
             self.create_async_function_constructor(making, function, async_function_prototype)?;
@@ -613,6 +671,9 @@ impl<H: Host> Agent<H> {
             async_generator_prototypes.function_prototype,
         )?;
         let (date, date_prototype) = self.create_date_constructor(making)?;
+        let reflect = self.create_reflect_object(making)?;
+        let (weak_map, weak_map_prototype) = self.create_weak_map_constructor(making)?;
+        let (weak_set, weak_set_prototype) = self.create_weak_set_constructor(making)?;
         // %Array.prototype.values% (23.1.3.38), %Array.prototype.entries% (23.1.3.5),
         // %Array.prototype.keys% (23.1.3.19) and %Array.prototype.forEach% (23.1.3.15): the
         // methods `create_array_constructor` has defined on %Array.prototype%, read before any
@@ -656,10 +717,12 @@ impl<H: Host> Agent<H> {
             regexp,
             regexp_prototype,
             regexp_string_iterator_prototype,
+            proxy,
             generator_prototypes,
             generator_function,
             promise,
             promise_prototype,
+            collections,
             async_function_prototype,
             async_function,
             async_iteration_prototypes,
@@ -667,6 +730,11 @@ impl<H: Host> Agent<H> {
             async_generator_function,
             date,
             date_prototype,
+            reflect,
+            weak_map,
+            weak_map_prototype,
+            weak_set,
+            weak_set_prototype,
         };
         match self.heap.realms.get_mut(realm) {
             Ok(record) => {

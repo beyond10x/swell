@@ -1,0 +1,79 @@
+script locals 0
+  lexical let "C"
+  0000 2:1 SetStrict true
+  0001 2:1 PushLexicalEnv 0 const "C"
+  0002 2:1 PushEnv 7
+  0003 2:1 NewPrivateName 0 "#a"
+  0004 2:1 NewPrivateName 2 "#b"
+  0005 2:1 NewPrivateName 5 "#c"
+  0006 2:1 ClassPrototype
+  0007 2:1 MakeClassConstructor 0 base
+  0008 2:11 Dup
+  0009 2:11 MakeMethod 1
+  0010 2:11 SetEnv 0 1
+  0011 2:11 Pop
+  0012 2:11 Pop
+  0013 2:26 Dup
+  0014 2:26 MakeMethod 2
+  0015 2:26 SetEnv 0 3
+  0016 2:26 Pop
+  0017 2:26 Pop
+  0018 2:56 Dup
+  0019 2:56 MakeMethod 3
+  0020 2:56 SetEnv 0 4
+  0021 2:56 Pop
+  0022 2:56 Pop
+  0023 2:76 Dup
+  0024 2:76 MakeMethod 4
+  0025 2:76 SetEnv 0 6
+  0026 2:76 Pop
+  0027 2:76 Pop
+  0028 2:91 Dup
+  0029 2:91 Closure 5
+  0030 2:91 DefineClassMethod "t"
+  0031 2:91 Pop
+  0032 2:1 SetEnv 1 0
+  0033 2:1 Nip 1
+  0034 2:11 AddPrivateMethod 0 0 0 1 room 3
+  0035 2:26 AddPrivateMethod 0 2 0 3 room 3
+  0036 2:56 AddPrivateMethod 0 2 0 4 room 3
+  0037 2:76 AddPrivateMethod 0 5 0 6 room 3
+  0038 2:1 PopEnv
+  0039 2:1 PopEnv
+  0040 2:1 SetStrict false
+  0041 2:1 InitGlobal "C"
+  0042 2:1 Pop
+  0043 0:0 LoadCompletion
+  0044 0:0 Return
+
+function 0 class constructor "C" length 0 locals 0 strict
+  0000 2:1 Undefined
+  0001 2:1 Return
+
+function 1 method "#a" length 0 locals 0 strict
+  0000 2:11 Undefined
+  0001 2:11 Return
+
+function 2 getter "get #b" length 0 locals 0 strict
+  0000 2:51 Number 1
+  0001 2:44 Return
+  0002 2:26 Undefined
+  0003 2:26 Return
+
+function 3 setter "set #b" length 1 locals 1 strict
+  params local 0
+  0000 2:56 Undefined
+  0001 2:56 Return
+
+function 4 method "#c" length 0 locals 0 strict
+  0000 2:76 Undefined
+  0001 2:76 Return
+
+function 5 method "t" length 0 locals 0 strict
+  0000 2:111 GetEnvChecked 1 0
+  0001 2:111 Dup
+  0002 2:111 GetPrivate 0 0
+  0003 2:111 Call 0
+  0004 2:104 Return
+  0005 2:91 Undefined
+  0006 2:91 Return

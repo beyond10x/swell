@@ -63,6 +63,7 @@ mod token;
 pub use ast::Scope;
 pub use error::{MessageKind, SyntaxError, message_kind};
 pub use ledger::{Ledger, Stop, Unlimited};
+pub use parser::HOLDS;
 
 use alloc::vec;
 use alloc::vec::Vec;
@@ -155,7 +156,10 @@ impl Failure {
 /// `Script`: the tree, or every `SyntaxError` the parse found, at least one. A grammar error or a
 /// refusal stops the parse and is the only error; the early errors of a source that parses are
 /// all reported, in source order. Generator functions and methods, and `async` functions and
-/// arrow functions, and async generators with `yield*` in them, parse.
+/// arrow functions, and async generators with `yield*` in them, parse. So does a class, with its
+/// heritage and its early errors. A construct the parse holds back ([`HOLDS`], each with the
+/// slice that delivers it) is refused at its first token only once the whole source parsed with
+/// no early error, as the one error.
 pub fn parse_script(source: &[u16], options: ParseOptions) -> Result<Script, Vec<SyntaxError>> {
     parse_script_with(source, options, &mut Unlimited).map_err(Failure::into_errors)
 }
@@ -171,36 +175,90 @@ pub fn parse_script_with(
     analysed(parsed, options.max_nesting, &meter)
 }
 
-/// Parses `source` as the eval code of PerformEval (`#sec-performeval`, steps 9 to 11):
-/// `ParseText(x, Script)`, strict when the caller is (`strict_caller`, IsStrict of the direct
-/// call; false for an indirect `eval`) or when the source's directive prologue holds a Use Strict
+/// The context of eval code that PerformEval reads before it parses (`#sec-performeval`,
+/// steps 7 to 11): the strictness of the caller and the four flags of a direct `eval` whose
+/// GetThisEnvironment is a Function Environment Record. An indirect `eval`, and a direct one
+/// outside function code, has every flag false. `EvalContext::from(strict_caller)` is the
+/// context of a caller of that strictness with every flag false.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EvalContext {
+    /// strictCaller: IsStrict of the direct call; false for an indirect `eval`.
+    pub strict_caller: bool,
+    /// inFunc: the `eval` is direct and its GetThisEnvironment is a function's.
+    pub in_function: bool,
+    /// inMethod: that environment HasSuperBinding (the function has a [[HomeObject]]).
+    pub in_method: bool,
+    /// inDerivedCtor: that function's [[ConstructorKind]] is derived.
+    pub in_derived_constructor: bool,
+    /// inClassFieldInitializer: that function has a [[ClassFieldInitializerName]].
+    pub in_class_field_initializer: bool,
+}
+
+impl From<bool> for EvalContext {
+    /// The context of a caller whose strictness is `strict_caller`, with every flag false.
+    fn from(strict_caller: bool) -> EvalContext {
+        EvalContext {
+            strict_caller,
+            ..EvalContext::default()
+        }
+    }
+}
+
+/// Parses `source` as the eval code of PerformEval (`#sec-performeval`, step 12):
+/// `ParseText(x, Script)` in the eval context `context`, strict when the caller is
+/// ([`EvalContext::strict_caller`]) or when the source's directive prologue holds a Use Strict
 /// Directive, with the early errors of a script of that strictness. The answer is a [`Script`]
 /// as [`parse_script`] gives it: its tree, [`Script::strict`] (strictEval), and in
 /// [`Script::scope`] the VarDeclaredNames and the function declarations to hoist that
 /// EvalDeclarationInstantiation takes (`#sec-evaldeclarationinstantiation`). An empty source is
-/// a script with no statement.
+/// a script with no statement. A `bool` is the context of a caller of that strictness with every
+/// flag false.
 ///
-/// The checks of steps 6 and 10 on code inside a function, a method or a class field
-/// initializer (`new.target`, `super`, `arguments` in a field initializer) need syntax the
-/// parser refuses anyway: `new.target` and `super` before slice 8, class fields before slice 8;
-/// so this entry has nothing more to check.
+/// The checks of step 12 that read the flags: `new.target` in the body is a SyntaxError unless
+/// [`EvalContext::in_function`] is set, which the parser reads at the top of the eval code
+/// (`story:new-target-meta-property`). A SuperProperty is a SyntaxError unless
+/// [`EvalContext::in_method`] is set, and a SuperCall unless
+/// [`EvalContext::in_derived_constructor`] is set: the parse starts with those flags as the
+/// code of such a method or constructor starts (an arrow function in the eval code keeps them,
+/// any other function sets its own), so where they are not set `super` answers the early errors
+/// a script answers (`story:derived-classes-and-super-call`). When
+/// [`EvalContext::in_class_field_initializer`] is set, ContainsArguments of the body
+/// (`#sec-static-semantics-containsarguments`: an IdentifierReference `arguments` outside every
+/// function that is not an arrow function; a class's computed keys, field initializers and
+/// static blocks are looked into, its methods are not) is a SyntaxError at the first such
+/// `arguments`, the one error of the parse (`story:eval-in-class-field-initializers`).
 pub fn parse_eval(
     source: &[u16],
-    strict_caller: bool,
+    context: impl Into<EvalContext>,
     options: ParseOptions,
 ) -> Result<Script, Vec<SyntaxError>> {
-    parse_eval_with(source, strict_caller, options, &mut Unlimited).map_err(Failure::into_errors)
+    parse_eval_with(source, context, options, &mut Unlimited).map_err(Failure::into_errors)
 }
 
-/// [`parse_eval`] charged to `ledger` (the module's documentation).
+/// [`parse_eval`] charged to `ledger` (the module's documentation). The ContainsArguments error
+/// of [`EvalContext::in_class_field_initializer`] is answered before a refusal the parser held in
+/// the eval code, as the parser's rule on holds orders every error before a held refusal
+/// (`Parser::hold`), so such eval code counts no refusal.
 pub fn parse_eval_with(
     source: &[u16],
-    strict_caller: bool,
+    context: impl Into<EvalContext>,
     options: ParseOptions,
     ledger: &mut dyn Ledger,
 ) -> Result<Script, Failure> {
+    let context = context.into();
     let meter = Meter::new(ledger);
-    let parsed = parser::parse_eval(source, options.max_nesting, strict_caller, &meter);
+    let parsed = parser::parse_eval(source, options.max_nesting, context, &meter);
+    // PerformEval, step 12.h (`#sec-performeval`): with inClassFieldInitializer,
+    // ContainsArguments of the body is a SyntaxError.
+    let parsed = match parsed {
+        Ok(parsed) if context.in_class_field_initializer => {
+            match early::contains_arguments(&parsed.ast, &parsed.body, &meter) {
+                Some(error) => Err(error),
+                None => Ok(parsed),
+            }
+        }
+        parsed => parsed,
+    };
     analysed(parsed, options.max_nesting, &meter)
 }
 

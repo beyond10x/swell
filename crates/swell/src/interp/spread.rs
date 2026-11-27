@@ -93,7 +93,7 @@ impl<H: Host> Agent<H> {
     /// The elements of the argument Array `list` a spread built, read into a list whose bytes
     /// are charged before it is made, one step per element; and those bytes, which the caller
     /// credits when the call no longer needs the list.
-    fn spread_arguments(&mut self, list: Value) -> Completion<(Vec<Value>, u64)> {
+    pub(super) fn spread_arguments(&mut self, list: Value) -> Completion<(Vec<Value>, u64)> {
         let list = self.expect_object(list)?;
         let length = self.length_of_array_like(list)?;
         let Ok(count) = u32::try_from(length as u64) else {
@@ -208,7 +208,7 @@ impl<H: Host> Agent<H> {
         }
         let object = self.expect_object(constructor)?;
         if self.is_ecmascript_function(object)? {
-            return self.push_construct_frame(object, args, 1);
+            return self.push_construct_frame(object, object, args, 1);
         }
         let result = self.construct_value(object, args, None);
         let result = self.check_interrupt_after(result)?;

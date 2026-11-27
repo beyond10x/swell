@@ -397,7 +397,10 @@ fn a_room_below_the_temporary_ends_in_the_memory_budget() {
     let mut agent = agent_with(limits()).unwrap();
     let realm = realm(&mut agent);
     let script = parse(&mut agent, &realm, "(1e-300).toPrecision(100);");
-    // A first round grows the arenas once; the rooms below are read after it.
+    // A first round with a room of 1 MiB grows the arenas once; the rooms below are read after
+    // it. At some sizes of the realm the first object the script makes grows an arena by more
+    // than 64 KiB (at 128 padding functions with the set methods of `story:set-methods`).
+    with_room(&mut agent, &realm, &script, 1 << 20);
     let (ample, ample_steps) = with_room(&mut agent, &realm, &script, 64 * 1024);
     let Outcome::Normal(text) = &ample else {
         panic!("{ample:?}");

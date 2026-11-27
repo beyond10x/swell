@@ -1,0 +1,194 @@
+---
+format: aep.planning-md/3
+id: story:private-names-and-private-methods
+kind: story
+status: implemented
+title: Private Names, [[PrivateElements]], and private methods and accessors
+summary: 1,977 cases (3,942 runs); lifts private method; one add function for every private element; every assignment form on a private target.
+relations:
+- decomposes: epic:slice-08-classes
+- depends_on: story:class-definition-evaluation
+- depends_on: story:class-element-syntax-and-early-errors
+- depends_on: story:weak-map-and-weak-set
+scope:
+- confidence: cited
+  path: crates/compiler/src/bytecode.rs
+- confidence: inferred
+  path: crates/compiler/src/class.rs
+- confidence: cited
+  path: crates/compiler/src/disasm.rs
+- confidence: cited
+  path: crates/compiler/src/expression.rs
+- confidence: cited
+  path: crates/compiler/src/resolve.rs
+- confidence: inferred
+  path: crates/compiler/tests/sources/class-private-methods.disasm
+- confidence: inferred
+  path: crates/compiler/tests/sources/class-private-methods.js
+- confidence: cited
+  path: crates/swell/src/builtins/function.rs
+- confidence: cited
+  path: crates/swell/src/env/global.rs
+- confidence: cited
+  path: crates/swell/src/env/mod.rs
+- confidence: cited
+  path: crates/swell/src/heap/collect.rs
+- confidence: cited
+  path: crates/swell/src/heap/mod.rs
+- confidence: cited
+  path: crates/swell/src/interp/dispatch.rs
+- confidence: cited
+  path: crates/swell/src/interp/frame.rs
+- confidence: cited
+  path: crates/swell/src/interp/lexical.rs
+- confidence: cited
+  path: crates/swell/src/interp/mod.rs
+- confidence: cited
+  path: crates/swell/src/interp/private.rs
+- confidence: cited
+  path: crates/swell/src/object/async_generator.rs
+- confidence: cited
+  path: crates/swell/src/object/generator.rs
+- confidence: cited
+  path: crates/swell/src/object/mod.rs
+- confidence: inferred
+  path: crates/swell/src/object/private_names.rs
+- confidence: cited
+  path: crates/swell/tests/main.rs
+- confidence: inferred
+  path: crates/swell/tests/private_methods.rs
+- confidence: inferred
+  path: crates/syntax/src/parser/class.rs
+- confidence: cited
+  path: crates/syntax/src/parser/mod.rs
+revision: 13
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T08:38:02Z", actor: "human:operator", revision: 13, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
+---
+## Context
+
+Slice 8 of 19, `classes` (`epic:slice-08-classes`; `docs/design/engine.md`, section 12, item 8). This story brings private names and runs private methods and accessors, as "Private names", items 1 to 6, states them: the Private Name (`PrivateNameRef`, a handle into an arena of its own, `Heap.private_names`, its record holding its description), held by a binding as the third variant of `SlotValue`, `PrivateName(PrivateNameRef)`; the private record in the environment chain (pushed after the heritage by the class's code, one slot per private identifier and one per private method or accessor's function, resolved at compile time to hops and slot); [[PrivateElements]] as `ObjectRecord.private_elements: Option<Box<PrivateElements>>` (the record grows from 200 to 208 bytes, the one change of slice 8 to it); the one add function in a new file `object/private_names.rs`; PrivateElementFind, PrivateGet and PrivateSet (a `TypeError` when the element is missing, when a method is set, when an accessor lacks the half asked for); the instance's private methods added by pass 1 of the instance initializer (`initializer_private_methods` of `story:class-definition-evaluation`, before any field), the static ones added to F at step 4 before the first static call (`static_private_adds`); `obj.#m()` with `obj` as `this`; one function object per private method per class evaluation; `Function.prototype.toString` of a private method; and the collector's `Item::PrivateName`, its workspace and its kind site. It lifts the hold `private method is not supported before slice 8` of `story:class-element-syntax-and-early-errors`.
+
+It owns, as decision 5 of the coordinator names them, `SlotValue::PrivateName`, the arena, `object/private_names.rs` and `RECORD_BYTES` 200 to 208. It also brings `GetPrivate` and `SetPrivate`, which a private method cannot be reached or a private setter run without; `story:private-fields-and-private-in` adds `AddPrivateField` and `PrivateIn`. The add function does not call HostEnsureCanAddPrivateElement yet: HOST-119 says the engine calls it only for a host object with an override table, and `story:host-ensure-can-add-private-element` adds that call.
+
+Edges: `story:class-definition-evaluation` (the functions it fills, the box, `InitInstance`), `story:class-element-syntax-and-early-errors` (the private elements' tree and the initializer function), and `story:weak-map-and-weak-set` of slice 9 (the last of slice 9's stories that append an object kind; through its own edges it follows `story:map-and-set`, `story:proxy-objects-and-access-traps` and `story:reflect-namespace`): those stories assert that the object record keeps 200 bytes ("passes as it is") and append their entries to `KIND_SITES`, which `story:reflect-namespace` makes a slice, so this story, which makes the record 208 bytes and appends an entry, comes after them. Order 3, built beside `story:derived-classes-and-super-call` and `story:public-class-fields`.
+
+Private names are invisible to scripts and hosts: no function of the language or of the host interface lists, copies or reads them (`Object.getOwnPropertyNames`, `Object.assign`, `JSON.stringify`, `Object.freeze` do not touch them); a slot that holds a Private Name has a name starting with `#`, which no lookup by name reaches; a Private Name read where a value is expected is a logic error of section 13 (`Terminated(EngineFault)`), never a panic.
+
+The list is `docs/plan/slice-08/story-private-methods.cases.txt`: the 1,977 cases of the key `private-methods` of `docs/plan/slice-08/scan.tsv` (a class with private methods or accessors and no heritage, SuperCall, field or static block; no negative case): `language/expressions/class` 962 and `language/statements/class` 951 (1,464 of them in the `dstr` directories: patterns in the parameters of private methods), `language/arguments-object` 60, `built-ins/Function/prototype` 4 (`toString`). In revision 1, 4 cases left this list for `close-later.tsv`, slice 18: `language/{statements,expressions}/class/elements/private-{getter,setter}-is-not-a-own-property.js`, which call `__lookupGetter__` or `__lookupSetter__` (Annex B, slice 18 in `conformance/test262/later-parts.tsv`). Their 3,942 runs fail on the plan's base run (the full run of 2026-11-26 on `149e12f1`, equal to `conformance/test262/expected.txt` on `62c7cf59`; slice 8: `test262-slice 08 9302 18455 0 0 9302 5 9297 0`): 3,912 on `class is not supported before slice 8` and 30 as counted refusals. A case of the list that ends on a part outside this story goes to `docs/plan/slice-08/close-later.tsv` by the coordinator's commit, as `story:new-target-meta-property` states.
+
+Design it builds on, by name: `docs/design/engine.md` section 3, "Private names", items 1 to 3, 5 and 6, and "Classes", items 2 (steps 1, 3 and 4) and 4 (pass 1 of the initializer); section 13 (logic errors of the object model). No sentence of the design is missing.
+
+## What later stories reuse
+
+The Private Name, its arena and its slot variant; the private record and `private_record`; [[PrivateElements]], the add function (`story:private-fields-and-private-in` adds fields through it; `story:host-ensure-can-add-private-element` gives it the hook), find, get and set; `GetPrivate` and `SetPrivate`; `interp/private.rs`; the collector's `Item::PrivateName` (`story:private-names-in-eval-code` resolves eval code's private names to the same slots).
+
+## Domain relations
+
+- A Private Name → the class evaluation that made it (one; two evaluations of a class make two Private Names); an object → its private elements (each keyed by a Private Name, at most one per name) — inferable (inferred from ECMA-262 `#sec-private-names` and `#sec-privateelement-specification-type`; no ess/1 document declares it: `spec/domains/host.yaml` holds no engine value, and ESS does not restate ECMA-262, `AGENTS.md`, "Rules").
+
+## Change
+
+Failing tests first: the tests below are written before the code and fail on the base.
+
+- Syntax: the hold `private method` is lifted: the `hold` call in `private_method` (`parser/class.rs`) and the line `("private method", 8),` of `HOLDS` (`parser/mod.rs`) are deleted. No fixture moves: `crates/syntax/tests/sources/held/private-method.js` (header `held "class", "private method"`) parses in both modes from this story on, as `sources::held_sources_answer_their_first_construct_still_held` reads from `HOLDS`, and `compile::held_sources_compile_once_nothing_in_them_is_held` compiles it.
+- Compiler: `crates/compiler/src/resolve.rs`, `private_record` (the stub of `story:class-definition-evaluation` filled): the private record, a record whenever the class declares a private name, one slot per private identifier and one per private method, getter or setter's function. The slots carry their names (each with its `#`) by the rule a record already has when a lookup by name may reach it (`crates/swell/src/env/mod.rs`, the documentation of `EnvironmentRecord`: "named when a lookup by name may reach them"): `mark_named` (`crates/compiler/src/resolve.rs`) names every scope that encloses a direct `eval`, so the private record is named exactly when a direct `eval` stands inside the class body (a `with` cannot, class code being strict), and its slots are unnamed otherwise; `story:private-names-in-eval-code` reads the names through that rule; `#x` in the class body after the heritage resolves to hops and slot as a captured name. `crates/compiler/src/class.rs`: `compile_private_method` (the `CompileError::Tree` replaced): at step 3 the function is made and stored in its slot; `initializer_private_methods`: one `AddPrivateMethod` per instance private method or accessor; `static_private_adds`: the same on F. The private record's Private Names are made where the class's code pushes the record (one new Private Name per identifier per evaluation). `crates/compiler/src/expression.rs`: the arm of `Expr::PrivateMember` (the `CompileError::Tree` of `story:class-element-syntax-and-early-errors` replaced) and of the private link of an optional chain (`a?.#m()`), a call getting the object as `this`; and the private reference as an assignment target: the variant `Target::Private { object, hops, slot }` of `enum Target`, with its arm in `target` (from `Expr::PrivateMember`), in `reference_items` (1 item, the object, like `Target::Member`), in `reference` (the object pushed), in `get_keeping` (`GetPrivate` on a kept object) and in `put` (`SetPrivate`). Through `Target` the plain assignment `this.#m = v` emits `SetPrivate`, and so do the compound, logical, update and destructuring forms and the `for`-`in`/`of` head, which already take any `Target` (`expression.rs` update, compound and logical assignment, the three pattern walks; `statement.rs` the loop head): no case moved between this list and `story:private-fields-and-private-in`'s (0 cases), since every form of a private target is built here and a case of this list needs nothing of the fields story. New instructions inserted after the variant `PutIndex` of `Instruction`, each documented: `GetPrivate { hops, slot }` (`[o] -> [v]`), `SetPrivate { hops, slot }` (`[o, v] -> [v]`), `AddPrivateMethod { hops, slot, function_hops, function_slot }` (`[o] -> [o]`); their arms in `disasm.rs` after `I::SetEnv { hops, slot }`. A compiler fixture pair `crates/compiler/tests/sources/class-private-methods.{js,disasm}` (new).
+- The Private Name (item 1): `PrivateNameRecord` (its description, a `StringRef`) and the field `private_names: Arena<PrivateNameRecord>` of `Heap` (`crates/swell/src/heap/mod.rs`, inserted after the field `symbols` and its initial value after `symbols: Arena::new(key)`); `SlotValue::PrivateName(PrivateNameRef)` inserted after `Uninitialized` in `crates/swell/src/interp/frame.rs`, with its arm in every exhaustive match over `SlotValue` (`SlotValue::value` in `frame.rs`, the reads of `env/mod.rs`, `env/global.rs` and `interp/lexical.rs`: a Private Name read as a value is the logic error of section 13) and marked wherever a `SlotValue` is traced (`Frame::trace`, the record's trace in `env/mod.rs`).
+- [[PrivateElements]] (item 2): `private_elements: Option<Box<PrivateElements>>` inserted after the field `kind` of `ObjectRecord` (`crates/swell/src/object/mod.rs`), `None` in `ObjectRecord::new`, its entries traced in `ObjectRecord::trace` before the match over the kind (each entry's Private Name and its values); the box charged before it grows and recorded in `Grown`; PrivateElementFind compares in order and spends a step per comparison past `SMALL` (`object/property.rs`). `crates/swell/src/object/private_names.rs` (new; `pub(crate) mod private_names;` in `object/mod.rs` between `ordinary` and `promise`): the add function (an entry already there is a `TypeError`; the entry appended), find, get (a getter called as a property's getter is called) and set. `crates/swell/src/interp/private.rs` (new; `mod private;` in `interp/mod.rs` after `mod patterns;`): the work of each new instruction, called from its arm in `execute` (`interp/dispatch.rs`, the arms inserted after `I::PutIndex`).
+- The collector (item 6): `Item::PrivateName` inserted after `Item::Symbol` in `enum Item` (`crates/swell/src/heap/collect.rs`), its arm after each arm of `Item::Symbol` (the mark bits, the arena of an item, the trace), a workspace for it in `Mark`; `"heap/mod.rs PrivateNameRecord::trace"` inserted into `KIND_SITES` after `"heap/mod.rs SymbolRecord::trace"` (a slice since `story:reflect-namespace`, so no length changes; one entry more than slice 9 leaves, which the unit reads on its base and names); the heap of `mark_phase_calls_every_site_of_the_layout` gets a Private Name, allocated after the symbol of that test and pushed after `mark.push(Item::Symbol(symbol))`. No Private Name is a root.
+- `builtins/function.rs`, `function_to_string`: the source text of a private method from its first token.
+- Tests, each in both collection modes, in `crates/swell/tests/private_methods.rs` (new): `a_private_method_getter_setter_and_accessor_pair`; `static_private_methods_and_accessors`; `this_private_method_call_gets_this`; `access_without_the_brand_throws_a_type_error`; `access_on_a_primitive_throws_a_type_error`; `setting_a_private_method_throws_a_type_error`; `getting_a_setter_only_accessor_throws_a_type_error`; `two_instances_share_one_method_function`; `two_evaluations_of_a_class_make_two_brands`; `an_inner_class_name_shadows_an_outer_one`; `private_elements_are_invisible_to_listings` (`Object.getOwnPropertyNames`, `getOwnPropertySymbols`, `JSON.stringify`, `Object.assign`, `for in`, `Object.freeze`, and the host interface's listing of the object); `private_names_are_freed_when_nothing_holds_them` (10,000 class evaluations, 1,000 under `collect-every-safe-point`; `heap_bytes()` after a `collect()` within the reading before); `an_instance_keeps_its_private_elements_across_collections`; `a_class_with_1000_private_methods`; `instances_are_charged_to_the_memory_budget` (10,000 instances, 1,000 under `collect-every-safe-point`; `Termination::MemoryBudget` under a small budget); `a_private_method_recursion_stops_at_frame_depth` (a `RangeError`); `a_lookup_past_small_spends_a_step_per_comparison` (`last_entry_steps()` read); `every_assignment_form_on_a_private_accessor_and_a_private_method`, the test of `Target::Private`: each form below runs on a private accessor with a getter and a setter (the setter gets the value, the getter is read where the form reads), and on a private method and on an accessor with a getter and no setter, where it throws a `TypeError` from PrivateSet (`#sec-privateset`: a method, or an accessor whose setter is undefined) at the point the clause of the form puts PutValue, which the test reads by a side effect of the right-hand side or of the value: plain `=` (`#sec-assignment-operators-runtime-semantics-evaluation`, `AssignmentExpression : LeftHandSideExpression = AssignmentExpression`: the right-hand side is evaluated, then PutValue throws); compound `+=` (the same clause, `LeftHandSideExpression AssignmentOperator AssignmentExpression`: GetValue, the right-hand side, the operation, then PutValue throws); logical `&&=`, `||=`, `??=` (the same clause, its three logical productions: on a method, whose value is a function, `&&=` evaluates the right-hand side and throws, while `||=` and `??=` short-circuit, evaluate no right-hand side and throw nothing); update `++` and `--`, prefix and postfix (`#sec-prefix-increment-operator-runtime-semantics-evaluation`, `#sec-postfix-increment-operator-runtime-semantics-evaluation` and their decrement twins: GetValue and ToNumeric, then PutValue throws); a destructuring target in an array pattern and in an object pattern (`#sec-runtime-semantics-iteratordestructuringassignmentevaluation` and `#sec-runtime-semantics-keyeddestructuringassignmentevaluation`, `AssignmentElement`: the reference, then the value, then PutValue throws, and the array form closes its iterator); a `for`-`of` and a `for`-`in` target (`#sec-runtime-semantics-forin-div-ofbodyevaluation-lhs-stmt-iterator-lhskind-labelset`, lhsKind assignment: the next value is taken, then PutValue throws, and `for`-`of` closes its iterator): that is 18 tests under `private_methods::`, none on the base (the file is new). `crates/swell/tests/main.rs` generated again.
+- Sizes (decision 7 of the coordinator). The object record grows by the box, 200 to 208 bytes: `RECORD_BYTES` changes from 200 to 208 in `object/generator.rs` (`object::generator::tests::a_generator_keeps_the_object_record_at_its_size`) and in `object/async_generator.rs` (its twin), with the reason in their documentation; the unit prints `size_of::<ObjectRecord>()` before and after and sets the measured value if it is not 208, naming it. `SlotValue` with the new variant is expected to stay at 16 bytes: the test that decides is `interp::frame::tests::a_slot_is_as_large_as_a_value` (it asserts 16, unchanged). The fallback the design names, if it shows 24: the variant is not added, the private record keeps its Private Names in a boxed list of its own beside its slots, `SlotValue` stays as it is, and the arms of the reads above are not written; the report names which form was built.
+- Bounds, as `AGENTS.md` and the `AGENTS.md` of the folder that holds the repository ("Tests stay fast", "A job in the pool ends within 10 minutes", "No Python for permanent tools") state them: a test is terminated at 60 s and counts as failed; the gate fails when the wall time of its test steps passes 120 s; a test stays under 1.5 CPU seconds alone in the default mode, under 2 with `collect-every-safe-point` (at the reduced count named above) and under 2.5 at `SWELL_FULL_COUNTS=1`, measured with the test binary run directly with `--exact <name> --test-threads 1` under `time` (user plus system); the unit times each test before it adds it and names each one over 1 CPU second with its time. A product several tests share is built once inside one test function or is a committed file, never per test; no test makes a network request or a model call; the unit runs the test binaries of its own change, never the whole gate and never a whole-workspace test run. Builds and tests go through the pool: `cargo` is the shim of the pool, anything else that compiles or tests is prefixed `slot`; a pool job ends after 10 minutes unless it names its time (`slot --timeout 30m` or `SLOT_TIMEOUT=30m`, 30 minutes at most); a script that measures, probes or waits runs without the prefix. No `unsafe`, no third-party crate, no panic, `unwrap`, `expect` or unchecked indexing; no Python in any tool, test or command; intermediate files in the scratch directory or `.out/`.
+- Size: about 1,150 lines (compiler 260, Private Name and collector 200, [[PrivateElements]] and the add 200, engine arms 100, tests 390): one session at the upper end; not cut further, since a private method cannot be reached without the Private Name, its record and `GetPrivate`.
+
+## Requirements
+
+- No line of `conformance/host/requirements.txt` moves here: `grep -c 'pending slice 8$' conformance/host/requirements.txt` prints `1` on `61f2a8e2` and after this story (HOST-119 stays pending); only `story:host-ensure-can-add-private-element` moves those lines. The heap's new kind is a kind of the collector: `host_objects::host_186_a_host_function_charges_every_byte` and `host_objects::host_187_a_realm_of_300_host_functions_and_40_host_objects` pass in both modes, with their readings before and after named in the report (the change explained by the record's 8 bytes per object); no realm item and no intrinsic is added.
+- The run loop: nothing is added to the frame of `Agent::execute`; each new instruction does its work in a function of its own; `STACK_BYTES_PER_REENTRY` is unchanged, and the stack tests pass on seven eighths of `min_stack_bytes()`, or the unit gives the measured change and the constant follows it.
+
+Writes: `crates/syntax/src/parser/{class,mod}.rs` (the hold call, its line of `HOLDS`); `crates/compiler/src/{class,resolve,expression,bytecode,disasm}.rs`, `crates/compiler/tests/sources/class-private-methods.{js,disasm}` (new); `crates/swell/src/object/{private_names,mod,generator,async_generator}.rs` (`private_names.rs` new; `SMALL` of `object/property.rs` read, not written), `crates/swell/src/heap/{mod,collect}.rs`, `crates/swell/src/interp/{frame,private,dispatch,mod,lexical}.rs` (`private.rs` new), `crates/swell/src/env/{mod,global}.rs` (the arms of `SlotValue::PrivateName`), `crates/swell/src/builtins/function.rs` (`function_to_string`), `crates/swell/tests/private_methods.rs` (new), `crates/swell/tests/main.rs` (generated). A unit that meets a file outside this line that its change cannot compile or pass without makes the smallest change there and reports it. Not written: `crates/syntax/src/{lexer,early}.rs`, `crates/swell/src/host/hooks.rs`, `crates/swell/src/dynamic_code.rs`, `crates/swell/src/object/ecmascript_function.rs` (the box has no [[PrivateMethods]]), `crates/swell/src/heap/arena.rs` (the arena type used as it is), `crates/test262`, `conformance/`, `website/`, `docs/`.
+
+Shared with the stories of order 3, built at the same time with no edge between them, each at its own named site: `parser/class.rs` (here the `hold` call in `private_method`; the others in `field` and the `class heritage` call); `HOLDS` in `parser/mod.rs` (each deletes its own line: here `("private method", 8),`, the others `("class heritage", 8),` and `("class field", 8),`; the lines are adjacent, so the second to merge gets a conflict there, fixed by "keep both deletions"); `compiler/src/class.rs` (here `compile_private_method`, `initializer_private_methods`, `static_private_adds`; `story:public-class-fields` `compile_field`, `initializer_fields`; `story:derived-classes-and-super-call` `class_heritage`, `default_derived_constructor`); `compiler/src/resolve.rs` (here `private_record`; the others `field_key_bindings` and `function`); `compiler/src/expression.rs` (here the arm of `Expr::PrivateMember` and the variant `Target::Private` with its arms in `target`, `reference_items`, `reference`, `get_keeping` and `put`; `story:derived-classes-and-super-call` the arms of `Expr::This` and `Expr::SuperCall`; the arm of `Expr::PrivateMember` sits directly after the arm of `Expr::SuperCall`, where `story:class-element-syntax-and-early-errors` inserts it, so the two replaced arms are adjacent lines and the second to merge gets a conflict there, fixed by "keep both arms"); `compiler/src/{bytecode,disasm}.rs` and `interp/dispatch.rs` (here after `PutIndex`, `I::SetEnv` and `I::PutIndex`; `story:derived-classes-and-super-call` after `NewSpread`, `Uninitialize`, `I::New(n)`, `I::NewSpread` and in `return_from_frame`); `interp/frame.rs` (here `SlotValue` and its trace; there `constructed`); `interp/mod.rs` (here `mod private;`; no other story of the order writes it); `builtins/function.rs` (written by `story:class-definition-evaluation` before, by an edge); `tests/main.rs` (generated again on the join). Shared with slice 9, ordered before this story by the edge to `story:weak-map-and-weak-set`: `heap/collect.rs` (slice 9's entries sit after `"object/promise.rs Promise::trace"` and `"object/async_builtin.rs AsyncBuiltinActivation::trace"`, here after `"heap/mod.rs SymbolRecord::trace"`; the layout test's records: slice 9's in `kinds` and after `from_sync` and `builtin`, here after the symbol), `object/mod.rs` (slice 9's kinds and arms, here the record's field, `new` and the line in `ObjectRecord::trace`), `object/{generator,async_generator}.rs` (here the one change of `RECORD_BYTES`). Ordered after this story by edges: `story:class-static-blocks` (it writes `parser/class.rs`, `HOLDS` and `compiler/src/resolve.rs` after this story), `story:private-fields-and-private-in`, `story:host-ensure-can-add-private-element` (through it).
+
+## Acceptance
+
+The tests named in Change pass in both collection modes, run by the binaries of this change and not as a whole step. `slot cargo nextest run --locked --no-tests=fail -p swell --test main -E 'test(/^private_methods::/)'` runs 18 tests and passes (on the base the filter matches none and the command fails); then `slot cargo nextest run --locked -p swell --test main -E 'test(/^private_methods::/) | test(/^classes::/) | test(/^builtins_object::/) | test(/^builtins_object_enumeration::/) | test(/^builtins_object_integrity::/) | test(/^builtins_json::/) | test(/^builtins_function_source::/) | test(/^host_objects::/) | test(/^generators::/) | test(/^async_generators::/) | test(/^language::/) | test(/^limits_scripts::/) | test(/^budgets::/) | test(/^eval_stack::/) | test(/^collect::/) | test(/^termination::/)'` and the same with `--features collect-every-safe-point`; `slot cargo nextest run --locked -p swell --lib` and the same with `--features collect-every-safe-point` (`object::generator::tests::a_generator_keeps_the_object_record_at_its_size` and its async twin at 208 or the measured value, `interp::frame::tests::a_slot_is_as_large_as_a_value`, `heap::collect::tests::mark_phase_calls_every_site_of_the_layout`); `slot cargo nextest run --locked -p swell-syntax --test main`; `slot cargo nextest run --locked -p swell-compiler --test main`; `slot cargo nextest run --locked -p swell-test262 --test main`; each exits 0, in this story's tree and after `story:derived-classes-and-super-call` or `story:public-class-fields` is merged first: the wave branch is merged into the unit, the conflicts this story names are fixed as it names them (the adjacent lines of `HOLDS`: keep both deletions; the adjacent arms of `Expr::SuperCall` and `Expr::PrivateMember` in `compiler/src/expression.rs`: keep both arms; `tests/main.rs`: generated again), and the same commands run again and exit 0. `ls crates/compiler/tests/sources/class-private-methods.* | wc -l` prints `2` (0 on the base). `slot task clippy`, `slot task forbid-unsafe-check` and `sh taskfiles/test-main.sh check` exit 0; `git diff --stat "$BASE" -- Cargo.lock "*/Cargo.toml"` prints nothing (`BASE` the join the unit starts from). The text: `grep -rn '"private method", 8' crates | wc -l` prints `0` (2 on its base: the hold call and the line of `HOLDS`; the header of `held/private-method.js` does not match); `ls crates/syntax/tests/sources/held | wc -l` prints the same number as on its base (no fixture moves). The size of the object record is checked by its layout tests, `object::generator::tests::a_generator_keeps_the_object_record_at_its_size` and its async twin, which the `--lib` runs above pass with the value the unit measured; `grep -rh 'const RECORD_BYTES: usize' crates/swell/src/object | sort -u` prints one line, `    const RECORD_BYTES: usize = 208;` (both read 200 on the base), or under the fallback of Change the same line with the measured value the report names in place of 208; `grep -c 'PrivateNameRecord::trace' crates/swell/src/heap/collect.rs` prints at least `1` (0 on the base). `git diff --quiet "$BASE" -- conformance/host/requirements.txt` exits 0 and `grep -c 'pending slice 8$' conformance/host/requirements.txt` prints `1`. Time: every test this story adds stays within the bounds of Change, as the unit measured them; the report lists each measured time and the sum, and a time over its bound fails this acceptance.
+
+test262. The full run is not the unit's. With the list as committed on the wave branch when the wave closes, `git show "$WAVE:docs/plan/slice-08/story-private-methods.cases.txt" > .out/story-private-methods.cases.txt` (`WAVE` the wave branch the unit merges into) and the guard `docs/plan/slice-08/guard-objects.cases.txt` (the 523 passing cases of the integrity, key and entry functions of `Object` and `JSON.stringify`, which must not see a private element), `cat .out/story-private-methods.cases.txt docs/plan/slice-08/guard-objects.cases.txt | LC_ALL=C sort -u > .out/part.cases.txt` and `sh docs/plan/slice-08/part.sh "$CHECKOUT" .out/test262-part .out/part.cases.txt` (`CHECKOUT` `.cache/test262/<commit of conformance/test262/PIN>`; 2,500 cases, 4,982 runs over the plan's base run), then, in the background, `slot --timeout 30m cargo run --locked --release -q -p swell-test262 -- count --test262 .out/test262-part --design docs/design/engine.md --features conformance/test262/features.txt --runs .out/test262-part/runs.tsv > .out/test262-part/lines.txt` (one pool job, as `story:new-target-meta-property` states), and the base run the coordinator made on the join the unit starts from copied to `.out/test262-base/runs.tsv`: (a) `sh docs/plan/slice-08/check.sh .out/story-private-methods.cases.txt .out/test262-base/runs.tsv .out/test262-part/runs.tsv` exits 0 (over the plan's base run, restricted to the part, it exits 1, prints 3,942 lines `failing` and `passed 523 bound 523 B 523 F 1977 R 1977`; it prints `missing` for a list case the part lacks and exits 1 on an empty list); (b) `awk -F'\t' '$6 ~ /(class|private method) is not supported/' .out/test262-part/runs.tsv | wc -l` prints `0` (3,912 over the plan's base run). On the join, the coordinator's full run, made in parts, passes (a) over the whole run.
+
+## Out of scope
+
+Private fields and `#x in` (`story:private-fields-and-private-in`); private methods with fields or in derived classes (the cases where the parts meet, on the lists of `story:class-static-blocks` and `story:private-fields-and-private-in`); private names in eval code (`story:private-names-in-eval-code`); the call of HostEnsureCanAddPrivateElement (`story:host-ensure-can-add-private-element`); `__lookupGetter__` and `__lookupSetter__` (slice 18, `close-later.tsv`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `privatemethods` of wave big-2 delivered the story on `impl/privatemethods` (three
+corrections: one after each of the adversary's two passes and one after the coordinator's
+read), merged into `wave/big-2`. Where the delivery differs from the text above:
+
+- One instruction more than the story names: `NewPrivateName { slot, name }` (`[] -> []`),
+  emitted right after the private record is pushed, one per private identifier. It writes a
+  new Private Name with the description `name` into slot `slot` of the running record.
+  `AddPrivateMethod` has `u16` fields (hops, slot, function_hops, function_slot, room), so
+  `Instruction` stays 12 bytes. A private record holds 65,536 slots, two per method with a
+  name of its own, so 32,768 methods; past it the compile error is
+  `TooManyInClass("private record slots")`, a `SyntaxError` of the realm
+  (`script::tests::a_bound_of_one_class_is_a_syntax_error_of_the_realm`; the narrowing:
+  `class::tests::a_private_record_holds_65536_slots` in the compiler crate).
+- `room`: the number of private elements one class level adds, a getter and a setter of one
+  name counted once, fixed by the resolver (`Resolution::private_rooms`, keyed by the
+  instance initializer and by the constructor for the static ones). The first add of a
+  construction that finds the list full or missing reserves `room` entries more
+  (`try_reserve_exact`), charged first: bytes charged equal bytes reserved, and the sweep
+  credits the same. An instance pays a box of 24 bytes and 44 bytes per element.
+  `story:private-fields-and-private-in` counts its private fields into the same room.
+- The scan on each add stays: an add finds its key first and charges a step per comparison
+  past `SMALL` = 8. A construction with n private elements of one level spends 0 steps for
+  n <= 9 and (n - 9)(n - 8)/2 above (17 methods: 36 steps).
+- The private record is the scope `ScopeKey::Private(constructor)` of the resolver: one
+  binding per private identifier (named `#x`) and one per private method, getter or setter
+  function, every binding captured. It is entered after the heritage, pushed with
+  `PushEnv(n)`, or with `PushLexicalEnv(table)` when a direct `eval` in the class body names
+  it. Every site of class code that follows the heritage resolves from the private record.
+- The instance initializer is made and walked whenever the class has an instance private
+  method, not only with a field; the fields of `story:public-class-fields` compile into the
+  same function, after the private methods' adds.
+- `PrivateValue` has two variants, `Method` and `Accessor { get, set }`;
+  `story:private-fields-and-private-in` adds `Field`.
+- The record of an object is 208 bytes, before 200 (`CHANGELOG.md`, "Changed", gives the
+  readings). One test needed room for it: the result parse of 100,000 nested brackets in
+  `builtins_json_parse` at the full count needs 66,304 KiB and has a budget of its own,
+  `RESULT_MEMORY_BYTES` = 72 MiB, where the test limits give 64 MiB.
+- Direct eval code, until `story:private-names-in-eval-code`: after a parse of direct eval
+  code failed, `Agent::private_names_of_direct_eval` (`crates/swell/src/dynamic_code.rs`)
+  reads each error of an undeclared private name. A name is declared by an enclosing class
+  when a declarative record on the chain of the running frame's LexicalEnvironment names a
+  slot `#x` (`Agent::chain_names_slot`); Object Environment Records are passed without a
+  read. When every error of the parse is of a declared name, the first becomes the refusal
+  `private name #x in direct eval code is not supported before slice 8`; otherwise those
+  errors are dropped and the first remaining error is thrown. A refusal is counted only for
+  the error answered first (`Agent::syntax_errors`). A direct `eval` whose code parses pays
+  nothing for this. That story removes both functions and turns the refusal lines of
+  `private_methods::a_direct_eval_is_refused_only_for_a_name_an_enclosing_class_declares`
+  and `private_methods::a_direct_eval_in_a_field_initializer_meets_private_names` into runs.
+- Changes outside the story's writes: one arm in `crates/swell/src/interp/parameters.rs` and
+  three in `crates/swell/src/interp/class.rs` (a Private Name where a parameter's slot or the
+  derived `this` binding is read is the logic error); `function.rs` of the compiler calls
+  `crate::class::instance_initializer`; `crates/swell/tests/proxy_shape_traps.rs` reads the
+  base of its memory sweep from an agent under the sweep's own budget (`docs/design/engine.md`,
+  "Memory budget", says why); `crates/swell/tests/builtins_json_parse.rs` (the budget above).
+- `builtins/function.rs` is not written: `function_to_string` already answered a private
+  method's MethodDefinition.
+- The reviews: `review-result:adversary-privatemethods-pass-1` (red: the Proxy memory sweep
+  at two realm sizes, the room of the list, six findings) and
+  `review-result:adversary-privatemethods-pass-2` (red: the refusal rewrote the early error
+  of undeclared private names, 7 cases of test262 regressed; a refusal counted beside a
+  thrown grammar error). Both corrected; the second correction and the third are read by the
+  coordinator (`review-result:privatemethods-correction-2-coordinator-read`).
+- The story's part of test262 (its list and its guard, 2,500 files) reads 2,500 passed and no
+  refusal on the unit's head. The part of 242 files with a direct `eval` and a private name:
+  211 of 445 runs pass (193 on the base run of `6f21df6d`), 230 are refused; the 18 runs of
+  the 9 `…-visible-to-direct-eval` files stay refused until `story:private-names-in-eval-code`.

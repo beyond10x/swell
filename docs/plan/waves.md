@@ -476,9 +476,6 @@ that slice reads its entries first.
 - The gate, any wave: about 15 planted scripts end a failure message with a path under `.out/`,
   which the log of a run on the forge does not show; the self-test prints the last 20 lines of
   the script's own log only.
-- Slice 6: the declarative part of the global environment (`RealmGlobalEnv` in
-  `crates/swell/src/realm/mod.rs` is an empty record until `let`, `const` and `class` arrive;
-  `crates/swell/src/env/global.rs` says what to add).
 
 ## After slice 4: bigger waves
 
@@ -496,3 +493,39 @@ Slice 9 is next in the order of delivery ("The order after slice 3"); slice 8 fo
 design's order and holds the most cases that do not pass. Both are decomposed while big-1 is
 built. A story of big-2 starts as soon as its critics approve it (the organization's rule
 "Goal first").
+
+## Slice 9, `collections-proxy-reflect`
+
+`epic:slice-09-collections-proxy-reflect`, decomposed on 2026-11-26 into ten stories (two rounds of the four plan critics, `review-result:slice-09-round-1-*` and `slice-09-round-2-*`, and the coordinator's reading of the second revision, `review-result:slice-09-revision-2-coordinator-read`; scope and parallel safety approved in round 2, and the nine findings of design and acceptance are answered in that revision). The case list and the guard list of each story are in `docs/plan/slice-09/`; `sh docs/plan/slice-09/lists.sh <runs>` proves that the lists partition the slice (`slice 1785 lists 1787 incoming 2` over the full run on the code of wave big-1 before the close of slice 4; the 2 incoming cases are the ones that close moves from slice 4 to slice 9). The order follows the stories' edges; stories of one order can be built at the same time, and each names, per shared file, the existing entry it inserts after, different from the other's. `weak-map-and-weak-set` depends on both stories of order 2 (it appends after the entries of each); `reflect-namespace` makes the collector's list of kind sites a slice, so no later story changes its length. `aep plan artifact waves` puts stories that declare the same file in different waves and so derives nine waves for these ten; the orders below are those of the edges. All ten belong to wave big-2.
+
+| order | stories | what it brings |
+|---|---|---|
+| 1 | `keyed-entry-table`, `reflect-namespace` | the ordered table of entries of `Map` and `Set` (SameValueZero keys, String keys atomized, cursors moved by compaction and `clear`); `Reflect` and its 13 functions (213 failing cases, and 267 passing ones that test for real once `Reflect.construct` exists) |
+| 2 | `map-and-set`, `proxy-objects-and-access-traps` | `Map`, `Set`, their iterators and species, HOST-25 and HOST-214 (376 cases); the Proxy object, `Proxy.revocable`, a Proxy arm in every internal method, the traps `get`, `set`, `has`, `deleteProperty`, `apply` and `construct`, the walks of the prototype chain, IsArray and GetFunctionRealm, every Proxy method a re-entry (246 cases) |
+| 3 | `weak-map-and-weak-set`, `set-methods`, `proxy-descriptor-prototype-and-extensibility-traps` | `WeakMap` and `WeakSet` with symbol keys and `getOrInsert*`, and ephemeron clearing in the collector (247 cases); the seven set methods (129 cases); the seven remaining Proxy traps and their invariants (204 cases) |
+| 4 | `map-upsert-and-group-by`, `host-object-overrides` | `Map.prototype.getOrInsert*` and `Map.groupBy` (46 cases); host objects with an override table, checked with the Proxy invariants, a broken one faulting the agent: HOST-41, HOST-112, HOST-113, HOST-114 and HOST-222 (no case) |
+| 5 | `slice-09-conformance-close` | the close of the slice: the cases that need slice 8 (37) or slice 12 (22) move by rule lines, the incoming cases and every line of `close-later.tsv` are checked |
+
+On `main` at `62c7cf59`: 267 of the 1,785 cases pass (`test262-slice 09 1785 3541 0 0 1785 267 1518 0`), and 6 host requirements are pending for the slice (HOST-25, HOST-41, HOST-112, HOST-113, HOST-114, HOST-214); `story:host-object-overrides` adds HOST-222 by a design change before it starts. Two orders of slice 8 depend on this slice: its story of private names (HOST-119 reads whether a host object has an override table) on `story:host-object-overrides`, and `slice-08-conformance-close` on `slice-09-conformance-close` (both write section 12 and the files of the gate line, and slice 9 is delivered first).
+
+Delivered on 2026-11-27 in wave big-2 (`docs/plan/wave-big-2.md`, "The close of slice 9"): all 1,858 cases of the slice pass in all 3,678 runs (`test262-slice 09 1858 3678 0 0 1858 1858 0 0`); 37 cases moved to slice 8 and 22 to slice 12, 130 came in from slice 19, and no host requirement is pending for slice 9.
+
+## Slice 8, `classes`
+
+`epic:slice-08-classes`, in fourteen stories after revision 3 (the fifteenth, `instance-elements-initialization-order`, is folded into `private-fields-and-private-in` and, since revision 3, its cases without a private field into `class-static-blocks`; the coordinator archives it). The case list of each story, the four close lists (`close-later.tsv`, `close-slice-9.cases.txt`, `close-pass.cases.txt`, and `incoming.tsv`, the 37 cases slice 9's close moves in) and the three guard lists are in `docs/plan/slice-08/`; `sh docs/plan/slice-08/lists.sh <runs.tsv>` proves that the lists partition the slice and prints `slice 9302 lists 9339 incoming 37` over the plan's run (exit 0). The order follows the stories' edges; stories of one order can be built at the same time, and each names its site in every file it shares with another story of its order. `aep plan artifact waves --kind story --status draft` puts every story in a wave of its own, since stories of one order share files (at the least the generated `crates/swell/tests/main.rs`); the named sites are the reason the orders put them side by side.
+
+A source that holds a construct (`Parser::hold`) has one form from order 1 to the close: it lives in `crates/syntax/tests/sources/held/` with the header `held "<construct>", ...`, and the test `sources::held_sources_answer_their_first_construct_still_held` answers it from the parser's list `HOLDS` (`pub const HOLDS: &[(&str, u32)]` in `parser/mod.rs`, re-exported by `lib.rs`), one line per hold. One rule places every case (`docs/plan/slice-08/scan.awk`): the first story, in the order of the edges, whose closure holds every part the case needs. A story that lifts a hold deletes its `hold` call and its line of `HOLDS` and moves no fixture; the last, `private-fields-and-private-in`, leaves `HOLDS` empty and deletes `hold`.
+
+| order | stories | what it brings |
+|---|---|---|
+| 1 | `new-target-meta-property`, `super-property-and-super-syntax`, `class-syntax-and-early-errors` | `new.target` outside classes, `ArrowContext`, the eval frame's function and PerformEval's four flags (36 cases); `super` outside classes, `super.x` in every MethodDefinition, its early errors (66); the grammar and early errors of a class, held by `Parser::hold` (467) |
+| 2 | `class-definition-evaluation`, `class-element-syntax-and-early-errors` | base classes run: `ClassConstructor` with both slots, the class scope, methods and accessors, `InitInstance`, `toString` (3,297); the grammar and early errors of fields, private names, static blocks, `.#x` and `#x in`, held (886) |
+| 3 | `derived-classes-and-super-call`, `public-class-fields`, `private-names-and-private-methods` | heritage, `super()` as four instructions, the hidden `this` binding, `KeepThis` and the `constructed` enum (331); public fields in the one instance initializer and the static runs (515); Private Names, `Target::Private` (every assignment form of a private reference), their arena, `[[PrivateElements]]` (object record 200 to 208 bytes), private methods and accessors (1,977) |
+| 4 | `class-static-blocks`, `eval-in-class-field-initializers` | static blocks, the other arm of the step-4 sequence beside public fields, and the 449 cases where the derived, field and private-method parts meet without a private field, with their 8 tests (484 = 35 + 449; after `public-class-fields`, and after `derived-classes-and-super-call` and `private-names-and-private-methods` for the files it shares with them); eval in field initializers: the read of `inClassFieldInitializer` from the template kind in `dynamic_code.rs` and the ContainsArguments rule (84) |
+| 5 | `private-fields-and-private-in` | private fields, `#x in`, and the cases where a private field meets the other parts (984) |
+| 6 | `private-names-in-eval-code`, `host-ensure-can-add-private-element` | private names in direct eval code through PerformEval's walk of the chain (107); HOST-119 and the new HOST-223 (no case; after slice 9's `host-object-overrides`) |
+| 7 | `slice-08-conformance-close` | the close: 9 cases (18 runs) moved, 5 to slice 13 and 4 to slice 18; the 91 cases of slice 9's parts (54 of slice 8, 37 incoming) and the 5 passing cases checked; passing cases of later slices come in; after `slice-09-conformance-close` |
+
+Edges to slice 9: `private-names-and-private-methods` after `weak-map-and-weak-set` (the object record's last change of slice 9 and the `KIND_SITES` entries it appends after); `host-ensure-can-add-private-element` after `host-object-overrides`; `slice-08-conformance-close` after `slice-09-conformance-close` and `slice-04-conformance-close`.
+
+On the plan's base (`62c7cf59`, the full run of 2026-11-26 on `149e12f1`): 5 of the 9,302 cases pass (`test262-slice 08 9302 18455 0 0 9302 5 9297 0`), and 1 host requirement is pending for the slice (HOST-119; `grep -c 'pending slice 8$' conformance/host/requirements.txt` prints `1`, `2` after the first commit of `host-ensure-can-add-private-element`, `0` after it). After the close, on the plan's numbers: 9,330 cases and 18,511 runs in slice 8, every run passed.
