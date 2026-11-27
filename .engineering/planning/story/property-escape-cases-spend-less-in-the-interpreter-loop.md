@@ -5,7 +5,7 @@ kind: story
 status: active
 title: The property-escape cases spend less in the interpreter loop
 summary: Three quarters of a property-escape case of test262 is the interpreter running the harness loop buildString; those cases are 73 % of the test262 run's test time. The loop's CPU seconds drop to 90 % or less (aim 80 %), with every step count, heap reading and stack bound unchanged. Lane unit 5 of wave big-2.
-revision: 7
+revision: 8
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T08:41:58Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T08:41:59Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
@@ -50,21 +50,23 @@ script or a host can observe changes.
    body of `buildString` over ranges of a fixed size with no regexp match, is sized so that
    one run takes at least 5 CPU seconds on the base, needs no harness file and ends with
    `print(result.length)`.
-2. A task `perf-loop` in a new file `taskfiles/perf.yml` (the coordinator adds the include
+2. A script `taskfiles/perf-loop.sh` (POSIX sh and awk) and a task `perf-loop` in a new file
+   `taskfiles/perf.yml` whose one command is that script (the coordinator adds the include
    line of `Taskfile.yml`; a variable of the task has the prefix `PERF_` and a line in
-   `GATE_VARIABLES`). It builds the release `swell` of the tree (`cargo build --release -p
-   swell-cli`, a job of the pool through the shim) and runs the binary with no limit flag,
-   three times, alternating with the binary `PERF_BASE_BIN` names when it is set (the release
-   `swell` built at the commit that adds the task, kept under `.out/perf/`). It reads CPU
+   `GATE_VARIABLES`). The script builds nothing. It runs the release `swell` that
+   `PERF_BIN` names (default `target/release/swell`) with no limit flag, three times,
+   alternating with the binary `PERF_BASE_BIN` names when it is set (the release `swell`
+   built at the commit that adds the script, kept under `.out/perf/`). It reads CPU
    seconds as user plus system of the child, as `taskfiles/gate-time.yml` reads them, and
    prints `perf-loop: run <n> <head|base> <seconds> cpu s, pressure <avg10 of
    /proc/pressure/cpu>` per run and one line `perf-loop: head <median> base <median> ratio
    <r>`. It exits non-zero when a run's exit status is not 0 or its output is not the
    committed line. It asserts nothing about time: no committed test and no script of the
-   gate reads a clock or a CPU time against a bound. The task is a measurement: it is in no
-   gate and no lane, it is started without the `slot` prefix, and it reads and writes
-   nothing under `bench/` (`story:bench-image-and-first-measurements` owns that tree).
-3. A profile of that source on the build node (`perf record` on the release CLI), read
+   gate reads a clock or a CPU time against a bound. The script is a measurement: it is
+   in no gate and no lane, it is started by its path without the pool's prefix, both
+   binaries run on one machine, and it reads and writes nothing under `bench/`
+   (`story:bench-image-and-first-measurements` owns that tree).
+3. A profile of that source (`perf record` on the release CLI), read
    before any change; the unit's report names the functions over 2 % and lists the
    instructions of the loop body from `swell_compiler::disasm::disassemble` (a scratch
    test, not committed).
@@ -112,7 +114,8 @@ script or a host can observe changes.
 
 ## Acceptance
 
-- `PERF_BASE_BIN=<the base binary> task perf-loop` on the build node prints `perf-loop: head
+- `PERF_BIN=<the head binary> PERF_BASE_BIN=<the base binary> sh taskfiles/perf-loop.sh`
+  prints `perf-loop: head
   <m> base <m> ratio <r>` with `r` at most 0.90, and exits 0. The six run lines and the
   ratio line are in the unit's report. The unit's aim is 0.80; the report says which of the
   two it reached.
