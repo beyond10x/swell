@@ -196,7 +196,9 @@ tasks:
       time line is bounded too. A part that fails stops the lane there, as before, and
       slow-time-sum does not run.
 
-      Right after gate-time-start the lane starts the build of the profile collect that
+      Right after gate-time-start the lane prints the machine it runs on, one line
+      "slow-runner: ..." (slow-runner), so that two runs of the lane on the same code whose
+      seconds differ can be read against their machines. Then it starts the build of the profile collect that
       slow-tests and test-realm-sizes run on (slow-collect-start): it runs in the background
       beside slow-test262, whose run keeps 4 workers busy while that build, which a 32-core node
       does not make shorter than a 4-core runner (3 min 59 s against 3 min 33 s), runs mostly on
@@ -210,6 +212,7 @@ tasks:
     cmds:
       - task: gate-vars
       - task: gate-time-start
+      - task: slow-runner
       - defer: {task: slow-collect-stop}
       - task: slow-collect-start
       - task: slow-test262
@@ -226,6 +229,35 @@ tasks:
       - task: gate-time
         vars: {STEP: stack-profiles, LABEL: slow-time}
       - task: slow-time-sum
+
+  slow-runner:
+    desc: Internal, called by slow after gate-time-start. Print one line that names the machine the lane runs on; it never fails.
+    summary: |
+      Internal, called by the lane slow right after gate-time-start. Prints one line,
+      "slow-runner: <n> cores, <cpu>, <memory>, sh is <sh>": the number of processors online
+      (getconf _NPROCESSORS_ONLN, else the processor lines of /proc/cpuinfo; "cores not read"
+      when neither gives a number), the first "model name" of /proc/cpuinfo ("cpu not read"
+      when the file is missing or has none, as on most ARM machines), MemTotal of
+      /proc/meminfo ("<kB> kB", else "memory not read") and what /bin/sh points to ("dash" on
+      the forge's runner, "bash" here; "/bin/sh, not a link" or "not read" otherwise). The
+      forge ran the lane twice on the same code in 882.6 s and 1,142.0 s, its single tests 1.4
+      to 1.56 times slower in the second run and its builds 1.11 to 1.14 times, and its log
+      did not name the runner's CPU. POSIX sh and awk only; whatever it cannot read, it exits
+      0. tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh reads the line in
+      the output of task slow.
+    silent: true
+    cmds:
+      - |
+        cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null) || cores=
+        case "$cores" in ''|*[!0-9]*) cores=$(awk '/^processor[ \t]*:/ { n++ } END { if (n) print n }' /proc/cpuinfo 2>/dev/null) || cores= ;; esac
+        case "$cores" in ''|*[!0-9]*) cores="cores not read" ;; *) cores="$cores cores" ;; esac
+        cpu=$(awk -F ':[ \t]*' '/^model name[ \t]*:/ { print $2; exit }' /proc/cpuinfo 2>/dev/null) || cpu=
+        [ -n "$cpu" ] || cpu="cpu not read"
+        mem=$(awk '$1 == "MemTotal:" && $2 ~ /^[0-9]+$/ { print $2 " kB"; exit }' /proc/meminfo 2>/dev/null) || mem=
+        [ -n "$mem" ] || mem="memory not read"
+        sh=$(ls -l /bin/sh 2>/dev/null | awk '{ i = index($0, " -> "); print (i ? substr($0, i + 4) : "/bin/sh, not a link"); exit }') || sh=
+        [ -n "$sh" ] || sh="not read"
+        echo "slow-runner: $cores, $cpu, $mem, sh is $sh"
 
   slow-collect-start:
     desc: Internal, called by slow after gate-time-start. Start the build of the profile collect that slow-tests and test-realm-sizes run on in the background, and return.

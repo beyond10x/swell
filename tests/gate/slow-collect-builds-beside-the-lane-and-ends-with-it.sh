@@ -18,7 +18,8 @@
 #    profile collect: a lane whose build failed must not pass.
 # 3. hang: (a) task slow, with a test262 pin whose URL does not exist so that slow-test262 fails
 #    at once, exits non-zero, prints "slow-collect-stop: ended the build", and the build's
-#    process group (.out/slow-collect/pid) is gone when task returns; (b) task
+#    process group (.out/slow-collect/pid) is gone when task returns, and the output holds
+#    exactly one line "slow-runner: <n> cores, ..." (task slow-runner); (b) task
 #    slow-collect-start alone (its task process ends at once, as an interrupted lane does):
 #    the build's process group is gone within 5 s.
 # 4. task slow-tests alone, with no .out/slow-collect: it exits 0 and the stub ran the profile
@@ -149,6 +150,8 @@ pg=$(cat "$dir/run-hang/.out/slow-collect/pid" 2>/dev/null) || fail "the lane st
 group_gone_within "$pg" 0 || { kill -KILL "-$pg" 2>/dev/null; fail "the build (process group $pg) still ran when task slow ended ($dir/hang.out)"; }
 grep -qF 'slow-collect-stop: ended the build of the profile collect' "$dir/hang.out" ||
   fail "task slow ended without slow-collect-stop ending the build ($dir/hang.out)"
+[ "$(grep -c '^slow-runner: ' "$dir/hang.out")" = 1 ] && grep -q '^slow-runner: [0-9][0-9]* cores, ' "$dir/hang.out" ||
+  fail "task slow did not print exactly one line \"slow-runner: <n> cores, ...\" that names the machine it runs on ($dir/hang.out)"
 
 # 3b. The task process that started the build is gone: the watcher ends the build.
 plant alone
