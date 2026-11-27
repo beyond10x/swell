@@ -557,8 +557,9 @@ Every number below comes from the gate, `task check`, on the released commit.
   holds a stale handle or a handle of another agent ends the run with
   `Terminated(EngineFault)`. It was the start gate of `story:host-object-overrides`, which
   holds it with a test.
-- `Overrides<H>`: the override table of a host object, with one optional function per
-  internal method: `Overrides::get_prototype_of`, `Overrides::set_prototype_of`,
+- `Overrides`: the override table of a host object, generic over the host type
+  (`Overrides<H>`), with one optional function per internal method:
+  `Overrides::get_prototype_of`, `Overrides::set_prototype_of`,
   `Overrides::is_extensible`, `Overrides::prevent_extensions`, `Overrides::get_own_property`,
   `Overrides::define_own_property`, `Overrides::has_property`, `Overrides::get`,
   `Overrides::set`, `Overrides::delete` and `Overrides::own_property_keys`, as
