@@ -2181,6 +2181,19 @@ lower bound, since the run ends at the first growth refused whatever was left be
 host makes room (roots dropped and a collection, or its own charges given back) before the next
 entry (`host-interface.md`, decision 10, HOST-188 to HOST-190; added on 2026-11-22).
 
+The reading `heap_bytes()` after a script depends on what the budget made the agent do, and
+not only on what the script left live. The arenas count their capacity, and a collection is
+due when the bytes allocated since the last one pass a threshold. So an agent with room
+grows an arena where an agent close to its budget ends its entry in
+`Terminated(MemoryBudget)` and collects at the next safe point instead. Two agents that ran
+the same script can therefore differ by an arena's growth: 114,688 bytes between an agent
+under 64 MiB and one whose budget is 128 KiB above its own reading, at the realm paddings
+`SWELL_TEST_REALM_FUNCTIONS` = 11 and 12 (`proxy_shape_traps::memory_sweep`). The host sees
+this through `heap_bytes()`; `live_bytes()` after a collection does not differ. Script sees
+only whether a later entry ends in the memory budget. A test that uses one agent's reading
+as another agent's budget reads it from an agent under that same budget (added on
+2026-11-27, `story:private-names-and-private-methods`).
+
 The rule, for every slice: storage is charged before it is allocated, and work before it is
 done. A structure's bytes are charged to the memory budget before the structure exists or
 grows, and a loop's steps are charged to the step budget before the work they count, at least

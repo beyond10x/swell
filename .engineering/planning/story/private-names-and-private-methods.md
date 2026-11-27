@@ -61,7 +61,7 @@ scope:
   path: crates/syntax/src/parser/class.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
@@ -121,3 +121,73 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Private fields and `#x in` (`story:private-fields-and-private-in`); private methods with fields or in derived classes (the cases where the parts meet, on the lists of `story:class-static-blocks` and `story:private-fields-and-private-in`); private names in eval code (`story:private-names-in-eval-code`); the call of HostEnsureCanAddPrivateElement (`story:host-ensure-can-add-private-element`); `__lookupGetter__` and `__lookupSetter__` (slice 18, `close-later.tsv`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `privatemethods` of wave big-2 delivered the story on `impl/privatemethods` (three
+corrections: one after each of the adversary's two passes and one after the coordinator's
+read), merged into `wave/big-2`. Where the delivery differs from the text above:
+
+- One instruction more than the story names: `NewPrivateName { slot, name }` (`[] -> []`),
+  emitted right after the private record is pushed, one per private identifier. It writes a
+  new Private Name with the description `name` into slot `slot` of the running record.
+  `AddPrivateMethod` has `u16` fields (hops, slot, function_hops, function_slot, room), so
+  `Instruction` stays 12 bytes. A private record holds 65,536 slots, two per method with a
+  name of its own, so 32,768 methods; past it the compile error is
+  `TooManyInClass("private record slots")`, a `SyntaxError` of the realm
+  (`script::tests::a_bound_of_one_class_is_a_syntax_error_of_the_realm`; the narrowing:
+  `class::tests::a_private_record_holds_65536_slots` in the compiler crate).
+- `room`: the number of private elements one class level adds, a getter and a setter of one
+  name counted once, fixed by the resolver (`Resolution::private_rooms`, keyed by the
+  instance initializer and by the constructor for the static ones). The first add of a
+  construction that finds the list full or missing reserves `room` entries more
+  (`try_reserve_exact`), charged first: bytes charged equal bytes reserved, and the sweep
+  credits the same. An instance pays a box of 24 bytes and 44 bytes per element.
+  `story:private-fields-and-private-in` counts its private fields into the same room.
+- The scan on each add stays: an add finds its key first and charges a step per comparison
+  past `SMALL` = 8. A construction with n private elements of one level spends 0 steps for
+  n <= 9 and (n - 9)(n - 8)/2 above (17 methods: 36 steps).
+- The private record is the scope `ScopeKey::Private(constructor)` of the resolver: one
+  binding per private identifier (named `#x`) and one per private method, getter or setter
+  function, every binding captured. It is entered after the heritage, pushed with
+  `PushEnv(n)`, or with `PushLexicalEnv(table)` when a direct `eval` in the class body names
+  it. Every site of class code that follows the heritage resolves from the private record.
+- The instance initializer is made and walked whenever the class has an instance private
+  method, not only with a field; the fields of `story:public-class-fields` compile into the
+  same function, after the private methods' adds.
+- `PrivateValue` has two variants, `Method` and `Accessor { get, set }`;
+  `story:private-fields-and-private-in` adds `Field`.
+- The record of an object is 208 bytes, before 200 (`CHANGELOG.md`, "Changed", gives the
+  readings). One test needed room for it: the result parse of 100,000 nested brackets in
+  `builtins_json_parse` at the full count needs 66,304 KiB and has a budget of its own,
+  `RESULT_MEMORY_BYTES` = 72 MiB, where the test limits give 64 MiB.
+- Direct eval code, until `story:private-names-in-eval-code`: after a parse of direct eval
+  code failed, `Agent::private_names_of_direct_eval` (`crates/swell/src/dynamic_code.rs`)
+  reads each error of an undeclared private name. A name is declared by an enclosing class
+  when a declarative record on the chain of the running frame's LexicalEnvironment names a
+  slot `#x` (`Agent::chain_names_slot`); Object Environment Records are passed without a
+  read. When every error of the parse is of a declared name, the first becomes the refusal
+  `private name #x in direct eval code is not supported before slice 8`; otherwise those
+  errors are dropped and the first remaining error is thrown. A refusal is counted only for
+  the error answered first (`Agent::syntax_errors`). A direct `eval` whose code parses pays
+  nothing for this. That story removes both functions and turns the refusal lines of
+  `private_methods::a_direct_eval_is_refused_only_for_a_name_an_enclosing_class_declares`
+  and `private_methods::a_direct_eval_in_a_field_initializer_meets_private_names` into runs.
+- Changes outside the story's writes: one arm in `crates/swell/src/interp/parameters.rs` and
+  three in `crates/swell/src/interp/class.rs` (a Private Name where a parameter's slot or the
+  derived `this` binding is read is the logic error); `function.rs` of the compiler calls
+  `crate::class::instance_initializer`; `crates/swell/tests/proxy_shape_traps.rs` reads the
+  base of its memory sweep from an agent under the sweep's own budget (`docs/design/engine.md`,
+  "Memory budget", says why); `crates/swell/tests/builtins_json_parse.rs` (the budget above).
+- `builtins/function.rs` is not written: `function_to_string` already answered a private
+  method's MethodDefinition.
+- The reviews: `review-result:adversary-privatemethods-pass-1` (red: the Proxy memory sweep
+  at two realm sizes, the room of the list, six findings) and
+  `review-result:adversary-privatemethods-pass-2` (red: the refusal rewrote the early error
+  of undeclared private names, 7 cases of test262 regressed; a refusal counted beside a
+  thrown grammar error). Both corrected; the second correction and the third are read by the
+  coordinator (`review-result:privatemethods-correction-2-coordinator-read`).
+- The story's part of test262 (its list and its guard, 2,500 files) reads 2,500 passed and no
+  refusal on the unit's head. The part of 242 files with a direct `eval` and a private name:
+  211 of 445 runs pass (193 on the base run of `6f21df6d`), 230 are refused; the 18 runs of
+  the 9 `…-visible-to-direct-eval` files stay refused until `story:private-names-in-eval-code`.
