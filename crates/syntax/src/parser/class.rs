@@ -472,10 +472,10 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The FieldDefinition named `key` of `target`, which started at `start`, appended to its
-    /// elements; holds `private field` for a private name at `start` (a public field runs since
-    /// `story:public-class-fields`). Answers the function its initializer belongs to: for a
-    /// static field the function of the run of static fields the element before it began, or a
-    /// new one; for any other field the function of the instance elements.
+    /// elements (a public field runs since `story:public-class-fields`, a private one since
+    /// `story:private-fields-and-private-in`). Answers the function its initializer belongs to:
+    /// for a static field the function of the run of static fields the element before it began,
+    /// or a new one; for any other field the function of the instance elements.
     #[inline(never)]
     fn field_head(
         &mut self,
@@ -484,9 +484,6 @@ impl<'a, 'm> Parser<'a, 'm> {
         key: ClassKey,
         start: Span,
     ) -> R<FunctionId> {
-        if matches!(key, ClassKey::Private(_)) {
-            self.hold("private field", 8, start);
-        }
         let function = if is_static {
             let run = self
                 .class_mut(target)
@@ -742,9 +739,10 @@ mod tests {
     /// the functions in the order of their first tokens, one `FieldInitializer` per run of
     /// static fields and one for the instance elements, each initializer an expression
     /// statement of its function's body, a `StaticBlock` with its statements; `#x in` with its
-    /// right operand; the class held; and what the ledger holds after the parse is the tree's
-    /// capacity, so every name, list and body the element parse made is charged and nothing it
-    /// dropped stays charged.
+    /// right operand; no refusal held back (the private fields and `#q in this` of the source
+    /// parse since `story:private-fields-and-private-in`, and [`super::super::HOLDS`] is empty);
+    /// and what the ledger holds after the parse is the tree's capacity, so every name, list and
+    /// body the element parse made is charged and nothing it dropped stays charged.
     #[test]
     fn the_elements_of_a_class_are_functions_of_the_tree() {
         let text = "class C {\n\
@@ -849,7 +847,11 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(members, [("#q", false), ("#p", true)]);
-        assert!(parsed.held.is_some(), "the class is held");
+        assert!(
+            parsed.held.is_none(),
+            "no construct of the class is held back: {:?}",
+            parsed.held
+        );
         let tree = parsed
             .ast
             .heap_bytes()

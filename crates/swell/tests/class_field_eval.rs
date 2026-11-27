@@ -270,7 +270,7 @@ fn eval_this_is_the_instance() {
 }
 
 /// Class code is strict, so eval code of a direct eval in an initializer is strict (strictEval,
-/// `#sec-performeval`, steps 16 to 18): its `var` and function declarations are bindings of a
+/// `#sec-performeval`, steps 17 to 19): its `var` and function declarations are bindings of a
 /// variable environment of that eval alone. A later eval in the same initializer, one in the
 /// next field's, the initializer itself and the global code see none of them.
 #[test]

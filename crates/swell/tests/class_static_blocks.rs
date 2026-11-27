@@ -221,8 +221,9 @@ fn await_as_a_binding_name_in_a_nested_function() {
 /// the class; an arrow function in the block hands its eval the same. The other flags of that
 /// PerformEval: `super()` in the eval code is a `SyntaxError` (inDerivedConstructor is false, in
 /// a derived class too), and a `var` of the eval code stays in its own record (class code is
-/// strict). A private name the class declares in that eval code answers the refusal of
-/// `Agent::private_names_of_direct_eval` until `story:private-names-in-eval-code`.
+/// strict). A private name the class declares runs in that eval code
+/// (`story:private-names-in-eval-code`): `#m in this` is false for F, which has no instance
+/// method, and an instance's `#m()` is called.
 #[test]
 fn a_direct_eval_of_arguments_in_a_block_sees_its_own_arguments_object() {
     both_pass(
@@ -243,10 +244,10 @@ fn a_direct_eval_of_arguments_in_a_block_sees_its_own_arguments_object() {
            }\n\
          }\n\
          outer(1, 2);\n\
-         var refusal = \"none\";\n\
-         class P { #m() {} static { try { eval(\"this.#m\"); } catch (e) { refusal = e.message; } } }\n\
+         var ran = \"none\";\n\
+         class P { #m() { return 5; } static { try { ran = eval(\"#m in this\") + \",\" + eval(\"new P().#m()\"); } catch (e) { ran = e.message; } } }\n\
          r.join() === \"0,true,[object Arguments],true,true,undefined\"\n\
-           && refusal.indexOf(\"private name #m in direct eval code is not supported before slice 8 (\") === 0;",
+           && ran === \"false,5\";",
     );
 }
 

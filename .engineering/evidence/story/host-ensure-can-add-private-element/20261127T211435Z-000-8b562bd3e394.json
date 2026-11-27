@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T21:14:35Z",
+  "actor": "human:operator",
+  "artifact": "story:host-ensure-can-add-private-element",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 5aaeb6e8, exit 0, on the build node; the unit was merged by commit 43284b76, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/private_element_hook.rs (swell::private_element_hook::*); host-requirements-check with 8 delivered: no requirement pending for slice 8 (HOST-119, HOST-223)"
+  }
+}

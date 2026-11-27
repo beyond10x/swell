@@ -46,7 +46,12 @@
 //!   the call included, lives in an environment whose slots have names, so that the eval code
 //!   finds it by name;
 //! - in eval code ([`crate::compile_eval`]), a reference that the eval code does not bind is looked
-//!   up by name, through the environments of the code that called `eval`.
+//!   up by name, through the environments of the code that called `eval`;
+//! - in eval code, a private reference (`o.#x`, `#x in o`) that no class of the eval code
+//!   declares resolves to the position of the caller's private name of that text
+//!   ([`crate::compile_eval_with`]): its slot, and its hops plus the environments between the
+//!   reference and the top of the eval code and the record of the eval code's top level, never
+//!   by name (`docs/design/engine.md`, "Private names", item 4).
 //!
 //! The `let` and `const` declarations make scopes of their own (`docs/design/engine.md`, decision
 //! 3, "Lexical bindings"): a block, the case block of a `switch`, the head of a `for`, the
@@ -194,6 +199,10 @@ pub(crate) enum Site {
     PrivateAddName(FunctionId),
     /// The binding of the function of `f`, from the same code as [`Site::PrivateAddName`].
     PrivateAddFunction(FunctionId),
+    /// The Private Name of the `n`th field (counted from 0) of the `FieldInitializer` function
+    /// `f` when that field's key is private, from the code of `f`, which adds the field
+    /// (PrivateFieldAdd, `class.rs`, `initializer_fields`).
+    PrivateField(FunctionId, u32),
     /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
     /// item 6), from the top of the function: the constructor itself, or an arrow function whose
     /// nearest function that is not an arrow function is one (or eval code whose context has
@@ -361,10 +370,10 @@ pub(crate) struct Resolution {
     /// pass 1 of the initializer adds them (`class.rs`, `initializer_private_methods`).
     pub initializer_methods: BTreeMap<FunctionId, Vec<FunctionId>>,
     /// The number of private elements the adds of one class level make, keyed by the
-    /// initializer of the instance elements for the methods, getters and setters that are not
-    /// static, and by the constructor for the static ones: the private names among them, a
-    /// getter and a setter of one name counted once. Each add carries it as its `room`
-    /// (`crate::bytecode::Instruction::AddPrivateMethod`).
+    /// initializer of the instance elements for the methods, getters, setters and fields that
+    /// are not static, and by the constructor for the static ones: the private names among them,
+    /// a getter and a setter of one name counted once. Each add carries it as its `room`
+    /// (`crate::bytecode::Instruction::AddPrivateMethod`, `AddPrivateField`).
     pub private_rooms: BTreeMap<FunctionId, u32>,
     /// The constructors of the classes with a heritage: each has the hidden binding `this`
     /// ([`Site::This`]) and returns by the derived rule (`class.rs`).
@@ -522,6 +531,13 @@ struct Resolver<'a, 'm> {
     this_arrows: BTreeSet<FunctionId>,
     /// [`Resolution::field_classes`].
     field_classes: BTreeMap<FunctionId, (ClassAt, usize)>,
+    /// Of eval code: the private names of the caller of a direct `eval`, each text with its
+    /// hops from the caller's LexicalEnvironment and its slot ([`crate::compile_eval_with`]).
+    caller_private: BTreeMap<&'a str, (u32, u32)>,
+    /// Of eval code: the scope of its top-level lexical names, when it has any.
+    eval_top: Option<usize>,
+    /// Whether the code is strict.
+    strict: bool,
 }
 
 fn malformed(what: &str) -> CompileError {
@@ -529,13 +545,24 @@ fn malformed(what: &str) -> CompileError {
 }
 
 /// Resolves every name of `script`; of eval code when `eval_code` is true, whose context has
-/// inDerivedConstructor when `this_by_name` is ([`Resolution::this_by_name`]).
+/// inDerivedConstructor when `this_by_name` is ([`Resolution::this_by_name`]) and whose caller
+/// has the private names `private_names` ([`crate::compile_eval_with`]; an entry of the map of
+/// them charged for each text, the first of a text kept).
 pub(crate) fn resolve(
     script: &Script,
-    eval_code: bool,
-    this_by_name: bool,
+    (eval_code, this_by_name): (bool, bool),
+    private_names: &[(&str, u32, u32)],
     m: &Meter<'_>,
 ) -> Result<Resolution, CompileError> {
+    let mut caller_private = BTreeMap::new();
+    if eval_code {
+        for &(name, hops, slot) in private_names {
+            if !caller_private.contains_key(name) {
+                m.charge(map_entry_bytes::<&str, (u32, u32)>())?;
+                caller_private.insert(name, (hops, slot));
+            }
+        }
+    }
     let mut scopes = m.with_capacity(1)?;
     scopes.push(ScopeData {
         parent: None,
@@ -574,6 +601,9 @@ pub(crate) fn resolve(
         this_by_name: eval_code && this_by_name,
         this_arrows: BTreeSet::new(),
         field_classes: BTreeMap::new(),
+        caller_private,
+        eval_top: None,
+        strict: script.strict,
     };
     let resolution = resolve_with(&mut r, script, eval_code);
     // The resolver's own structures are dropped with it; on a stop the compile step credits
@@ -600,6 +630,7 @@ fn resolve_with(
     } else {
         None
     };
+    r.eval_top = eval_top;
     r.push_list(&script.body);
     while let Some(task) = r.work.pop() {
         r.m.visit()?;
@@ -763,8 +794,13 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .this_arrows
             .len()
             .saturating_mul(map_entry_bytes::<FunctionId, ()>());
+        let caller_private = self
+            .caller_private
+            .len()
+            .saturating_mul(map_entry_bytes::<&str, (u32, u32)>());
         capacity(&self.work)
             .saturating_add(this_arrows)
+            .saturating_add(caller_private)
             .saturating_add(occurrences)
             .saturating_add(bindings)
             .saturating_add(scopes)
@@ -1452,7 +1488,8 @@ impl<'a, 'm> Resolver<'a, 'm> {
     }
 
     /// The reads of the hidden bindings of the computed keys of the fields that the
-    /// `FieldInitializer` function `id` defines, from the current scope, its own.
+    /// `FieldInitializer` function `id` defines, and of the Private Names of its private fields
+    /// ([`Site::PrivateField`]), from the current scope, its own.
     fn field_key_reads(&mut self, id: FunctionId) -> Result<(), CompileError> {
         let (at, first) = self
             .field_classes
@@ -1460,15 +1497,24 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .copied()
             .ok_or_else(|| malformed("a field initializer outside a class"))?;
         let ast = self.ast;
-        for element in initializer_fields_of(at.class(ast)?, id, first) {
-            if let ClassElement::Field {
-                key: ClassKey::Computed(e),
-                ..
-            } = element
-            {
-                let name = field_key_name(*e, self.m)?;
-                self.occur(Site::FieldKeyRead(*e), &name);
-                self.m.release(name);
+        for (n, element) in initializer_fields_of(at.class(ast)?, id, first).enumerate() {
+            match element {
+                ClassElement::Field {
+                    key: ClassKey::Computed(e),
+                    ..
+                } => {
+                    let name = field_key_name(*e, self.m)?;
+                    self.occur(Site::FieldKeyRead(*e), &name);
+                    self.m.release(name);
+                }
+                ClassElement::Field {
+                    key: ClassKey::Private(name),
+                    ..
+                } => {
+                    let n = u32::try_from(n).map_err(|_| CompileError::TooMany("fields"))?;
+                    self.occur(Site::PrivateField(id, n), &name.name);
+                }
+                _ => {}
             }
         }
         Ok(())
@@ -1500,9 +1546,13 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     self.m.insert(&mut self.named_by_key, f)?;
                 }
             }
-            // A private name names its function at compile time:
-            // `story:private-fields-and-private-in`.
-            ClassKey::Private(_) => {}
+            // A private name names its function at compile time, by its description, the
+            // name with its `#` (`#sec-runtime-semantics-classfielddefinitionevaluation`, step
+            // 3.a.ii: NamedEvaluation with the Private Name).
+            ClassKey::Private(name) => {
+                let units = self.m.utf16(&name.name)?;
+                self.give_name(f, units)?;
+            }
         }
         Ok(())
     }
@@ -1557,10 +1607,19 @@ impl<'a, 'm> Resolver<'a, 'm> {
                     function,
                     ..
                 } => (*is_static, name, *kind, *function),
+                // A private field is an element of its level of its own: no other element has
+                // its name (an early error), and its add carries the same room.
                 ClassElement::Field {
+                    is_static,
                     key: ClassKey::Private(name),
                     ..
                 } => {
+                    let room = if *is_static {
+                        &mut rooms.1
+                    } else {
+                        &mut rooms.0
+                    };
+                    *room = room.saturating_add(1);
                     self.declare(scope, &name.name);
                     continue;
                 }
@@ -1896,9 +1955,11 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.occur(Site::Expr(id), &name.name);
                 children.push(Walk::Expr(*object));
             }
-            // No source with `#x in o` reaches the compiler while it is held:
-            // `story:private-fields-and-private-in` replaces this arm.
-            Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
+            // `#x in o` resolves `#x` as `o.#x` does; its right operand is any expression.
+            Expr::PrivateIn { name, right } => {
+                self.occur(Site::Expr(id), &name.name);
+                children.push(Walk::Expr(*right));
+            }
             Expr::New { callee, arguments } => {
                 children.push(Walk::Expr(*callee));
                 children.extend(arguments.iter().flatten().map(|e| Walk::Expr(*e)));
@@ -2407,6 +2468,19 @@ impl<'a, 'm> Resolver<'a, 'm> {
         Ok((names, env))
     }
 
+    /// The record of eval code's own that a walk from a site to the top of the eval code does
+    /// not count, between the eval code and its caller's LexicalEnvironment: the empty
+    /// declarative record strict eval code runs in when none of its top-level bindings lives in a
+    /// record (`#sec-performeval`, steps 17 and 19; the engine's `eval_environments`), 1;
+    /// otherwise 0, the record of the top level being counted as any scope's.
+    fn eval_own_record(&self) -> u32 {
+        let counted = self
+            .eval_top
+            .and_then(|s| self.scopes.get(s))
+            .is_some_and(|s| s.env_slots > 0);
+        u32::from(self.strict && !counted)
+    }
+
     /// The binding of every site.
     fn locate(&mut self) -> Result<BTreeMap<Site, Binding>, CompileError> {
         // At most one entry per binding, charged first.
@@ -2466,6 +2540,21 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 }
             }
             let binding = match found {
+                // A private name the eval code does not declare: the caller's
+                // (`crate::compile_eval_with`), past the environments counted to the top of the
+                // eval code and the eval code's own record, never looked up by name.
+                None if self.eval_code && name.starts_with('#') => {
+                    let Some(&(outer, slot)) = self.caller_private.get(name.as_str()) else {
+                        return Err(malformed(
+                            "a private name no class around eval code declares",
+                        ));
+                    };
+                    let hops = hops
+                        .checked_add(self.eval_own_record())
+                        .and_then(|hops| hops.checked_add(outer))
+                        .ok_or(CompileError::TooMany("environment hops"))?;
+                    Binding::Env { hops, slot }
+                }
                 _ if by_name => Binding::Dynamic(name.clone()),
                 None => Binding::Global(name.clone()),
                 Some(b) => {

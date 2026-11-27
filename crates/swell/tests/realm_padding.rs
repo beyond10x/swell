@@ -3,7 +3,8 @@
 //! host functions, reached from the realm's global object under a Symbol only, and
 //! `support::host::create_realm` pads every realm of a test by the k of
 //! `SWELL_TEST_REALM_FUNCTIONS`, which the task `test-realm-sizes` sets. Run also with the feature
-//! `collect-every-safe-point`.
+//! `collect-every-safe-point`. And the instrument's other half, the profile the tests run in:
+//! debug assertions and overflow checks stay on at every optimization level the gate builds.
 #![cfg(test)]
 
 use crate::support;
@@ -103,4 +104,24 @@ fn a_padded_realm_holds_k_functions_more() {
             );
         }
     }
+}
+
+/// The gate's step `test` runs most tests of this binary at opt-level 1, in the profile
+/// `collect` of `.cargo/collect-profile.toml`, which inherits `test`; `Cargo.toml` sets
+/// `overflow-checks = true` there. A test proves at opt-level 1 what it proves at opt-level 0
+/// only while debug assertions and overflow checks stay on: this test fails when
+/// `debug_assertions` is off, and when an `i32` addition that overflows at run time (its
+/// operands through `black_box`, so the compiler cannot fold it) does not panic.
+#[test]
+fn the_profile_keeps_debug_assertions_and_overflow_checks_on() {
+    if !cfg!(debug_assertions) {
+        panic!("debug assertions are off in the profile this test binary was built in");
+    }
+    let sum =
+        std::panic::catch_unwind(|| std::hint::black_box(i32::MAX) + std::hint::black_box(1_i32));
+    assert!(
+        sum.is_err(),
+        "an i32 addition that overflows did not panic: overflow checks are off in the profile \
+         this test binary was built in (it gave {sum:?})"
+    );
 }

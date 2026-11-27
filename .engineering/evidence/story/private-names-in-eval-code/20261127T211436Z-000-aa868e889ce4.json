@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T21:14:36Z",
+  "actor": "human:operator",
+  "artifact": "story:private-names-in-eval-code",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 5aaeb6e8, exit 0, on the build node; the unit was merged by commit 79ca8d38, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/eval_private_names.rs (swell::eval_private_names::*) and the cases of docs/plan/slice-08/story-eval-private.cases.txt in conformance/test262/expected.txt; test262-slice 08 9478 18803 0 0 9478 9478 0 0"
+  }
+}

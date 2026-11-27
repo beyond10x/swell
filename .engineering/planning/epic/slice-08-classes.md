@@ -4,10 +4,10 @@ id: epic:slice-08-classes
 kind: epic
 status: draft
 title: 'Slice 8, classes: classes, super, private names, static blocks'
-summary: 'Classes, super, new.target, private names and static blocks: 9,302 cases and 18,455 runs; 9,330 and 18,511 after the close.'
+summary: 'Classes, super, new.target, private names and static blocks: 9,302 cases and 18,455 runs; 9,478 and 18,803 after the close.'
 relations:
 - depends_on: epic:slice-07-generators
-revision: 3
+revision: 6
 ---
 ## Context
 
@@ -78,10 +78,15 @@ paragraph's items 4 and 5 were written for this slice before its stories were re
   - `feature super 8`
   - `feature new.target 8`
   - no `flag` line.
-- What the close changes, on the plan's numbers (`story:slice-08-conformance-close`,
-  `docs/plan/slice-08/`): 37 cases come in from slice 9's close (`incoming.tsv`), 5 cases move to
-  slice 13 and 4 to slice 18 (`close-later.tsv`), which gives 9,330 cases and 18,511 runs. The
-  numbers are measured again by the close.
+- What the close changed (`story:slice-08-conformance-close`, `docs/plan/slice-08/`): slice 8
+  holds 9,478 cases and 18,803 runs after its close (section 12 table of
+  `docs/design/engine.md`; `test262-slice 08 9478 18803 0 0 9478 9478 0 0`). 37 cases came in
+  from slice 9's close (`incoming.tsv`), 5 cases moved to slice 13 (`ArrayBuffer` 2,
+  `DataView` 2, `Uint8Array` 1) and 4 to slice 18 (`__lookupGetter__` 2, `__lookupSetter__`
+  2), each with evidence (`close-later.tsv`, `conformance/test262/moves.tsv`), and 148 cases
+  (292 runs) of `test/staging/sm/` came in from slice 19
+  (`docs/plan/slice-08/close-into-08.tsv`): 9,302 + 37 − 9 + 148 cases and 18,455 + 74 − 18
+  + 292 runs. The plan said 9,330 and 18,511 before the cases of slice 19 were measured.
 
 Source: `docs/design/engine.md`, section 12 and the output under 'How the counts were made'; a count is measured again on the pinned test262 checkout before a story's acceptance uses it (`AGENTS.md`, 'How the work is run').
 
@@ -113,7 +118,7 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 
 `slot task check` exits 0 on `main`, and in that run:
 
-1. The conformance runner's line for slice 8 reads the cases and runs the design's table states after the close (9,330 cases and 18,511 runs on the plan's numbers), and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
+1. The conformance runner's line for slice 8 reads the cases and runs the design's table states after the close (9,478 cases and 18,803 runs at the close), and every run of the slice passes; no case of the slice is counted as failed or as ended by a budget.
 2. No pass count of an earlier slice or of any directory line in `conformance/test262/expected.txt` is lower than before the slice.
 3. `conformance/test262/expected.txt` is committed with the lines of that run, and `AGENTS.md` and `README.md` carry the gate's numbers.
 4. A case of this slice that is found to need a later slice is moved by a rule line in the `swell-slices` block of the design with its reason, in the same change that moves the counts of both slices; none is skipped silently.

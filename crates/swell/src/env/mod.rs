@@ -64,6 +64,7 @@ pub(crate) mod object;
 use alloc::rc::Rc;
 use core::cell::Cell;
 
+use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
 use crate::heap::collect::{Item, Mark};
 use crate::host::Host;
@@ -118,6 +119,28 @@ impl SlotNames {
         let found = self.scan(key, &mut visited);
         let steps = u64::try_from(visited.saturating_sub(SMALL)).unwrap_or(u64::MAX);
         (found, steps)
+    }
+
+    /// The text of the name of slot `slot`, as the code's String constant: `None` for a slot the
+    /// table does not name and for the one binding of a function expression's own name.
+    fn text(&self, slot: u32) -> Option<&[u16]> {
+        let code = &self.compiled.code;
+        let template = |t: u32| code.functions.get(usize::try_from(t).ok()?);
+        let slot = usize::try_from(slot).ok()?;
+        let name = match self.table {
+            NameTable::Function(t) => *template(t)?.captured.get(slot)?,
+            NameTable::Scope { template: t, index } => {
+                let scopes = match t {
+                    Some(t) => &template(t)?.scopes,
+                    None => &code.scopes,
+                };
+                scopes.get(usize::try_from(index).ok()?)?.get(slot)?.name()
+            }
+            NameTable::SelfName(_) => return None,
+        };
+        code.strings
+            .get(usize::try_from(name).ok()?)
+            .map(Vec::as_slice)
     }
 
     /// The scan of [`SlotNames::find`], counting the names it compares in `visited`.
@@ -467,26 +490,13 @@ impl<H: Host> Agent<H> {
     /// `const` bindings and a function's environment, whose parameters may be uninitialized,
     /// always name their slots.
     pub(crate) fn slot_name(&mut self, env: Handle, slot: u32) -> String {
-        let name = self.heap.environments.get(env).ok().and_then(|record| {
-            let names = record.slot_names()?;
-            let code = &names.compiled.code;
-            let template = |t: u32| code.functions.get(usize::try_from(t).ok()?);
-            let slot = usize::try_from(slot).ok()?;
-            let name = match names.table {
-                NameTable::Function(t) => *template(t)?.captured.get(slot)?,
-                NameTable::Scope { template: t, index } => {
-                    let scopes = match t {
-                        Some(t) => &template(t)?.scopes,
-                        None => &code.scopes,
-                    };
-                    scopes.get(usize::try_from(index).ok()?)?.get(slot)?.name()
-                }
-                NameTable::SelfName(_) => return None,
-            };
-            code.strings.get(usize::try_from(name).ok()?)
-        });
-        name.map(|units| String::from_utf16_lossy(units))
-            .unwrap_or_default()
+        let name = self
+            .heap
+            .environments
+            .get(env)
+            .ok()
+            .and_then(|record| record.slot_names()?.text(slot));
+        name.map(String::from_utf16_lossy).unwrap_or_default()
     }
 
     /// SetMutableBinding of slot `slot` of the record `hops` outward from `env`
@@ -521,31 +531,105 @@ impl<H: Host> Agent<H> {
         Ok(self.environment(env)?.outer)
     }
 
-    /// Whether a declarative record on the chain from `env` outward names a slot `key` in the
-    /// table of its compiled code. An Object Environment Record (a `with` object, the global
-    /// object) is passed without a read of its object: no trap or getter runs. One step per
-    /// record and the steps of each table's scan, as [`Agent::resolve_name`] spends them.
-    pub(crate) fn chain_names_slot(&mut self, env: Option<Handle>, key: Key) -> Completion<bool> {
+    /// The private names a direct `eval` whose caller's LexicalEnvironment is `env` sees
+    /// (`#sec-evaldeclarationinstantiation`, steps 4 to 6, privateIdentifiers: the names of the
+    /// privateEnv PerformEval passes, the caller's running PrivateEnvironment, and its outer
+    /// ones; `docs/design/engine.md`, "Private names", item 4). `Agent::eval_code_of` calls it
+    /// only for a direct `eval` whose String holds a `#`. The walk goes from `env`
+    /// outward once and lists each slot that holds a Private Name, in a record whose slots are
+    /// named: a class's private record names them whenever a direct `eval` stands in the class
+    /// body (`swell-compiler`, `resolve.rs`, `mark_named`), and only such an `eval` starts this
+    /// walk. Each name goes into `texts` as its description (the slot's name, `#x`) in UTF-8, and
+    /// into `places` as the start and end of that text, the hops of its record from `env` and its
+    /// slot; a text an inner record listed is passed over (an inner name hides an outer one of
+    /// the same text). An Object Environment Record is passed without a read of its object.
+    ///
+    /// Bounds: a step per record ([`Agent::charge_steps`]), and a step per slot read and per
+    /// text compared past the first [`SMALL`] of a record, as a lookup by name spends them. Both
+    /// lists are [`ChargedVec`]s, charged to the memory budget by their capacity before they grow
+    /// and credited when their owner drops them, after the compile. They hold texts and numbers,
+    /// no handle, so a collection while they live changes nothing they say.
+    pub(crate) fn eval_private_names(
+        &mut self,
+        env: Option<Handle>,
+        texts: &mut ChargedVec<u8>,
+        places: &mut ChargedVec<(u32, u32, u32, u32)>,
+    ) -> Completion<()> {
         let mut current = env;
+        let mut hops = 0u32;
         while let Some(handle) = current {
             self.charge_steps(1)?;
-            let (outer, found, steps) = {
+            let (outer, names, count) = {
                 let record = self.environment(handle)?;
-                let (named, steps) = match (record.binding_object, record.slot_names()) {
-                    (None, Some(names)) => names.find(key),
-                    _ => (None, 0),
+                let names = match (record.binding_object, record.slot_names()) {
+                    (None, Some(names)) => Some(SlotNames {
+                        script: names.script,
+                        compiled: Rc::clone(&names.compiled),
+                        table: names.table,
+                    }),
+                    _ => None,
                 };
-                (record.outer, named.is_some(), steps)
+                (record.outer, names, record.slots.len())
             };
-            if steps > 0 {
-                self.charge_steps(steps)?;
-            }
-            if found {
-                return Ok(true);
+            if let Some(names) = names {
+                let inner = places.len();
+                let mut visited = 0usize;
+                for slot in 0..count {
+                    visited = visited.saturating_add(1);
+                    let holds = matches!(
+                        self.environment(handle)?.slots.get(slot),
+                        Some(SlotValue::PrivateName(_))
+                    );
+                    if !holds {
+                        continue;
+                    }
+                    let slot = u32::try_from(slot).unwrap_or(u32::MAX);
+                    let Some(units) = names.text(slot) else {
+                        return Err(self.fault());
+                    };
+                    let decoded = || {
+                        char::decode_utf16(units.iter().copied())
+                            .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+                    };
+                    self.reserve_vec(texts, decoded().map(char::len_utf8).sum())?;
+                    let start = texts.len();
+                    for c in decoded() {
+                        let mut buffer = [0u8; 4];
+                        if texts
+                            .extend_from_slice(c.encode_utf8(&mut buffer).as_bytes())
+                            .is_err()
+                        {
+                            return Err(self.fault());
+                        }
+                    }
+                    let end = texts.len();
+                    let text = texts.get(start..end);
+                    let hidden = places.get(..inner).unwrap_or_default().iter().any(|p| {
+                        visited = visited.saturating_add(1);
+                        let at = |n: u32| usize::try_from(n).unwrap_or(usize::MAX);
+                        texts.get(at(p.0)..at(p.1)) == text
+                    });
+                    if hidden {
+                        texts.truncate(start);
+                        continue;
+                    }
+                    let (Ok(start), Ok(end)) = (u32::try_from(start), u32::try_from(end)) else {
+                        return Err(self.terminate(Termination::MemoryBudget));
+                    };
+                    self.reserve_vec(places, 1)?;
+                    if places.push((start, end, hops, slot)).is_err() {
+                        return Err(self.fault());
+                    }
+                }
+                let steps = u64::try_from(visited.saturating_sub(SMALL)).unwrap_or(u64::MAX);
+                if steps > 0 {
+                    self.charge_steps(steps)?;
+                }
             }
             current = outer;
+            hops = hops.saturating_add(1);
         }
-        Ok(false)
+        Ok(())
     }
 
     /// ResolveBinding of `key` (`#sec-resolvebinding`, `#sec-getidentifierreference`) from the

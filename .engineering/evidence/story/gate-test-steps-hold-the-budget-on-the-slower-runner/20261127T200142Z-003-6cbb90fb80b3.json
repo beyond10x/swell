@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T20:01:42Z",
+  "actor": "human:operator",
+  "artifact": "story:gate-test-steps-hold-the-budget-on-the-slower-runner",
+  "kind": "story",
+  "revision": 6,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/lanesix at 362b69b1, build node, before the merge into wave/big-2",
+    "reference": "three whole gates (task check-runner on the build node, the digest line of the test262 sources set in the tree), each exit 0: 19 test binaries: 2532 passed, 0 failed, 1 ignored; gate-selftest: 112 passed, 0 failed; the test steps 38.3 to 45.5 s of 120; test: swell::main 1647 at opt-level 1, 123 at opt-level 0"
+  }
+}

@@ -1,0 +1,2 @@
+// sec-runtime-semantics-classdefinitionevaluation: private fields added by AddPrivateField in pass 2 of the initializer, after the private methods' adds and in source order with the public fields, the static ones by the run of static fields on F; every add of a level carries one room, its methods and fields counted together; #x in o is PrivateIn of the Private Name the private record holds
+class C { a = 1; #x = 2; #m() {} #y; static #s = 3; static b; static has(o) { return #x in o && #s in o; } run() { this.#y = this.#x; this.#x += 1; return this.#y; } }

@@ -1927,6 +1927,8 @@ box is the host's to charge with `charge_host_bytes` (decision 14). Making one s
 
 **HOST-222** (swell:D6) An override of a host object whose `Ok` value or `Abrupt::Throw` value holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`; `state()` then reads `Faulted` and nothing panics. [slice 9]
 
+**HOST-223** (swell:D6) A `host_ensure_can_add_private_element` is called before a private method or accessor is added to a host object with an override table, as before a private field; a `Throw` from it is the add's throw and the element is not added; a `Throw` value that holds a stale handle or a handle of another agent ends the run with `Terminated(EngineFault)`, no element is added, `state()` then reads `Faulted`, every entry point and read but `state()` and `refusals()` answers `Err(HostError::Faulted)`, and nothing panics. The same-kind duty of HOST-119 holds for the adds of methods and accessors: a getter and a setter of one name are one element and call the hook once, for the half that stands first in the source, and an element between the halves that the hook refuses leaves the accessor with its first half only. [slice 8]
+
 **HOST-115** (ecma262:sec-IsHTMLDDA-internal-slot) For a host object with `is_html_dda`, the script `typeof o` answers `"undefined"`, `!o` answers `true` and `o == null` answers `true`. [slice 18]
 
 ## 16. The hook trait
@@ -2003,7 +2005,7 @@ HostEnsureCanAddPrivateElement where the draft says "If the host is a web browse
 
 **HOST-118** (ecma262:sec-hostgetcodeforeval) `eval(o)` with an object `o` calls `host_get_code_for_eval(o)`; `None` makes `eval` return `o`, and `Some(s)` makes it evaluate `s`. [slice 2]
 
-**HOST-119** (ecma262:sec-hostensurecanaddprivateelement) The engine calls `host_ensure_can_add_private_element` only for host objects with an override table, and a `Throw` from it makes the private field definition throw that value. [slice 8]
+**HOST-119** (ecma262:sec-hostensurecanaddprivateelement) The engine calls `host_ensure_can_add_private_element` only for host objects with an override table, and a `Throw` from it makes the private field definition throw that value. The host answers every call for one object with the same kind of completion (`#sec-hostensurecanaddprivateelement`: "Any two calls of this abstract operation with the same argument must return the same kind of Completion Record"); the engine does not check it, and a host that refuses an object after allowing it in one construction gets the elements added before the refusal, in source order, each half of an accessor where it stands, with nothing taken back and no fault. [slice 8]
 
 **HOST-120** (ecma262:sec-hosthassourcetextavailable) For a function for which `host_has_source_text_available` answers false, `Function.prototype.toString` returns a NativeFunction string. [slice 3]
 

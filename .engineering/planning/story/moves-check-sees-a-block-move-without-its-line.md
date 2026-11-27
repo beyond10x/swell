@@ -5,7 +5,7 @@ kind: story
 status: draft
 title: The moves check sees a block move without its line of the list
 summary: 'test262-moves-check reads the lines of moves.tsv only: a block line that sends a case to a later slice with no line of the list passes the gate. Backlog, from pass 1 of the adversary on unit close9 of wave big-2.'
-revision: 1
+revision: 2
 ---
 ## Context
 
@@ -48,3 +48,21 @@ out of a copy of the list and reads the refusal with the case's path; a second t
 block line for a case into an earlier slice with no line of the list and reads exit 0; the
 step's time in the gate before and after (`gate-time test262-moves-check`, 1.5 s on the build
 node on 2026-11-27).
+
+## Added by the close of slice 8
+
+Pass 1 of the adversary on the unit `close8` of wave big-2
+(`review-result:adversary-close8-pass-1`, its findings 3 and 4) planted both gaps again on
+the tree of that close:
+
+- the line of `language/statements/class/subclass/builtins.js` taken out of `moves.tsv` with
+  its block line `dir ... 13` kept: `test262-moves-check` exits 0 and prints `2030 case(s)
+  moved`; `test262-check` fails only on the digest, which `test262-expected` writes again;
+- field 2 of that line (the slice the case leaves) changed from 8 to 7: the moves check
+  exits 0, and so do the checks of the close story, which count by that field; only the
+  story's groups line shows `all 8` in place of `all 9`.
+
+The second gap is new to this story: the moves check reads no run lines and has no source
+for the slice a case left. When the story is planned, the Change names one: the block as it
+was on the commit before the line of the list was added, or the slice the case's own
+`feature`, `flag` and directory lines give it without its file line.

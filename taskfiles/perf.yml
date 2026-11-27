@@ -1,0 +1,18 @@
+version: '3'
+
+set: [pipefail]
+
+tasks:
+  perf-loop:
+    desc: Print the CPU seconds of the loop of buildString on the release swell, three runs, alternating with PERF_BASE_BIN when it is set, and their ratio; builds nothing, in no gate and no lane.
+    summary: |
+      Runs taskfiles/perf-loop.sh, whose head says what it reads and prints
+      (story:property-escape-cases-spend-less-in-the-interpreter-loop). PERF_BIN names the
+      release swell to measure (default target/release/swell), PERF_BASE_BIN the base binary to
+      alternate with (none by default). A measurement: start it without the build pool's
+      prefix, after the binaries are built. It asserts nothing about time.
+    vars:
+      PERF_BIN: '{{.PERF_BIN | default "target/release/swell"}}'
+      PERF_BASE_BIN: '{{.PERF_BASE_BIN | default ""}}'
+    cmds:
+      - PERF_BIN='{{.PERF_BIN}}' PERF_BASE_BIN='{{.PERF_BASE_BIN}}' sh taskfiles/perf-loop.sh

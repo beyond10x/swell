@@ -94,6 +94,16 @@ and the close, with 37 cases that need `class` or `new.target` moved to slice 8 
 need a BigInt literal moved to slice 12, each with evidence, and 130 cases of
 `test/staging/` taken in from slice 19: all 1,858 cases of slice 9 pass in all 3,678 runs
 (`test262-slice 09 1858 3678 0 0 1858 1858 0 0`), and no host requirement is pending for it.
+Slice 8, `classes` (`epic:slice-08-classes`), is delivered too (2026-11-27), in fourteen stories
+(`docs/plan/waves.md`, "Slice 8, `classes`"; `docs/plan/wave-big-2.md`): `new.target`,
+`super`, class syntax and its early errors, class definition evaluation, derived classes and
+`super()`, public fields, static blocks, private names, methods and fields, `#x in`, `eval`
+in field initializers and private names in eval code, and HOST-119 and HOST-223; and the
+close, with 9 cases moved, 5 to slice 13 (binary data) and 4 to slice 18
+(`__lookupGetter__`, `__lookupSetter__`), each with evidence, and 148 cases of
+`test/staging/sm/` taken in from slice 19: all 9,478 cases of slice 8 pass in all 18,803
+runs (`test262-slice 08 9478 18803 0 0 9478 9478 0 0`), and no host requirement is pending
+for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases
@@ -276,6 +286,15 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   a core count without an entry, `gate-cpu test-steps: not read (...)`; and `gate-time: no
   file of <k> under <dir>/*/deps changed while the test steps ran` (`<k>` counts both
   directories).
+- Right after `gate-time-start`, before its first test step, `check` prints the machine it
+  runs on, `gate-runner: <n> cores, <model name>, <MemTotal> kB, sh is <sh>` (task
+  `slow-runner` with `LABEL` `gate-runner`; the lane `slow` calls the same task without a
+  label and prints `slow-runner: ...`; the `echo` is written once). Two runs of the gate on
+  the same code whose seconds differ are read against these lines: on 2026-11-27 the forge
+  ran the test steps of the same code in 77.2 s and 147.6 s, 1.94 times the CPU seconds, and
+  its log did not name the runner.
+  `tests/gate/check-prints-the-runner-line-before-its-first-test-step.sh` holds the order
+  (`task --dry --verbose check`) and both lines.
 - `check-runner` passes `GATE_CPU_BOUNDS`, the table `CPU_BOUNDS_BY_CORES` of
   `taskfiles/forge.yml`: pairs `<cores>:<CPU seconds>`, now `16:245` (provisional: its pair
   under this tree is recorded by the first two check-runner jobs on a 16-core machine after
@@ -283,7 +302,14 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   seconds are over the entry for the core count it runs on. A core count without an entry
   gets no CPU bound; there the CPU seconds are printed, and only the wall budget and the
   `deps` check decide. A green there says nothing of the forge's time. The pool's build node
-  (64 cores) and the forge (4 cores) have no entry; on the forge the wall time decides.
+  (32 cores, read from `nproc` in a pool job on 2026-11-27) and the forge (4 cores) have no
+  entry; on the forge the wall time decides. The CPU seconds of one code are not steady on
+  the build node: across the gates of `story:gate-test-steps-hold-the-budget-on-the-slower-runner`
+  the step `test-collect` read 64.8 to 127.9 at loads of 10 to 38, and the test steps of one
+  base 294.0 and 476.5 in two gates run one after the other. Its pairs of base and head read
+  0.76, 0.78 and 0.73, and an entry needs at most 0.64, so 32 cores got none; a pair is read
+  beside an unchanged step of the same gates
+  (`story:local-gate-reads-the-cost-of-its-test-steps-on-a-steady-measure`, a backlog draft).
 - An entry of `CPU_BOUNDS_BY_CORES` is added or changed only together with a pair measured
   on that kind of machine, recorded in the same commit. The pair is the code before the
   change over the entry and the change under it, each a whole check-runner job. The entry is
@@ -409,6 +435,11 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   clock, and on the pool's 64-core node the step went from 168.5 to 33.3 and 34.0 CPU
   seconds. That flag is `COLLECT_CONFIG` in `taskfiles/collect-mode.yml`, used by
   test-collect, build-collect and test-doc's collect line; build-collect checks the file.
+  Since `story:gate-test-steps-hold-the-budget-on-the-slower-runner` the step `test` runs
+  1,647 of the 1,770 tests of `swell::main` at opt-level 1: on the build node the step went
+  from 231.9 to 141.7 CPU seconds (loads 36.7 and 38.5), from 191.6 to 118.7 (16.3 and 19.5)
+  and from 294.3 to 160.2 (15.4 and 14.1), the test steps from 416.9 to 315.9, from 314.1 to
+  245.6 and from 476.5 to 348.7.
   `gate-selftest` runs the planted scripts as a rolling pool (`xargs -P`), with `GOGC=off`
   and `GOMEMLIMIT=1GiB` for its many short go-task processes.
 - The lane `slow` runs the collect mode at opt-level 1 too, except for the stack tests: in
@@ -420,10 +451,12 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   test profile at opt-level 0.
 - The guard of that split: the run at opt-level 1 sets `SWELL_NO_STACK_TESTS=1`
   (`NO_STACK_TESTS` at the top of `Taskfile.yml`; it and `COLLECT_MAIN`, `COLLECT_RUSTFLAGS`
-  and `SLOW_COLLECT_WAIT` stand in `GATE_VARIABLES`, so the first line of the gate and of the
-  lane shows them). The two ways of swell's tests to a bounded stack, `stack_with_room` and
-  `stack_thread` of `crates/swell/tests/support/host.rs`, panic when it is set, naming the
-  way out: the rule did not find the test, so it must run at opt-level 0. A test that needs
+  and `SLOW_COLLECT_WAIT` stand in `GATE_VARIABLES`, as `TEST_OPT1_ARGS` and
+  `TEST_OPT1_PROFILE_TEST` do, so the first line of the gate and of the lane shows them). The
+  two ways of swell's tests to a bounded stack, `stack_with_room` and `stack_thread` of
+  `crates/swell/tests/support/host.rs`, panic when it is set, naming the way out and both
+  runs at opt-level 1, the gate's (task `test`) and the lane's (task `slow-tests`): the rule
+  did not find the test, so it must run at opt-level 0. A test that needs
   a thread of a given stack takes it from `stack_thread`, never from
   `std::thread::Builder::stack_size` directly. Forms the rule does not read, which the guard
   catches at run time, are listed at the head of the awk file: a helper imported by `use`, a
@@ -431,6 +464,57 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   and a function pointer made by a cast (`&(f as fn())`). The gate's `test-collect` and the
   collect runs of `test-realm-sizes` run stack tests at opt-level 1 on purpose and do not
   set the variable.
+- The gate's step `test` splits `swell::main` the same way
+  (`story:gate-test-steps-hold-the-budget-on-the-slower-runner`): the tests the stack rule
+  prints "other" run at opt-level 1 (`TEST_OPT1_ARGS` at the top of `Taskfile.yml`:
+  `--locked -p swell --test main --config .cargo/collect-profile.toml --cargo-profile collect
+  --profile default`, the default mode, no feature), with `SWELL_NO_STACK_TESTS=1`; every
+  other test of the workspace (the stack tests, the tests a macro writes, the library tests
+  of swell and every other crate) runs at opt-level 0 with `TEST_NEXTEST_ARGS` unchanged.
+  Each run's filter is a `default-filter` line in a copy of `.config/nextest.toml`
+  (`.out/test-opt1-nextest.toml`, `.out/test-opt0-nextest.toml`; the 1,647 names do not fit
+  one command-line argument). The steps `test` and `build-tests` refuse a caller's value of
+  `TEST_OPT1_ARGS`, `NO_STACK_TESTS` and `TEST_OPT1_PROFILE_TEST` (task
+  `test-opt1-vars-check`), as `test-vars-check` refuses one of `TEST_RUSTFLAGS`; the lane's
+  tasks do not call it.
+- The internal task `test-split` takes `cargo nextest list` of each run and of the workspace
+  and fails, naming the test, when one is in not exactly one run; it prints `test:
+  swell::main <a> at opt-level 1, <b> at opt-level 0` (1647 and 123 on `362b69b1`). It
+  fails, naming the test, when the list of the run at opt-level 1 does not hold
+  `TEST_OPT1_PROFILE_TEST`, the profile's test (a test the rule prints "stack", one in a
+  nested `mod` or one a macro writes would run at opt-level 0), and with a line of its own
+  when `crates/swell/tests/support/` holds no `.rs` file. A task's `env` does not reach the
+  tasks it calls: `test-split` sets `RUSTFLAGS` itself, and a list that compiles fails it
+  (`compile-check` on the three list logs). The internal task `test-sum` runs
+  `nextest-report` on each run into a file (by `TASK_EXE`, made absolute from
+  `USER_WORKING_DIR` when it names a directory: the command runs in the directory of
+  `Taskfile.yml`) and prints one line for both, `<b> test binaries: <p> passed, <f> failed,
+  <i> ignored`: b from the run at opt-level 0, whose Starting line counts every binary of
+  the workspace, p and f the sums, i the tests neither run ran (1). The ten `gate-slowest
+  test` lines are taken over both runs. Planted scripts under `tests/gate/`:
+  `test-runs-each-test-once-at-one-opt-level.sh` (with a failing run at opt-level 1 and a
+  list that compiles), `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
+  `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh`,
+  `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh` and
+  `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh`.
+- The profile `collect` keeps debug assertions and overflow checks (it inherits `test`,
+  where `Cargo.toml` sets `overflow-checks = true`), held by
+  `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on`. That test reads
+  the profile of its own crate only. `build-tests` refuses, naming file and line, a profile
+  of one package or of build scripts in the profile `dev` or `test` (the run's `collect`
+  inherits `test`, `test` inherits `dev`), a definition of the profile `collect` and an
+  include of another configuration file, in `Cargo.toml`, `.cargo/config.toml` or
+  `.cargo/config`, and such a `CARGO_PROFILE_` variable in the environment (task
+  `test-opt1-profile-check`; planted script
+  `build-tests-refuses-a-profile-its-profile-test-does-not-see.sh`). A cargo configuration
+  file outside the tree is not read, nor a key written with an escape or an inline table
+  over several lines; a change of these files is read in review.
+- `build-tests` builds the binary of the run at opt-level 1 before the clock, after the
+  step's build at opt-level 0 and before `build-collect`, whose `.debug_` check of
+  `<target>/collect/deps` covers it (`build-tests opt-level 1: <Finished line>`;
+  `build-collect: 6 test executables in target/collect/deps`). On the build node that build
+  took 5 min 14 s to 8 min 44 s after a change of swell's tests (the binary compiles swell's
+  whole test crate); the forge's job `check` has 30 minutes for build and tests.
 - The lane builds the profile `collect` in the background from its start, beside
   `slow-test262` (`slow-collect-start`; `COLLECT_MAIN` and `COLLECT_RUSTFLAGS` at the top of
   `Taskfile.yml` are the one definition of its arguments and flags, read by the runs on it
@@ -533,40 +617,54 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
     went red on this after green runs on the build node.
 - A bare `task` or `cargo` in an agent shell is refused or queued by the build pool's hook;
   inside a pool job (`slot task check`) the scripts call them directly.
+- `sh taskfiles/perf-loop.sh` (task `perf-loop` of `taskfiles/perf.yml`) measures the CPU
+  seconds of the loop of `buildString` (`tests/perf/build-string-loop.js`) on a release
+  `swell` (`PERF_BIN`), alternating with a base binary (`PERF_BASE_BIN`), three runs each, and
+  prints the medians and their ratio. It builds nothing, is in no gate and no lane, asserts
+  nothing about time and is started by its path without the pool's prefix, after the binaries
+  are built and fetched (`slot --fetch .out/perf/<name> sh -c 'cargo build --locked --release
+  -p swell-cli && mkdir -p .out/perf && cp target/release/swell .out/perf/<name>'`). Each run
+  line carries the machine's CPU pressure (`avg10`), so a reading taken beside other work
+  shows it.
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-27, on `impl/lanefix` at `e3c97c4`, the
-head of the unit that `wave/big-2` merged at `175c17f` (the two trees differ only in the
-planning store), on the pool's build node, load 12 on 32 cores. Every check passed and the
-run exited 0: the test steps took 35.3 s of their 120 (429.5 CPU seconds, of them `test`
-272.0 and `test-collect` 106.9; 32 cores have no entry in the table of CPU seconds, so the
-`gate-cpu` line prints no bound). On `wave/big-2` at `b9adbe35`, the head of the second part
-of wave big-2, the node took 65.5 s at load 14 (315.0 CPU seconds). On `wave/big-2` at
-`8ab9456a`, the first part of that wave, the node took 56.4 s at load 26 (431.5 CPU
-seconds). On `wave/big-1` at `a4c1b2e7`, the close of slice 4, the node took 89.7 s at load
-46 (304.4 CPU seconds). On `5ee604a`, the release commit of `0.9.0`, the node took 24.9 s at
-load 36 on 64 cores (166.7 CPU seconds). On the code of release `0.8.0` with the gate change
-of `story:gate-test-steps-fit-four-cores` (`756b8be`) the same node took 34.3 s at load 67
+`slot --timeout 30m task check-runner` on 2026-11-27, on `wave/big-2` at `5aaeb6e8`, the
+head with slice 8 delivered (the commits after it change documents and the planning store),
+on the pool's build node, load 22 on 32 cores. Every check passed and the run exited 0: the
+test steps took 46.9 s of their 120 (360.5 CPU seconds, of them `test` 164.8 and
+`test-collect` 124.3; 32 cores have no entry in the table of CPU seconds, so the `gate-cpu`
+line prints no bound). The step `test` runs in two runs since
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, and the build of the run at
+opt-level 1 is outside the clock of the test steps (the line `build-tests opt-level 1`). On
+`impl/lanefix` at `e3c97c4`, the head of the wave's first pull request but for the planning
+store, the node took 35.3 s at load 12 (429.5 CPU seconds, of them `test` 272.0). On
+`wave/big-2` at `b9adbe35`, the head of the second part of wave big-2, the node took 65.5 s
+at load 14 (315.0 CPU seconds). On `wave/big-2` at `8ab9456a`, the first part of that wave,
+the node took 56.4 s at load 26 (431.5 CPU seconds). On `wave/big-1` at `a4c1b2e7`, the
+close of slice 4, the node took 89.7 s at load 46 (304.4 CPU seconds). On `5ee604a`, the
+release commit of `0.9.0`, the node took 24.9 s at load 36 on 64 cores (166.7 CPU seconds).
+On the code of release `0.8.0` with the gate change of
+`story:gate-test-steps-fit-four-cores` (`756b8be`) the same node took 34.3 s at load 67
 (201.5 CPU seconds); before that change, on the code of `0.8.0`, a 16-core machine took
 94.3 s at load 34 (312.1 CPU seconds) and the forge's runner of 4 cores 127.9 s (448.5 CPU
 seconds). The planted scripts' single `ok` lines, the ten slowest tests of each step and the
 slice lines after slice 10 are left out (`conformance/test262/expected.txt` has every slice
-line). The fault step's line counts the 1,693 tests its filter leaves out as ignored:
+line). The fault step's line counts the 1,770 tests its filter leaves out as ignored:
 
 ```
 runner-env-check: check-runner sets CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0: CI and GITHUB_ACTIONS as the runner sets them, and the 2 variable(s) .github/workflows/check.yml sets for task check
-python-check: no Python file among 2917 file(s)
-kill-check: no kill with two dashes after its signal operand in 141 file(s)
+python-check: no Python file among 2993 file(s)
+kill-check: no kill with two dashes after its signal operand in 150 file(s)
 forbid-unsafe-check: 10 crate root(s), each with #![forbid(unsafe_code)]
-libm-check: no forbidden call under 228 file(s)
-nostd-build: Finished `dev` profile [unoptimized] target(s) in 0.03s
+libm-check: no forbidden call under 229 file(s)
+nostd-build: Finished `dev` profile [unoptimized] target(s) in 7.01s
 nostd-build: 6 libraries for x86_64-unknown-none: swell swell_compiler swell_num swell_regexp swell_syntax swell_unicode
-nostd-symbols: 6 libraries, 57 object(s), 10248 undefined symbol(s): 10106 Rust's own, 55 memory functions, 87 compiler runtime routines; none from a C library or the system
+nostd-symbols: 6 libraries, 58 object(s), 10315 undefined symbol(s): 10174 Rust's own, 54 memory functions, 87 compiler runtime routines; none from a C library or the system
 Cargo.lock: 9 package(s), none from outside this repository
 toolchain-check: rustc 1.99.1, the channel rust-toolchain.toml pins; 6 workflow file(s), none names a compiler; .github/workflows/check.yml installs the 2 component(s) and 1 target(s) rust-toolchain.toml names
 release-targets-check: 7 target(s) in .github/workflows/release-build.yml, the release's targets; musl and Windows built with +crt-static and their linking checked; docs/releasing.md and website/docs/embedding.md name each archive and no other, and docs/releasing.md counts 7 archives and 8 assets
-nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 22 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
+nextest-check: ./.config/nextest.toml: every test is terminated by 60 s at the latest; 23 task file(s): 4 step(s) through cargo-nextest, no cargo test but doc tests
 test262 2a1ade303f72d3de80565c921d685222405c32ce: present and checked
 data/unicode/17.0.0: 17 file(s), each with the SHA-256 its SOURCE line gives; 17 required path(s) present
 math-data-check: 3 file(s)
@@ -574,34 +672,37 @@ unicode-tables: 16 table(s) equal the generator output
 swell v1 — 2 file(s), 10 scenario(s), valid
 60 scenario(s) (10 authored), 41 refusal(s), written to .out/suite.json
   60 scenarios: 60 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 222 requirement(s), 222 line(s): 172 test, 50 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 8:1 11:32 12:3 13:2 14:6 16:5 18:1
-host-surface: 17 change(s) since 0.12.0, each named
+host-requirements: 223 requirement(s), 223 line(s): 174 test, 49 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 11:32 12:3 13:2 14:6 16:5 18:1
+host-surface: 19 change(s) since 0.12.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 site-data-check: website/data/engines.json equals its regeneration from bench/engines.jsonl, bench/published/*.tsv (held by its SHA256SUMS), bench/results/*.json, conformance/test262/expected.txt, conformance/test262/PIN, Cargo.toml, conformance/host/requirements.txt, crates/swell/src/host/limits.rs, crates/swell/src/host/interrupt.rs and the status file
 test-main: 9 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
 test-binaries-check: 19 test executables, 9 integration-test binaries in 9 packages, none with a .debug_ section
 build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
-build-collect: Finished `collect` profile [optimized] target(s) in 0.00s
-build-collect: 2 test executables in target/collect/deps, none with a .debug_ section
-build-faults: Finished `test` profile [unoptimized] target(s) in 0.00s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 0.04s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.04s
-build-test262-runner: Finished `release` profile [optimized] target(s) in 0.00s
-19 test binaries: 2445 passed, 0 failed, 1 ignored
-gate-time test 10.9
+build-tests opt-level 1: Finished `collect` profile [optimized] target(s) in 5m 33s
+build-collect: Finished `collect` profile [optimized] target(s) in 5m 25s
+build-collect: 3 test executables in target/collect/deps, none with a .debug_ section
+build-faults: Finished `test` profile [unoptimized] target(s) in 27.66s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 1m 00s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.06s
+build-test262-runner: Finished `release` profile [optimized] target(s) in 16.39s
+gate-runner: 32 cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash
+test: swell::main 1647 at opt-level 1, 123 at opt-level 0
+19 test binaries: 2532 passed, 0 failed, 1 ignored
+gate-time test 14.7
 test-doc: 8 test suites: 19 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 19 passed, 0 failed, 0 ignored
-gate-time test-doc 4.2
-test-collect: 2 test binaries: 1944 passed, 0 failed, 1 ignored
-gate-time test-collect 4.2
-test-faults: 1 test binaries: 1 passed, 0 failed, 1693 ignored
+gate-time test-doc 4.9
+test-collect: 2 test binaries: 2029 passed, 0 failed, 1 ignored
+gate-time test-collect 5.3
+test-faults: 1 test binaries: 1 passed, 0 failed, 1770 ignored
 gate-time test-faults 0.2
 conform-engine: 3 test binaries: 16 passed, 0 failed, 0 ignored
   60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported
-gate-time conform-engine 1.6
-test262-refused 5369
-test262 total 53801 8982 7 44812 36027 8783 2
+gate-time conform-engine 1.9
+test262-refused 3237
+test262 total 53801 8982 7 44812 37097 7713 2
 test262: 221 directory lines sum to the total
 test262-slice 01 31 62 0 0 31 31 0 0
 test262-slice 02 4259 7543 0 0 4259 4259 0 0
@@ -610,21 +711,21 @@ test262-slice 04 1681 3320 0 0 1681 1681 0 0
 test262-slice 05 2724 5441 0 0 2724 2724 0 0
 test262-slice 06 3898 7351 0 0 3898 3898 0 0
 test262-slice 07 1472 2801 0 0 1472 1472 0 0
-test262-slice 08 9339 18529 0 0 9339 8279 1060 0
+test262-slice 08 9478 18803 0 0 9478 9478 0 0
 test262-slice 09 1858 3678 0 0 1858 1858 0 0
 test262-slice 10 3759 7258 0 0 3759 3759 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
-test262: 287 lines of conformance/test262/expected.txt; sources digest 6c2d41c27635226bceca91f133544a9fdc65eb62658fac2ce65567cf161e904c equals conformance/test262/expected.digest
-gate-time test262-check 0.1
-test262-moves: 2022 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:378 9:29 10:83 11:4 12:64 13:17; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 1.5
-gate-selftest: 105 passed, 0 failed
-gate-time gate-selftest 12.6
-gate-time test-steps 35.3 of 120, cpu 429.5, load 11.55 on 32 cores
-gate-time yardstick 3.1 s: conform-engine 1.6 and test262-moves-check 1.5
-gate-cpu test-steps 429.5, no bound for 32 cores: test 272.0, test-doc 4.9, test-collect 106.9, test-faults 0.1, conform-engine 2.4, test262-check 0.1, test262-moves-check 1.5, gate-selftest 41.6
-gate-time: no file of 336 under target/*/deps changed while the test steps ran
+test262: 287 lines of conformance/test262/expected.txt; sources digest 0e48037b2a499061123b175285a79a9530326607607f625e35cc251e7fc956c1 equals conformance/test262/expected.digest
+gate-time test262-check 0.2
+test262-moves: 2031 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:378 9:29 10:83 11:4 12:64 13:22 18:4; slices 1 to 19: 44931 85794
+gate-time test262-moves-check 2.6
+gate-selftest: 112 passed, 0 failed
+gate-time gate-selftest 17.1
+gate-time test-steps 46.9 of 120, cpu 360.5, load 21.72 on 32 cores
+gate-time yardstick 4.5 s: conform-engine 1.9 and test262-moves-check 2.6
+gate-cpu test-steps 360.5, no bound for 32 cores: test 164.8, test-doc 5.8, test-collect 124.3, test-faults 0.2, conform-engine 2.9, test262-check 0.1, test262-moves-check 2.5, gate-selftest 59.9
+gate-time: no file of 400 under target/*/deps changed while the test steps ran
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`
@@ -882,7 +983,8 @@ session coordinates; this section is its procedure, taken from how surf is run
   is bounded too. Right after `gate-time-start` the lane prints the machine it runs on,
   `slow-runner: <n> cores, <model name>, <MemTotal> kB, sh is <sh>` (task `slow-runner`;
   "cpu not read" when `/proc/cpuinfo` is missing or has no model name; it never fails the
-  lane), so that two runs on the same code can be read against their machines: the forge ran
+  lane; `check` calls the same task with the label `gate-runner`), so that two runs on the
+  same code can be read against their machines: the forge ran
   the lane on one code in 882.6 s and 1,142.0 s, single tests 1.4 to 1.56 times slower in
   the second run, builds 1.11 to 1.14 times. On the build node it prints `slow-runner: 32
   cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash`.

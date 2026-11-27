@@ -18,8 +18,8 @@ can use it.
 
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
 modes, with regular expressions, under a step budget and a memory budget.
-Its gate holds the test262 counts: 36,027 of the 44,812 cases that run pass (80.4 %), measured on 2026-11-27.
-Nine of nineteen delivery slices are delivered:
+Its gate holds the test262 counts: 37,097 of the 44,812 cases that run pass (82.8 %), measured on 2026-11-27.
+Ten of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |
 |---|---|---|
@@ -30,6 +30,7 @@ Nine of nineteen delivery slices are delivered:
 | 5 | regular expressions: `RegExp`, its flags with `v`, named groups, lookbehind, Unicode properties, and the `String` methods that take one | 2,724, every one passes |
 | 6 | bindings and iteration: `let`, `const`, templates, arrow functions, destructuring, spread, `Symbol`, iterators, `for`-`of` | 3,898, every one passes |
 | 7 | generators: generator functions and methods, `yield`, `yield*` and the `GeneratorFunction` constructor | 1,472, every one passes |
+| 8 | classes: class declarations and expressions, `extends` and `super`, `new.target`, public and private fields, methods and accessors, `#x in`, static blocks | 9,478, every one passes |
 | 9 | collections, proxies and reflection: `Map`, `Set` with the set methods, `WeakMap`, `WeakSet`, `Proxy`, `Reflect`, and the host's overrides of the internal methods | 1,858, every one passes |
 | 10 | promises and `async`: `Promise` with its statics, `async` functions and methods, `await`, `for await`, async generators and `Array.fromAsync` | 3,759, every one passes |
 

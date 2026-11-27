@@ -308,6 +308,19 @@ pub enum Instruction {
     /// `[o, v] -> [o]`: CreateDataPropertyOrThrow(o, `strings[k]`, v)
     /// (`#sec-object-initializer-runtime-semantics-propertydefinitionevaluation`).
     DefineField(u32),
+    /// `[o, v] -> [o]`: PrivateFieldAdd (`#sec-privatefieldadd`) of the private field whose
+    /// Private Name is slot `slot` of the environment `hops` outward (the private record) to `o`
+    /// with value `v`, the step of DefineField (`#sec-definefield`, step 6) for a private name:
+    /// a `TypeError` when `o` has an element of the name already; [[Extensible]] is not read.
+    /// `room` is the number of elements the adds of this class level make, its private methods,
+    /// accessors and fields counted together (those that are not static, or those that are), as
+    /// [`Instruction::AddPrivateMethod`] carries it: whichever add of the level finds the list of
+    /// `o` full reserves room for exactly `room` elements. 16-bit fields, as that instruction's.
+    AddPrivateField {
+        hops: u16,
+        slot: u16,
+        room: u16,
+    },
     /// `[o, f] -> [o]`: the getter `f` as property `strings[k]`, enumerable and configurable
     /// (`#sec-runtime-semantics-methoddefinitionevaluation`).
     DefineGetter(u32),
@@ -471,6 +484,17 @@ pub enum Instruction {
     InstanceOf,
     /// `[a, b] -> [r]`: `a in b`, a `TypeError` when `b` is not an Object.
     In,
+    /// `[o] -> [b]`: `#x in o` (`#sec-relational-operators-runtime-semantics-evaluation`,
+    /// RelationalExpression : PrivateIdentifier `in` ShiftExpression), `o` the value of the
+    /// ShiftExpression: a `TypeError` when `o` is not an Object, otherwise whether
+    /// PrivateElementFind (`#sec-privateelementfind`) finds the Private Name in slot `slot` of
+    /// the environment `hops` outward (the private record of the innermost class that declares
+    /// `#x`) among `o`'s private elements, a field, a method or an accessor. No internal method
+    /// of `o` runs, so a `Proxy` answers by its own elements and no trap is called.
+    PrivateIn {
+        hops: u32,
+        slot: u32,
+    },
     /// `[a, b] -> [r]`: IsLooselyEqual (`#sec-islooselyequal`).
     Eq,
     NotEq,
@@ -1026,6 +1050,7 @@ impl Instruction {
             | Instruction::NewArray
             | Instruction::NewRegExp { .. }
             | Instruction::DefineField(_)
+            | Instruction::AddPrivateField { .. }
             | Instruction::DefineGetter(_)
             | Instruction::DefineSetter(_)
             | Instruction::DefineMethod(_)
@@ -1069,6 +1094,7 @@ impl Instruction {
             | Instruction::GtEq
             | Instruction::InstanceOf
             | Instruction::In
+            | Instruction::PrivateIn { .. }
             | Instruction::Eq
             | Instruction::NotEq
             | Instruction::StrictEq

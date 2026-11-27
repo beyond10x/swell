@@ -44,6 +44,8 @@ mod for_of;
 pub(crate) mod frame;
 mod generator;
 mod lexical;
+#[cfg(test)]
+mod loop_tests;
 mod object_literal;
 mod parameters;
 mod patterns;

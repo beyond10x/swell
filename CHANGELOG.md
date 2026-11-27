@@ -54,6 +54,21 @@ Every number below comes from the gate, `task check`, on the released commit.
   `parts_script_sees_the_sign_of_each_zero` (the four functions of `Math`). Slice 4 is
   delivered: `conformance/slices-delivered.txt` lists it, and no host requirement is pending
   for it.
+- The close of slice 8, `classes` (`story:slice-08-conformance-close`): every case of the
+  slice passes in every run, `test262-slice 08 9478 18803 0 0 9478 9478 0 0`, and `8` is in
+  `conformance/slices-delivered.txt`. 9 cases that need a later slice move with evidence in
+  `conformance/test262/moves.tsv`: 5 to slice 13 (`ArrayBuffer` 2, `DataView` 2,
+  `Uint8Array` 1: the subclasses of `class/subclass/builtin-objects/ArrayBuffer/` and
+  `DataView/` and `class/subclass/builtins`) and 4 to slice 18 (`__lookupGetter__` 2,
+  `__lookupSetter__` 2: the `private-getter-` and `private-setter-is-not-a-own-property`
+  cases of `statements/class/` and `expressions/class/`). 148 cases of `test/staging/sm/`
+  that failed at the start of the slice and pass now come into slice 8 from slice 19 by
+  lines of the block (`docs/plan/slice-08/close-into-08.tsv`); 10 of them name later slices
+  only behind `typeof` in `harness/deepEqual.js` (3) or `harness/propertyHelper.js` (7).
+  The table of section 12 moves by them: slice 8 9,478 cases and 18,803 runs, slice 13
+  3,066 and 6,088, slice 18 1,138 and 1,459, slice 19 1,085 and 2,007; the sums do not
+  move. The whole run reads `test262 total 53801 8982 7 44812 37097 7713 2`: 37,097 of the
+  44,812 cases that run pass.
 - The close of slice 9, `collections-proxy-reflect` (`story:slice-09-conformance-close`):
   every case of the slice passes in every run, `test262-slice 09 1858 3678 0 0 1858 1858 0 0`.
   59 cases that need a later slice move with evidence in `conformance/test262/moves.tsv`:
@@ -293,10 +308,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   per private identifier (a heap record of its own, its description the identifier with its
   `#`), held by the class's private record, a lexical scope pushed after the heritage. An
   object holds its private elements in a list of its own, charged to the memory budget before
-  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  it grows: a box of 24 bytes and 48 bytes per element, reserved once per class level for
   exactly the elements that level adds (a getter and a setter of one name are one element), so
-  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
-  methods 200, with 17 methods 772
+  an instance of a class with one private method costs 72 bytes over a plain instance, with 4
+  methods 216, with 17 methods 840
   (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
   methods and accessors are added by the class's instance initializer before any other
   element, the static ones to the constructor before the first static element runs
@@ -312,9 +327,8 @@ Every number below comes from the gate, `task check`, on the released commit.
   Private Name that nothing holds. One class holds at most 32,768 private methods with names
   of their own (the 65,536 slots of its private record); past it the class is the
   `SyntaxError` `more private record slots in one class than the bytecode can number`. Direct
-  eval code that reads a private name an enclosing class declares is refused with the
-  `SyntaxError` `private name #x in direct eval code is not supported before slice 8` until
-  `story:private-names-in-eval-code`; a name no enclosing class declares, an indirect `eval`
+  eval code reads the private names of the classes around the call
+  (`story:private-names-in-eval-code`); a name no enclosing class declares, an indirect `eval`
   and `Function` keep the early error `private name #x is not declared in an enclosing
   class`. The hold `private method is not supported before slice 8` is gone
   (`story:private-names-and-private-methods`).
@@ -362,8 +376,93 @@ Every number below comes from the gate, `task check`, on the released commit.
   function`); those of `Object.groupBy` read as before. 15 tests in
   `tests/builtins_map_upsert.rs` (14 with `collect-every-safe-point`).
 
+- Private fields and `#x in` run (`#sec-privatefieldadd`,
+  `#sec-relational-operators-runtime-semantics-evaluation`). A private field is added by the
+  class's instance initializer after the private methods and accessors, in source order with
+  the public fields, and a static one to the constructor in its run of static elements; an
+  object a base constructor returns gets the fields too, a second add of the same name is a
+  `TypeError`, and the add does not read [[Extensible]], so a frozen or non-extensible object
+  gets them. `o.#x`, `o?.#x` and every assignment form on a private field (plain, compound,
+  logical with its short circuit, update, destructuring and the `for`-`in`/`of` head) run
+  PrivateGet and PrivateSet. `#x in o` throws a `TypeError` when `o` is not an object and
+  answers whether `o` has the element, for fields, methods and accessors alike, with no trap of
+  a Proxy called. A class level reserves room for its private methods and private fields
+  together, once. The holds `private field is not supported before slice 8` and
+  `private name in is not supported before slice 8` are gone: no construct is held any more
+  (`story:private-fields-and-private-in`).
+
+- HostEnsureCanAddPrivateElement, a story of the eighth slice: before a private field, a
+  private method or a private accessor is added to a host object with an override table, the
+  engine asks the host's hook `host_ensure_can_add_private_element`, once per element (a
+  getter and a setter of one name are one element). A `Throw` from the hook is the add's
+  throw, and the element is not added. Every other object calls no hook. "Host interface"
+  below has HOST-119 and HOST-223 (`story:host-ensure-can-add-private-element`).
+
+- Private names in direct eval code, a story of the eighth slice: direct `eval` code reads,
+  writes, calls and tests (`#x in o`) the private names of every class around the call
+  (`#sec-evaldeclarationinstantiation`, privateIdentifiers and AllPrivateIdentifiersValid,
+  with the caller's PrivateEnvironment that PerformEval passes). `swell_syntax::EvalContext`
+  gains a lifetime and the field `EvalContext::private_names` (the texts the parse takes as
+  declared), `parse_eval` and `parse_eval_with` take `impl Into<EvalContext<'a>>`, and
+  `swell_compiler::compile_eval_with` gains `private_names: &[(&str, u32, u32)]` (text, hops
+  from the caller's environment, slot). A direct `eval` whose String holds no `#` code unit
+  costs what it cost before: it does not walk the caller's records for private names. One
+  whose String holds a `#` anywhere (also only in a string literal or a comment) spends a
+  step per record of the caller's chain and, in a record whose slots are named, a step per
+  slot and per text compared past the first 8; `eval("'#'")` in a non-strict function of
+  1,000 `var`s spends 995 steps more than `eval("1")` there
+  (`story:private-names-in-eval-code`).
+
 ### Changed
 
+- The gate's step `test` runs each test once in two runs
+  (story gate-test-steps-hold-the-budget-on-the-slower-runner): the tests of swell's
+  integration-test binary (`swell::main`) that `taskfiles/realm-room-tests.awk -v rule=stack`
+  prints "other" run at opt-level 1 (`TEST_OPT1_ARGS`: the profile `collect` without the
+  feature `collect-every-safe-point`, with `SWELL_NO_STACK_TESTS=1`), 1,647 of the binary's
+  1,770; the stack tests, the tests a macro writes and every other test of the workspace run
+  at opt-level 0 with `TEST_NEXTEST_ARGS` unchanged. The internal task `test-split` fails,
+  naming the test, when `cargo nextest list` puts a test in not exactly one run or when the
+  run at opt-level 1 does not hold the profile's test, and prints `test: swell::main <a> at
+  opt-level 1, <b> at opt-level 0`; `test-sum` prints one line of counts for both runs
+  (`ignored`: the tests neither run ran) and the ten slowest over both. `build-tests` builds
+  the binary at opt-level 1 before the clock, before `build-collect`, whose `.debug_` check
+  covers it. Debug assertions and overflow checks stay on in that run: the test
+  `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on` fails when the
+  profile it is built in turns either off, and `build-tests` refuses, naming file and line, a
+  profile of one package or of build scripts in the profile `dev` or `test`, a definition of
+  the profile `collect` outside `.cargo/collect-profile.toml`, and a key `include` at the top
+  of `.cargo/config.toml` (internal task `test-opt1-profile-check`). The steps `test` and
+  `build-tests` refuse a caller's value of `TEST_OPT1_ARGS`, `NO_STACK_TESTS` and
+  `TEST_OPT1_PROFILE_TEST` (internal task `test-opt1-vars-check`). The guard's line
+  (`NO_STACK_TESTS_LINE`) names both runs at opt-level 1, the gate's (task `test`) and the
+  lane's (task `slow-tests`). On a build node of 32 cores the CPU seconds of the test steps
+  went from 416.9 to 315.9, from 314.1 to 245.6 and from 476.5 to 348.7 in three pairs of
+  whole gates (ratios 0.76, 0.78 and 0.73; the readings of one code differ by up to half on
+  that node), the step `test` from 231.9 to 141.7, from 191.6 to 118.7 and from 294.3 to
+  160.2; the build of the binary at opt-level 1 took 5 min 14 s to 8 min 44 s there. Planted
+  scripts under
+  `tests/gate/`: `test-runs-each-test-once-at-one-opt-level.sh`,
+  `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
+  `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh`,
+  `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh`,
+  `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh` and
+  `build-tests-refuses-a-profile-its-profile-test-does-not-see.sh`.
+- The gate names the machine its test steps run on: `task check` prints, after
+  `gate-time-start` and before its first test step, one line `gate-runner: <n> cores,
+  <model name>, <MemTotal> kB, sh is <sh>`, from the task `slow-runner` with the label
+  `gate-runner` (the lane `slow` keeps its line `slow-runner: ...`; the line is written in
+  one place). The planted script
+  `tests/gate/check-prints-the-runner-line-before-its-first-test-step.sh` holds it
+  (story gate-test-steps-hold-the-budget-on-the-slower-runner).
+- The interpreter spends fewer CPU seconds per instruction in a loop of the kind of the test262
+  harness's `buildString` (story property-escape-cases-spend-less-in-the-interpreter-loop): a
+  push of a value and a replace of the operand stack write in place, the next instruction is
+  read in the loop's own code, and the operands of an instruction and a checked local are read
+  in one borrow of the frame. The measurement `tests/perf/build-string-loop.js` takes 0.72 of
+  the CPU seconds of the base (`taskfiles/perf-loop.sh`, median of three runs each); the
+  property-escape cases of part 1/14 of the test262 run take 0.86 of the base's wall time with
+  one worker. No step count, heap reading, stack bound or test262 result changed.
 - A character class outside `v` keeps its last answer together with the range of code
   points around it that answer the same (`ClassSet::contains_around`, with
   `swell_unicode::Property::contains_around` for the property tables). A run of characters
@@ -677,7 +776,20 @@ Every number below comes from the gate, `task check`, on the released commit.
 - **Breaking**: `HostObjectSpec`. A host that names the type or writes a literal stops
   compiling once. A literal names `overrides` (`overrides: None` for no table), and a type
   position names the host type (`HostObjectSpec<MyHost>`).
-- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-222.
+- `HOST-119` and `HOST-223` (slice 8): the engine calls `host_ensure_can_add_private_element`
+  only for a host object with an override table, before a private field, a private method or a
+  private accessor is added to it. It calls the hook once per element: a getter and a setter
+  of one name are one element. A `Throw` from the hook is the add's throw, and the element is
+  not added. A `Throw` value that holds a stale handle or a handle of another agent ends the
+  run with `Terminated(EngineFault)` and faults the agent. A hook that sets the interrupt flag
+  ends the run before the element is added. `HOST-223` is new. Tests:
+  `swell::private_element_hook::host_119_a_throw_from_the_hook_is_the_field_adds_throw` and
+  `swell::private_element_hook::host_223_a_stale_handle_in_the_throw_faults_the_agent`.
+  - The host's duty: the hook answers the same kind of completion for every call with one
+    object (`#sec-hostensurecanaddprivateelement`). The engine does not check it. A host that
+    breaks it keeps the elements added before the refusal, in source order; an accessor whose
+    second half stands after the refused element keeps only its first half.
+- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-119, HOST-222, HOST-223.
 
 ## [0.12.0] - 2026-11-25
 

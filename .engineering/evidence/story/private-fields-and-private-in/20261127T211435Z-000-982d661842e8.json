@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T21:14:35Z",
+  "actor": "human:operator",
+  "artifact": "story:private-fields-and-private-in",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at 5aaeb6e8, exit 0, on the build node; the unit was merged by commit 91a6b56e, an ancestor of that head",
+    "reference": "the tests of crates/swell/tests/private_fields.rs (swell::private_fields::*) and the cases of docs/plan/slice-08/story-private-fields.cases.txt in conformance/test262/expected.txt; test262-slice 08 9478 18803 0 0 9478 9478 0 0"
+  }
+}

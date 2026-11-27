@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-08-conformance-close
 kind: story
-status: active
+status: implemented
 title: 'Every run of slice 8 passes: 9 cases move to later slices (5 to slice 13, 4 to slice 18), the slice-9 and passing cases are checked, passing cases of later slices come in'
 summary: 9 cases (18 runs) moved, 5 to slice 13 and 4 to slice 18, with evidence in moves.tsv; 91 cases of slice 9's parts and 5 passing cases checked; section 12 and expected.txt.
 relations:
@@ -22,6 +22,7 @@ relations:
 - depends_on: story:host-ensure-can-add-private-element
 - depends_on: story:slice-04-conformance-close
 - depends_on: story:slice-09-conformance-close
+- depends_on: story:gate-test-steps-hold-the-budget-on-the-slower-runner
 scope:
 - confidence: cited
   path: conformance/test262/expected.digest
@@ -35,10 +36,11 @@ scope:
   path: docs/design/engine.md
 - confidence: inferred
   path: docs/plan/slice-08/close-into-08.tsv
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T21:14:36Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
