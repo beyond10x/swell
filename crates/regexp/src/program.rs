@@ -184,6 +184,36 @@ impl ClassSet {
                 .any(|&(property, negated)| property.contains(c) != negated)
     }
 
+    /// [`ClassSet::contains`] of `c`, with an inclusive range `(first, last)` of characters
+    /// around `c`, `c` among them, for each of which the class answers the same: where its
+    /// ranges and each of its property escapes ([`Property::contains_around`]) answer alike. The
+    /// same binary searches as `contains`. A class under `i` or with `\s` or `\S` answers for
+    /// `c` alone. The matcher keeps the answer with its range and answers a character in the
+    /// range from it (`matcher.rs`).
+    pub(crate) fn contains_around(&self, program: &Program, c: u32) -> (bool, u32, u32) {
+        if self.fold || self.space || self.not_space {
+            return (self.contains(program, c), c, c);
+        }
+        let start = self.start as usize;
+        let own = program
+            .ranges
+            .get(start..start.saturating_add(self.len as usize))
+            .unwrap_or(&[]);
+        let (mut held, mut first, mut last) = ranges_around(own, c);
+        if !held {
+            for &(property, negated) in self.properties_of(program) {
+                let (has, from, to) = property.contains_around(c);
+                if has != negated {
+                    (held, first, last) = (true, from, to);
+                    break;
+                }
+                first = first.max(from);
+                last = last.min(to);
+            }
+        }
+        (held != self.negated, first, last)
+    }
+
     /// The property escapes of the class, each with `true` for `\P{...}`.
     pub(crate) fn properties_of<'p>(&self, program: &'p Program) -> &'p [(Property, bool)] {
         let start = self.properties as usize;
@@ -192,6 +222,23 @@ impl ClassSet {
             .get(start..start.saturating_add(self.properties_len as usize))
             .unwrap_or(&[])
     }
+}
+
+/// Whether `c` lies in one of `ranges`, sorted and disjoint, with the characters around `c` that
+/// answer the same: the range that holds `c`, or the gap between the two ranges beside it (from
+/// 0 before the first, to `u32::MAX` after the last). One binary search.
+fn ranges_around(ranges: &[(u32, u32)], c: u32) -> (bool, u32, u32) {
+    let at = ranges.partition_point(|&(_, last)| last < c);
+    let next = ranges.get(at);
+    if let Some(&(first, last)) = next.filter(|&&(first, _)| first <= c) {
+        return (true, first, last);
+    }
+    let first = at
+        .checked_sub(1)
+        .and_then(|before| ranges.get(before))
+        .map_or(0, |&(_, last)| last.saturating_add(1));
+    let last = next.map_or(u32::MAX, |&(first, _)| first.saturating_sub(1));
+    (false, first, last)
 }
 
 /// WhiteSpace or LineTerminator (`#sec-white-space`, `#sec-line-terminators`), the characters

@@ -305,15 +305,15 @@
         },
         "K1.built-ins": {
           "status": "measured",
-          "value": 14057,
+          "value": 14160,
           "of": 23885,
-          "percent": "58.8",
+          "percent": "59.2",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 14057,
+            "value": 14160,
             "of": 18861,
-            "percent": "74.5",
+            "percent": "75.0",
             "label": "of the cases swell's runner runs"
           },
           "source": {
@@ -368,15 +368,15 @@
         },
         "K1.language": {
           "status": "measured",
-          "value": 17200,
+          "value": 20591,
           "of": 23832,
-          "percent": "72.1",
+          "percent": "86.4",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 17200,
+            "value": 20591,
             "of": 23300,
-            "percent": "73.8",
+            "percent": "88.3",
             "label": "of the cases swell's runner runs"
           },
           "source": {
@@ -389,15 +389,15 @@
         },
         "K1.staging": {
           "status": "measured",
-          "value": 899,
+          "value": 977,
           "of": 1487,
-          "percent": "60.4",
+          "percent": "65.7",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 899,
+            "value": 977,
             "of": 1474,
-            "percent": "60.9",
+            "percent": "66.2",
             "label": "of the cases swell's runner runs"
           },
           "source": {
@@ -410,15 +410,15 @@
         },
         "K1.total": {
           "status": "measured",
-          "value": 32455,
+          "value": 36027,
           "of": 53801,
-          "percent": "60.3",
+          "percent": "66.9",
           "unit": "cases",
           "basis": "swell-runner-2a1ade30",
           "secondary": {
-            "value": 32455,
+            "value": 36027,
             "of": 44812,
-            "percent": "72.4",
+            "percent": "80.3",
             "label": "of the cases swell's runner runs"
           },
           "source": {
