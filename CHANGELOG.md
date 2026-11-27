@@ -377,6 +377,13 @@ Every number below comes from the gate, `task check`, on the released commit.
   `private name in is not supported before slice 8` are gone: no construct is held any more
   (`story:private-fields-and-private-in`).
 
+- HostEnsureCanAddPrivateElement, a story of the eighth slice: before a private field, a
+  private method or a private accessor is added to a host object with an override table, the
+  engine asks the host's hook `host_ensure_can_add_private_element`, once per element (a
+  getter and a setter of one name are one element). A `Throw` from the hook is the add's
+  throw, and the element is not added. Every other object calls no hook. "Host interface"
+  below has HOST-119 and HOST-223 (`story:host-ensure-can-add-private-element`).
+
 ### Changed
 
 - A character class outside `v` keeps its last answer together with the range of code
@@ -692,7 +699,20 @@ Every number below comes from the gate, `task check`, on the released commit.
 - **Breaking**: `HostObjectSpec`. A host that names the type or writes a literal stops
   compiling once. A literal names `overrides` (`overrides: None` for no table), and a type
   position names the host type (`HostObjectSpec<MyHost>`).
-- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-222.
+- `HOST-119` and `HOST-223` (slice 8): the engine calls `host_ensure_can_add_private_element`
+  only for a host object with an override table, before a private field, a private method or a
+  private accessor is added to it. It calls the hook once per element: a getter and a setter
+  of one name are one element. A `Throw` from the hook is the add's throw, and the element is
+  not added. A `Throw` value that holds a stale handle or a handle of another agent ends the
+  run with `Terminated(EngineFault)` and faults the agent. A hook that sets the interrupt flag
+  ends the run before the element is added. `HOST-223` is new. Tests:
+  `swell::private_element_hook::host_119_a_throw_from_the_hook_is_the_field_adds_throw` and
+  `swell::private_element_hook::host_223_a_stale_handle_in_the_throw_faults_the_agent`.
+  - The host's duty: the hook answers the same kind of completion for every call with one
+    object (`#sec-hostensurecanaddprivateelement`). The engine does not check it. A host that
+    breaks it keeps the elements added before the refusal, in source order; an accessor whose
+    second half stands after the refused element keeps only its first half.
+- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-119, HOST-222, HOST-223.
 
 ## [0.12.0] - 2026-11-25
 

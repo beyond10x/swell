@@ -2044,8 +2044,15 @@ with an override table, and nowhere else. The requirement that the story of the 
    objects alike, since the adds act on the object itself, through no trap.
 
    One add function in a new file, `object/private_names.rs`, serves both adds:
-   1. For a host object with an override table, it calls the hook (HOST-119), and a `Throw` from it
-      is the add's throw (`HOST-223`).
+   1. It finds the element of its key (the scan whose comparisons past `SMALL` are charged).
+      The second half of an accessor whose first half is there joins that element and calls
+      no hook: InitializeInstanceElements adds each PrivateElement once, and a getter and a
+      setter of one name are one element. Otherwise, for a host object with an override
+      table, it calls the hook (HOST-119), and a `Throw` from it is the add's throw
+      (`HOST-223`). The find comes before the hook, and the hook cannot change what the find
+      read: a `HookCx` runs no code, adds no element and is no safe point. The host answers
+      every call for one object with the same kind of completion; the engine does not check
+      it, and a host that breaks it keeps the elements added before the refusal.
    2. An entry that is already there is a `TypeError`.
    3. The entry is appended.
 
