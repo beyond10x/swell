@@ -20,9 +20,11 @@ tasks:
 
       It runs the gate's step test restricted to that test, with the step's flags and arguments,
       the variables TEST_RUSTFLAGS and TEST_NEXTEST_ARGS of this file, which the steps build,
-      build-tests, test and test-doc of Taskfile.yml read too, so they share one build:
-      RUSTFLAGS=<TEST_RUSTFLAGS> cargo nextest run <TEST_NEXTEST_ARGS> -E
-      'test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)', with
+      build-tests, test and test-doc of Taskfile.yml read too, so they share one build, the
+      one of the step's run at opt-level 0 (the step runs the tests of swell::main that the
+      stack rule prints "other", this one among them, at opt-level 1 from a build of its own,
+      TEST_OPT1_ARGS of Taskfile.yml): RUSTFLAGS=<TEST_RUSTFLAGS> cargo nextest run
+      <TEST_NEXTEST_ARGS> -E 'test(=builtins_symbol_values::the_realm_places_file_equals_the_walk)', with
       SWELL_REALM_PLACES_OUT set to the absolute path of .out/realm-places/walk.txt (nextest runs
       the test in crates/swell), which it removes first. The test writes the whole file there,
       its two comment lines (REALM_PLACES_HEADER of the test, their one definition) and the
