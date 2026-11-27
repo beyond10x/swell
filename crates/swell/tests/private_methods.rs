@@ -984,6 +984,212 @@ var c = new C(), Inner = O.make();
     }
 }
 
+/// The class of [`a_direct_eval_finds_a_name_outside_ascii_and_through_escapes`] whose
+/// private name is outside ASCII: its method `m` answers the error of a direct `eval` of `code`.
+const NAMED_OUTSIDE_ASCII: &str = "function said(e) { return (e instanceof SyntaxError ? \"SyntaxError: \" : \"other: \") + e.message; }\n\
+class A { #ä() {} m(code) { try { eval(code); } catch (e) { return said(e); } return \"none\"; } }\n";
+
+/// `padUnits()`: the code units of the Strings of
+/// [`a_direct_eval_finds_a_name_outside_ascii_and_through_escapes`], set without a parse.
+static PAD_UNITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `padUnits()`: [`PAD_UNITS`].
+fn pad_units(
+    _cx: &mut swell::Cx<'_, TestHost>,
+    _call: swell::HostCall<'_>,
+) -> swell::Completion<Value> {
+    Ok(Value::Number(
+        PAD_UNITS.load(std::sync::atomic::Ordering::Relaxed) as f64,
+    ))
+}
+
+/// A direct `eval` names a private name an enclosing class declares by its StringValue
+/// (`#sec-static-semantics-stringvalue`), not by its source text: a name outside ASCII, in the
+/// BMP (`#ä`) and outside it (`#\u{2118F}`, an ID_Start code point of plane 2), is the refusal
+/// with that name in its message, and `#ö`, which no class declares, is the early `SyntaxError`;
+/// a name the class or the eval code writes with a Unicode escape (`#\u{61}`, `#\u{e4}`,
+/// `#\u{2118F}`) is the refusal of the same name. The lookup of a name outside ASCII
+/// (`dynamic_code.rs`, `enclosing_class_declares`) copies its UTF-16 units into a charged buffer:
+/// across the memory budget lowered by 8 bytes per run over that lookup, each run ends in the
+/// budget or answers the refusal, and `heap_bytes()` after the run and a collection equals its
+/// reading before (the default build).
+#[test]
+fn a_direct_eval_finds_a_name_outside_ascii_and_through_escapes() {
+    use std::sync::atomic::Ordering;
+    let astral = "\u{2118F}";
+    let script = format!(
+        "{NAMED_OUTSIDE_ASCII}\
+class B {{ #{astral}() {{}} m(code) {{ try {{ eval(code); }} catch (e) {{ return said(e); }} return \"none\"; }} }}\n\
+class E {{ #a() {{}} m(code) {{ try {{ eval(code); }} catch (e) {{ return said(e); }} return \"none\"; }} }}\n\
+class F {{ #\\u{{61}}() {{}} m(code) {{ try {{ eval(code); }} catch (e) {{ return said(e); }} return \"none\"; }} }}\n\
+var ca = new A(), cb = new B(), ce = new E(), cf = new F();\n\
+[ca.m(\"this.#ä\"), ca.m(\"this.#ö\"), ca.m(\"this.#\\\\u{{e4}}\"),\n\
+ cb.m(\"this.#{astral}\"), cb.m(\"this.#\\\\u{{2118F}}\"),\n\
+ ce.m(\"this.#\\\\u{{61}}\"), ce.m(\"this.#a\"), cf.m(\"this.#a\")].join(\"|\");"
+    );
+    let refused = |name: &str| {
+        format!(
+            "SyntaxError: private name {name} in direct eval code is not supported before slice 8 (1:6)"
+        )
+    };
+    let wanted = [
+        refused("#ä"),
+        "SyntaxError: private name #ö is not declared in an enclosing class (1:6)".to_string(),
+        refused("#ä"),
+        refused(&format!("#{astral}")),
+        refused(&format!("#{astral}")),
+        refused("#a"),
+        refused("#a"),
+        refused("#a"),
+    ];
+    let expected = Outcome::Normal(format!("\"{}\"", wanted.join("|")));
+    for text in [script.clone(), format!("\"use strict\";\n{script}")] {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let before = agent.refusals();
+        assert_eq!(eval_text(&mut agent, &r, &text), expected, "{text}");
+        assert_eq!(agent.refusals() - before, 7, "{text}");
+    }
+
+    // The budget across the lookup of `#ä`: Strings in `pads` leave a target room (from 2 KiB,
+    // 1 KiB more each round until a run answers), then each run makes `h`, a String of `u` code
+    // units, and the eval, for `u` from 0 up by 8 bytes until 8 runs in a row ended before the
+    // eval. In the default build only, as the other sweeps of this file: with a collection at
+    // every safe point its few hundred runs take seconds.
+    if cfg!(feature = "collect-every-safe-point") {
+        return;
+    }
+    let zero = Outcome::Normal("0".to_string());
+    let setup = format!(
+        "{NAMED_OUTSIDE_ASCII}var ca = new A(), started = 0, answer = \"\", pads = [];\n0;"
+    );
+    let base = {
+        let mut probe = agent().unwrap();
+        let r = realm(&mut probe);
+        assert_eq!(eval_text(&mut probe, &r, &setup), zero);
+        assert_eq!(
+            eval_text(
+                &mut probe,
+                &r,
+                "answer = ca.m(\"this.#ä\"); answer = \"\"; 0;"
+            ),
+            zero
+        );
+        assert!(matches!(probe.collect(), Ok(HostOutcome::Normal(_))));
+        probe.heap_bytes().unwrap()
+    };
+    let mut l = limits();
+    l.memory_bytes = base + (1 << 18);
+    let budget = l.memory_bytes;
+    let mut agent = agent_with(l).unwrap();
+    let r = realm(&mut agent);
+    support::script::define_function(&mut agent, &r, "padUnits", 0, pad_units, false);
+    assert_eq!(eval_text(&mut agent, &r, &setup), zero);
+    let scripts = [
+        "started = 0; (function () { var h = \"x\".repeat(padUnits()); started = 1; answer = ca.m(\"this.#ä\"); })(); 0;",
+        "started;",
+        "answer;",
+        "answer = \"\"; 0;",
+        "pads.push(\"x\".repeat(padUnits())); 0;",
+        "pads.pop(); 0;",
+    ]
+    .map(|source| parse(&mut agent, &r, source));
+    let [run, started, answer, clear, push, pop] = &scripts;
+    let go = |agent: &mut Agent<TestHost>, script: &swell::Script| {
+        let outcome = agent.evaluate_script(script).unwrap();
+        describe(agent, &r, outcome)
+    };
+    let set = |_: &mut Agent<TestHost>, units: u64| PAD_UNITS.store(units, Ordering::Relaxed);
+    let collect = |agent: &mut Agent<TestHost>| {
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    };
+    let refusal = Outcome::Normal(format!("\"{}\"", refused("#ä")));
+    for _ in 0..3 {
+        set(&mut agent, 0);
+        assert_eq!(go(&mut agent, run), zero);
+        assert_eq!(go(&mut agent, answer), refusal);
+        assert_eq!(go(&mut agent, clear), zero);
+        collect(&mut agent);
+    }
+    // The bytes a code unit of `"x".repeat` costs, after a first push grew `pads`: 8 bytes
+    // are `step` units.
+    set(&mut agent, 4096);
+    assert_eq!(go(&mut agent, push), zero);
+    assert_eq!(go(&mut agent, pop), zero);
+    collect(&mut agent);
+    let held = agent.heap_bytes().unwrap();
+    assert_eq!(go(&mut agent, push), zero);
+    collect(&mut agent);
+    let per_unit = (agent.heap_bytes().unwrap() - held).div_ceil(4096).max(1);
+    let step = (8 / per_unit).max(1);
+    assert_eq!(go(&mut agent, pop), zero);
+    collect(&mut agent);
+    let room_now = |agent: &Agent<TestHost>| budget.saturating_sub(agent.heap_bytes().unwrap());
+    let (mut target, mut answered, mut ended, mut rounds) = (2048u64, 0u32, 0u32, 0u32);
+    while answered == 0 && target < (32 << 10) {
+        rounds += 1;
+        while room_now(&agent) < target {
+            assert_eq!(go(&mut agent, pop), zero);
+            collect(&mut agent);
+        }
+        let mut shift = 0;
+        loop {
+            let room = room_now(&agent);
+            let units = (room.saturating_sub(target) / (4 * per_unit)) >> shift;
+            if room <= target + 64 || units == 0 {
+                break;
+            }
+            set(&mut agent, units);
+            if go(&mut agent, push) == zero {
+                shift = 0;
+            } else {
+                shift += 1;
+            }
+            collect(&mut agent);
+        }
+        set(&mut agent, 0);
+        collect(&mut agent);
+        let reading = agent.heap_bytes().unwrap();
+        let (mut u, mut before) = (0u64, 0u32);
+        while before < 8 {
+            set(&mut agent, u);
+            let outcome = go(&mut agent, run);
+            let began = go(&mut agent, started) == Outcome::Normal("1".to_string());
+            if outcome == zero {
+                assert_eq!(go(&mut agent, answer), refusal, "{target} {u}");
+                answered += 1;
+            } else {
+                assert_eq!(
+                    outcome,
+                    Outcome::Terminated(Termination::MemoryBudget),
+                    "{target} {u}"
+                );
+                assert_eq!(go(&mut agent, answer), Outcome::Normal("\"\"".to_string()));
+                if began {
+                    ended += 1;
+                } else {
+                    before += 1;
+                }
+            }
+            assert_eq!(go(&mut agent, clear), zero);
+            set(&mut agent, 0);
+            collect(&mut agent);
+            assert_eq!(
+                agent.heap_bytes().unwrap(),
+                reading,
+                "{target} {u}: {outcome:?}"
+            );
+            u += step;
+        }
+        target += 1024;
+    }
+    println!(
+        "{rounds} round(s), last target {}, {ended} runs ended in the eval, {answered} answered, {per_unit} byte(s) per unit",
+        target - 1024
+    );
+    assert!(ended > 0 && answered > 0, "{ended} {answered}");
+}
+
 /// A private method's [[HomeObject]] is the prototype, a static one's is F
 /// (`#sec-runtime-semantics-classelementevaluation`, MethodDefinitionEvaluation with `object`),
 /// so `super.x` inside an instance private method, getter or setter reads the prototype's
