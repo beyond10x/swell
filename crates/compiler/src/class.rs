@@ -43,24 +43,64 @@
 use swell_syntax::ast::{Class, ClassElement, ClassKey, Function, FunctionId, FunctionKind, Span};
 
 use crate::bytecode::Instruction;
-use crate::resolve::{ScopeKey, Site, property_key};
+use crate::resolve::{Binding, LexicalPlace, ScopeKey, Site, property_key};
 use crate::statement::leave_scope;
-use crate::{CompileError, Compiler, Task, Tasks, malformed};
+use crate::{CompileError, Compiler, Task, Tasks, ThisUse, malformed};
 
 /// The prologue of the template of the class constructor `id` (`#sec-ecmascript-function-objects-construct-argumentslist-newtarget`,
-/// InitializeInstanceElements before OrdinaryCallEvaluateBody): `This; InitInstance; Pop`
-/// before the parameters are bound, when its class has instance elements; nothing otherwise.
+/// InitializeInstanceElements before OrdinaryCallEvaluateBody): of a derived constructor the
+/// hidden binding `this` made uninitialized, in its local or record form, before the parameters
+/// are bound (`docs/design/engine.md`, "Classes", item 6: `constructor(a = super())` binds it in
+/// a parameter's initializer), its instance elements initialized after each SuperCall instead;
+/// of a base one `This; InitInstance; Pop` when its class has instance elements; nothing
+/// otherwise.
 pub(crate) fn constructor_prologue(
     c: &mut Compiler<'_, '_>,
     id: FunctionId,
     span: Span,
 ) -> Result<(), CompileError> {
+    if c.derived {
+        let uninitialize = match c.binding(Site::This(id))? {
+            Binding::Lexical {
+                at: LexicalPlace::Local(slot),
+                ..
+            } => Instruction::Uninitialize(slot),
+            Binding::Lexical {
+                at: LexicalPlace::Env { hops, slot },
+                ..
+            } => Instruction::UninitializeEnv { hops, slot },
+            _ => return Err(malformed("the `this` binding of a derived constructor")),
+        };
+        return c.emit(uninitialize, span);
+    }
     if !c.resolution.instance_elements.contains(&id) {
         return Ok(());
     }
     c.emit(Instruction::This, span)?;
     c.emit(Instruction::InitInstance, span)?;
     c.emit(Instruction::Pop, span)
+}
+
+/// The code of the default constructor of a class with a heritage (`docs/design/engine.md`,
+/// "Classes", item 7; ClassDefinitionEvaluation, step 14.a, the default constructor's
+/// [[Construct]] behaviour): its template keeps its arguments (`binds_parameters` with no
+/// parameter), which follow its `locals` own slots; `GetSuperConstructor`, `SuperCallKept`
+/// of those slots, which passes them on with no iterator read, `BindThis`, the instance
+/// elements initialized (`Dup; InitInstance; Pop`), then `KeepThis; Return`. Its prologue made
+/// the binding uninitialized ([`constructor_prologue`]).
+pub(crate) fn default_derived_constructor(
+    c: &mut Compiler<'_, '_>,
+    locals: u32,
+    span: Span,
+) -> Result<(), CompileError> {
+    c.emit(Instruction::GetSuperConstructor, span)?;
+    c.emit(Instruction::SuperCallKept(locals), span)?;
+    let bind = c.this_instruction(ThisUse::Bind)?;
+    c.emit(bind, span)?;
+    c.emit(Instruction::Dup, span)?;
+    c.emit(Instruction::InitInstance, span)?;
+    c.emit(Instruction::Pop, span)?;
+    c.emit_return(span)
 }
 
 /// The code of the initializer of a class's instance elements, the `FieldInitializer` template
@@ -102,10 +142,6 @@ impl<'a, 'm> Compiler<'a, 'm> {
         span: Span,
         t: &mut Tasks<'_, '_>,
     ) -> Result<(), CompileError> {
-        // The parse holds a heritage back (`swell_syntax::HOLDS`): `story:derived-classes-and-super-call`.
-        if class.heritage.is_some() {
-            return Err(malformed("a class heritage"));
-        }
         let ctor = class.constructor;
         // All parts of a class are strict mode code (`#sec-strict-mode-code`): in non-strict
         // code the class's code is enclosed by `SetStrict(true)` and `SetStrict(false)`; a
@@ -114,16 +150,19 @@ impl<'a, 'm> Compiler<'a, 'm> {
         if !enclosing {
             t.push(Task::Strict(true, span))?;
         }
-        // Step 1, steps 1 to 6 of the clause: the class scope. The heritage, evaluated in it
-        // (`story:derived-classes-and-super-call`), goes after it and before the prototype,
-        // inside the class's strict code.
+        // Step 1, steps 1 to 6 of the clause: the class scope.
         let record = self.enter_scope(ScopeKey::Class(ctor), span, t)?;
-        // Step 2, steps 7 to 19: the prototype, then F with `prototype` and `constructor`.
-        t.push(Task::Emit(Instruction::ClassPrototype, span))?;
+        // Step 2, steps 7 to 19: the prototype (after the heritage, evaluated in the class
+        // scope, inside the class's strict code), then F with `prototype` and `constructor`.
+        let derived = class.heritage.is_some();
+        match class.heritage {
+            Some(heritage) => self.class_heritage(heritage, span, t)?,
+            None => t.push(Task::Emit(Instruction::ClassPrototype, span))?,
+        }
         t.push(Task::Emit(
             Instruction::MakeClassConstructor {
                 function: ctor.0,
-                derived: false,
+                derived,
             },
             span,
         ))?;
@@ -165,6 +204,22 @@ impl<'a, 'm> Compiler<'a, 'm> {
             t.push(Task::Strict(false, span))?;
         }
         Ok(())
+    }
+
+    /// ClassHeritage of ClassDefinitionEvaluation (`#sec-runtime-semantics-classdefinitionevaluation`,
+    /// steps 8.a to 8.h and 10), in the class scope: the expression `heritage`, then
+    /// [`Instruction::ClassHeritage`], which checks the parent (`null`, or a constructor whose
+    /// `prototype` is an object or `null`) and leaves constructorParent under the prototype it
+    /// makes from protoParent; `MakeClassConstructor { derived: true }` takes the first for F.
+    fn class_heritage(
+        &mut self,
+        heritage: swell_syntax::ast::ExprId,
+        span: Span,
+        t: &mut Tasks<'_, '_>,
+    ) -> Result<(), CompileError> {
+        let at = self.ast.expr(heritage).map_or(span, |x| x.span);
+        t.push(Task::Expr(heritage))?;
+        t.push(Task::Emit(Instruction::ClassHeritage, at))
     }
 
     /// The instruction that initializes the binding of `site` through its plain place: a slot

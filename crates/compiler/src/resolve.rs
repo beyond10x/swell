@@ -179,6 +179,12 @@ pub(crate) enum Site {
     /// The class's own name in its class scope, by the class's constructor, which step 4 of
     /// ClassDefinitionEvaluation initializes with F (`class.rs`).
     ClassName(FunctionId),
+    /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
+    /// item 6), from the top of the function: the constructor itself, or an arrow function whose
+    /// nearest function that is not an arrow function is one (or eval code whose context has
+    /// inDerivedConstructor). Every access is checked; the compiler adds the environments the
+    /// function's code pushed to its hops (`Compiler::this_instruction`).
+    This(FunctionId),
 }
 
 /// Where a name resolves to, from one site.
@@ -263,6 +269,15 @@ pub(crate) struct Resolution {
     /// a computed key of an object literal. Their class code names F right after it is made
     /// ([`crate::bytecode::Instruction::SetClassName`]).
     pub named_by_key: BTreeSet<FunctionId>,
+    /// The constructors of the classes with a heritage: each has the hidden binding `this`
+    /// ([`Site::This`]) and returns by the derived rule (`class.rs`).
+    pub derived_constructors: BTreeSet<FunctionId>,
+    /// Those of [`Resolution::derived_constructors`] that are the default one the parser made:
+    /// their template is `default_derived_constructor` (`class.rs`).
+    pub default_derived_constructors: BTreeSet<FunctionId>,
+    /// Of eval code whose context has inDerivedConstructor: `this` at its top is the binding
+    /// `this` looked up by name, as in its arrow functions.
+    pub this_by_name: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -380,16 +395,28 @@ struct Resolver<'a, 'm> {
     instance_elements: BTreeSet<FunctionId>,
     /// [`Resolution::named_by_key`].
     named_by_key: BTreeSet<FunctionId>,
+    /// [`Resolution::derived_constructors`].
+    derived_constructors: BTreeSet<FunctionId>,
+    /// [`Resolution::default_derived_constructors`].
+    default_derived_constructors: BTreeSet<FunctionId>,
+    /// [`Resolution::this_by_name`].
+    this_by_name: bool,
+    /// The arrow functions whose `this` is the binding `this` of a derived constructor or of
+    /// eval code with inDerivedConstructor, each found from the function around it, so no walk
+    /// over the scopes is made per arrow.
+    this_arrows: BTreeSet<FunctionId>,
 }
 
 fn malformed(what: &str) -> CompileError {
     CompileError::Tree(what.to_string())
 }
 
-/// Resolves every name of `script`; of eval code when `eval_code` is true.
+/// Resolves every name of `script`; of eval code when `eval_code` is true, whose context has
+/// inDerivedConstructor when `this_by_name` is ([`Resolution::this_by_name`]).
 pub(crate) fn resolve(
     script: &Script,
     eval_code: bool,
+    this_by_name: bool,
     m: &Meter<'_>,
 ) -> Result<Resolution, CompileError> {
     let mut scopes = m.with_capacity(1)?;
@@ -422,6 +449,10 @@ pub(crate) fn resolve(
         checked_locals: BTreeSet::new(),
         instance_elements: BTreeSet::new(),
         named_by_key: BTreeSet::new(),
+        derived_constructors: BTreeSet::new(),
+        default_derived_constructors: BTreeSet::new(),
+        this_by_name: eval_code && this_by_name,
+        this_arrows: BTreeSet::new(),
     };
     let resolution = resolve_with(&mut r, script, eval_code);
     // The resolver's own structures are dropped with it; on a stop the compile step credits
@@ -506,6 +537,9 @@ fn resolve_with(
         eval_env,
         instance_elements: core::mem::take(&mut r.instance_elements),
         named_by_key: core::mem::take(&mut r.named_by_key),
+        derived_constructors: core::mem::take(&mut r.derived_constructors),
+        default_derived_constructors: core::mem::take(&mut r.default_derived_constructors),
+        this_by_name: r.this_by_name,
     })
 }
 
@@ -595,7 +629,12 @@ impl<'a, 'm> Resolver<'a, 'm> {
             .bindings
             .len()
             .saturating_mul(map_entry_bytes::<usize, ()>());
+        let this_arrows = self
+            .this_arrows
+            .len()
+            .saturating_mul(map_entry_bytes::<FunctionId, ()>());
         capacity(&self.work)
+            .saturating_add(this_arrows)
             .saturating_add(occurrences)
             .saturating_add(bindings)
             .saturating_add(scopes)
@@ -1127,6 +1166,13 @@ impl<'a, 'm> Resolver<'a, 'm> {
         if instance {
             self.m.insert(&mut self.instance_elements, ctor)?;
         }
+        if class.heritage.is_some() {
+            self.m.insert(&mut self.derived_constructors, ctor)?;
+            if class.default_constructor {
+                self.m
+                    .insert(&mut self.default_derived_constructors, ctor)?;
+            }
+        }
         // The children, pushed last first: the scope is left after them.
         let mut children: Vec<Walk> = self
             .m
@@ -1510,8 +1556,10 @@ impl<'a, 'm> Resolver<'a, 'm> {
             self.m.insert_entry(&mut self.self_scopes, id, scope)?;
             self.work.push(Walk::Leave);
         }
+        let outer = self.scopes.get(self.current).and_then(|s| s.owner);
         let scope = self.new_scope(Kind::Function, Some(id));
         self.m.insert_entry(&mut self.function_scopes, id, scope)?;
+        self.this_binding(id, f.kind, outer, scope)?;
         let simple = f.is_simple();
         for (i, p) in f.params.iter().enumerate() {
             // A parameter of a list that is not simple is initialized in order: an access
@@ -1557,6 +1605,47 @@ impl<'a, 'm> Resolver<'a, 'm> {
                 self.give_name(g, name)?;
             }
             self.work.push(Walk::Expr(e));
+        }
+        Ok(())
+    }
+
+    /// The hidden binding `this` of a derived constructor (`docs/design/engine.md`, "Classes",
+    /// item 6), in the function scope `scope` of `id`, whose kind is `kind` and which stands in
+    /// the code of the function `outer` (`None` for the top): declared in the scope of a derived
+    /// constructor, a `let`-like binding every access checks, and its site [`Site::This`] in
+    /// that scope; an arrow function whose `outer` is a derived constructor, or another such
+    /// arrow, or the top of eval code with inDerivedConstructor, gets only the site, which
+    /// reaches the binding through its environments, or by name from eval code. A binding an
+    /// arrow or a direct `eval` reaches lives in the function environment by the rules that
+    /// place every binding.
+    fn this_binding(
+        &mut self,
+        id: FunctionId,
+        kind: FunctionKind,
+        outer: Option<FunctionId>,
+        scope: usize,
+    ) -> Result<(), CompileError> {
+        if self.derived_constructors.contains(&id) {
+            let data = LexicalData {
+                constant: false,
+                end: u32::MAX,
+            };
+            self.declare_as(scope, "this", Some(data));
+            self.occur(Site::This(id), "this");
+            return Ok(());
+        }
+        if kind != FunctionKind::Arrow {
+            return Ok(());
+        }
+        let derived = match outer {
+            None => self.this_by_name,
+            Some(outer) => {
+                self.derived_constructors.contains(&outer) || self.this_arrows.contains(&outer)
+            }
+        };
+        if derived {
+            self.m.insert(&mut self.this_arrows, id)?;
+            self.occur(Site::This(id), "this");
         }
         Ok(())
     }

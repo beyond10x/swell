@@ -316,31 +316,24 @@ fn held_sources_answer_their_first_construct_still_held() {
     );
 }
 
-/// The hold `class heritage` is answered at its `extends`, the first one of the source, as
-/// long as it is a line of `HOLDS`.
+/// A ClassHeritage parses wherever its `extends` stands, in a declaration and in an
+/// expression, and a heritage is no line of `HOLDS` (`story:derived-classes-and-super-call`).
 #[test]
-fn the_heritage_hold_stands_at_extends() {
-    if !swell_syntax::HOLDS
-        .iter()
-        .any(|(c, _)| *c == "class heritage")
-    {
-        return;
-    }
-    for (text, at) in [
-        ("class A\n  extends B {}", (2, 3)),
-        ("x = class\n  extends B {};", (2, 3)),
-        ("class A {}\nclass B extends C {}", (2, 9)),
-        ("x = class extends (class {}) {};", (1, 11)),
+fn the_heritage_parses_at_extends() {
+    assert!(
+        !swell_syntax::HOLDS
+            .iter()
+            .any(|(c, _)| *c == "class heritage")
+    );
+    for text in [
+        "class A\n  extends B {}",
+        "x = class\n  extends B {};",
+        "class A {}\nclass B extends C {}",
+        "x = class extends (class {}) {};",
     ] {
-        let errors = parse(text)
-            .err()
-            .unwrap_or_else(|| panic!("{text:?}: parsed"));
-        assert_eq!(
-            messages(&errors),
-            vec!["class heritage is not supported before slice 8".to_string()],
-            "{text:?}"
-        );
-        assert_eq!((errors[0].line, errors[0].column), at, "{text:?}");
+        if let Err(errors) = parse(text) {
+            panic!("{text:?}: {:?}", messages(&errors));
+        }
     }
 }
 
@@ -758,8 +751,8 @@ fn message_kind_tells_refusals_from_early_errors() {
 /// Every source under `eval/` is eval code: parsed through `parse_eval` as the code of a
 /// non-strict caller with no flag set (`#sec-performeval`, step 9), it answers its header:
 /// `parses`, `SyntaxError "<message>"` (the first error) or `refused "<message>"` (the one
-/// error). The tests of scripts do not read these sources: `super.x` at the top of a script is
-/// an early error, at the top of eval code a refusal (`story:super-property-and-super-syntax`).
+/// error). The tests of scripts do not read these sources: what they show is the answer of eval
+/// code, whose flags (`EvalContext`) decide what a script cannot state.
 #[test]
 fn eval_sources_answer_their_header() {
     let options = ParseOptions { max_nesting: LIMIT };
@@ -791,10 +784,11 @@ fn eval_sources_answer_their_header() {
 }
 
 /// `parse_script` parses a script, never eval code of a caller with every flag false: at the top
-/// of a script `super.x` is the early error of `#sec-scripts-static-semantics-early-errors`,
-/// while at the top of such eval code it is the refusal of slice 8; `new.target` is the early
-/// error of its own rule through both entries, and admitted in eval code only with
-/// `in_function`.
+/// of a script and of such eval code `super.x` is the early error of
+/// `#sec-scripts-static-semantics-early-errors` (PerformEval, steps 7 to 11: no flag of the
+/// context is set); with `in_method` eval code admits a SuperProperty and not a SuperCall, with
+/// `in_derived_constructor` both; `new.target` is the early error of its own rule through both
+/// entries, and admitted in eval code only with `in_function`.
 #[test]
 fn a_script_is_not_parsed_as_eval_code() {
     let options = ParseOptions { max_nesting: LIMIT };
@@ -803,14 +797,40 @@ fn a_script_is_not_parsed_as_eval_code() {
     };
     let script = |text: &str| parse(text).map(|_| ()).map_err(|errors| messages(&errors));
     let super_property = vec!["super property outside a method".to_string()];
+    let super_call = vec!["super call outside a derived class constructor".to_string()];
     let new_target = vec!["new.target outside a function".to_string()];
     assert_eq!(script("super.x;"), Err(super_property.clone()));
     assert_eq!(script("new.target;"), Err(new_target.clone()));
     assert_eq!(
         eval("super.x;", EvalContext::from(false)).map(|_| ()),
-        Err(vec![
-            "super in eval code is not supported before slice 8".to_string()
-        ])
+        Err(super_property.clone())
+    );
+    let in_method = EvalContext {
+        in_function: true,
+        in_method: true,
+        ..EvalContext::from(false)
+    };
+    let in_derived_constructor = EvalContext {
+        in_derived_constructor: true,
+        ..in_method
+    };
+    assert!(eval("super.x; () => super.y;", in_method).is_ok());
+    assert_eq!(
+        eval("super();", in_method).map(|_| ()),
+        Err(super_call.clone())
+    );
+    assert!(eval("super(); super.x; () => super();", in_derived_constructor).is_ok());
+    assert_eq!(
+        eval("super();", EvalContext::from(false)).map(|_| ()),
+        Err(super_call)
+    );
+    assert_eq!(
+        eval(
+            "({ m() { super.x; } }); function f() { super.x; }",
+            in_derived_constructor
+        )
+        .map(|_| ()),
+        Err(super_property.clone())
     );
     assert_eq!(
         eval("new.target;", EvalContext::from(false)).map(|_| ()),

@@ -1258,12 +1258,13 @@ impl<'a, 'm> Parser<'a, 'm> {
 
     /// Whether the `super` at the current token stands here, and as what (`#sec-super-keyword`):
     /// followed by `.` or `[` a SuperProperty, by `(` a SuperCall, by anything else a grammar
-    /// error. A SuperCall is an early error (no derived constructor is parsed before slice 8,
-    /// `#sec-method-definitions-static-semantics-early-errors`), and so is a SuperProperty where
-    /// the nearest function that is not an arrow function is no MethodDefinition
+    /// error. A SuperCall is an early error outside the constructor of a class with a heritage
+    /// (`#sec-class-definitions-static-semantics-early-errors`,
+    /// `#sec-method-definitions-static-semantics-early-errors`), and a SuperProperty where the
+    /// nearest function that is not an arrow function is no MethodDefinition
     /// (`#sec-function-definitions-static-semantics-early-errors`,
-    /// `#sec-scripts-static-semantics-early-errors`); in an arrow function in a method and in
-    /// eval code outside a function of its own `super` is refused before slice 8.
+    /// `#sec-scripts-static-semantics-early-errors`); an arrow function and eval code take the
+    /// answer of the code around them ([`SuperProperty`]).
     #[inline(never)]
     fn super_admitted(&mut self) -> R<ExprParser<'a, 'm>> {
         let start = self.start();
@@ -1273,21 +1274,11 @@ impl<'a, 'm> Parser<'a, 'm> {
             _ => return self.unexpected(),
         };
         match self.super_property {
-            SuperProperty::Eval => self.refuse_at("super in eval code", 8, start),
+            SuperProperty::DerivedConstructor => Ok(Parser::super_expression),
             _ if call => self.fail_at(SUPER_CALL, start),
             SuperProperty::Outside => self.fail_at(SUPER_PROPERTY, start),
-            SuperProperty::Arrow => self.refuse_super_in_arrow(start),
             SuperProperty::Method => Ok(Parser::super_expression),
         }
-    }
-
-    /// The refusal of `super` in an arrow function whose nearest function that is not an arrow
-    /// function is a method, at `at`: `story:derived-classes-and-super-call` gives such an arrow
-    /// the function of its code (`docs/design/engine.md`, decision 3, "`this` and `arguments` in
-    /// an arrow function", item 4).
-    #[inline(never)]
-    pub(super) fn refuse_super_in_arrow<T>(&mut self, at: Span) -> R<T> {
-        self.refuse_at("super in an arrow function", 8, at)
     }
 
     /// `super . IdentifierName`, `super [ Expression ]` or `super Arguments` at the current

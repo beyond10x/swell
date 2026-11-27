@@ -131,8 +131,9 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// (`#sec-generator-function-definitions`, `#sec-async-function-definitions`,
     /// `#sec-function-definitions`, `#sec-method-definitions`), and `new.target` admitted, as in
     /// every function that is not an arrow function (`#sec-scripts-static-semantics-early-errors`),
-    /// and the SuperProperty flag of its kind ([`super_property_of`]). [`Parser::function_end`]
-    /// puts the saved ones back.
+    /// and the SuperProperty flag of its kind ([`super_property_of`]), or with a SuperCall when
+    /// `id` is the written constructor of a class with a heritage (`derived_constructor`, set by
+    /// `parser/class.rs`). [`Parser::function_end`] puts the saved ones back.
     #[inline(never)]
     fn open_context(&mut self, id: FunctionId) -> R<()> {
         let (generator, asynchronous, kind) = self
@@ -143,7 +144,11 @@ impl<'a, 'm> Parser<'a, 'm> {
             });
         self.save_context(generator, asynchronous)?;
         self.new_target = true;
-        self.super_property = super_property_of(kind);
+        self.super_property = if self.derived_constructor.take() == Some(id) {
+            SuperProperty::DerivedConstructor
+        } else {
+            super_property_of(kind)
+        };
         Ok(())
     }
 
@@ -458,11 +463,6 @@ impl<'a, 'm> Parser<'a, 'm> {
         if self.tok.newline_before {
             return self.fail_here(LINE_TERMINATOR_BEFORE_ARROW);
         }
-        if self.super_property == SuperProperty::Method
-            && let Some(at) = self.super_in_cover(start)
-        {
-            return self.refuse_super_in_arrow(at);
-        }
         let asynchronous = self.is_async_head(left, start);
         let (params, initializers, rest) = self.arrow_parameters(left, asynchronous)?;
         self.advance()?;
@@ -480,22 +480,6 @@ impl<'a, 'm> Parser<'a, 'm> {
             }
         }
         Ok(id)
-    }
-
-    /// Where a SuperProperty stands among the nodes read from `start` on, the operand before
-    /// the `=>` of an arrow function in a method, read in the method's code before it was known
-    /// to be the arrow's parameters: the nodes the parser made since its first token, the last
-    /// ones of the arena. A SuperProperty of a method nested in a parameter's initializer is
-    /// found too, and the arrow refused with it.
-    #[inline(never)]
-    fn super_in_cover(&self, start: Span) -> Option<Span> {
-        self.ast
-            .exprs
-            .iter()
-            .rev()
-            .take_while(|n| n.span.start >= start.start)
-            .find(|n| matches!(n.expr, Expr::SuperMember(_)))
-            .map(|n| n.span)
     }
 
     /// Whether the operand `left` before `=>`, whose `AssignmentExpression` started at `start`,
@@ -820,16 +804,15 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// Saves the [Yield] and [Await] around the body of the arrow function `id` and sets its
-    /// own: [Yield] cleared, [Await] set when it is an `async` arrow function. Not inlined, so
-    /// that the look at the function stays out of the frame of [`Parser::arrow_body`].
+    /// own: [Yield] cleared, [Await] set when it is an `async` arrow function. `new.target` and
+    /// the SuperProperty flag stay those of the code around it, the flag with its SuperCall
+    /// (`#sec-arrow-function-definitions-static-semantics-early-errors`: an arrow's `super` is
+    /// that of the nearest function that is not an arrow function). Not inlined, so that the
+    /// look at the function stays out of the frame of [`Parser::arrow_body`].
     #[inline(never)]
     fn open_arrow_body(&mut self, id: FunctionId) -> R<()> {
         let asynchronous = self.ast.function(id).is_some_and(|f| f.asynchronous);
-        self.save_context(false, asynchronous)?;
-        if self.super_property == SuperProperty::Method {
-            self.super_property = SuperProperty::Arrow;
-        }
-        Ok(())
+        self.save_context(false, asynchronous)
     }
 
     /// The body of the arrow function `id` from its `ExpressionBody` `e`: one `return`
@@ -854,9 +837,9 @@ impl<'a, 'm> Parser<'a, 'm> {
 /// Initializer and a ClassStaticBlockStatementList may not contain a SuperCall and may contain a
 /// SuperProperty; both are functions with a [[HomeObject]], ClassFieldDefinitionEvaluation and
 /// ClassStaticBlockDefinitionEvaluation); cleared for every other
-/// (`#sec-function-definitions-static-semantics-early-errors`). A SuperCall is decided apart
-/// ([`Parser::super_admitted`]). Every kind is listed, so a new kind does not compile until it
-/// is placed here.
+/// (`#sec-function-definitions-static-semantics-early-errors`). The constructor of a class with
+/// a heritage gets [`SuperProperty::DerivedConstructor`] instead ([`Parser::open_context`]).
+/// Every kind is listed, so a new kind does not compile until it is placed here.
 fn super_property_of(kind: FunctionKind) -> SuperProperty {
     match kind {
         FunctionKind::Method

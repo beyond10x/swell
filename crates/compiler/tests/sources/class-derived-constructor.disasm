@@ -1,0 +1,47 @@
+script locals 1
+  lexical let "B"
+  0000 2:1 SetStrict true
+  0001 2:17 GetGlobal "A"
+  0002 2:17 ClassHeritage
+  0003 2:1 MakeClassConstructor 0 derived
+  0004 2:1 SetLocal 0
+  0005 2:1 Nip 1
+  0006 2:1 SetStrict false
+  0007 2:1 InitGlobal "B"
+  0008 2:1 Pop
+  0009 0:0 LoadCompletion
+  0010 0:0 Return
+
+function 0 class constructor "B" length 1 locals 3 strict binds-parameters
+  params local 1, local 2
+  0000 2:1 Uninitialize 0
+  0001 2:33 Argument 3
+  0002 2:33 SetLocal 1
+  0003 2:33 Pop
+  0004 2:39 RestArguments 4
+  0005 2:39 SetLocal 2
+  0006 2:39 Pop
+  0007 2:44 GetSuperConstructor
+  0008 2:44 NewArray
+  0009 2:50 GetLocal 1
+  0010 2:50 ArrayAppend
+  0011 2:56 GetLocal 2
+  0012 2:56 SpreadArray
+  0013 2:44 SuperCallSpread
+  0014 2:44 BindThis 0
+  0015 2:44 Dup
+  0016 2:44 InitInstance
+  0017 2:44 Pop
+  0018 2:44 Pop
+  0019 2:60 GetLocalChecked 0 "this"
+  0020 2:69 GetLocal 1
+  0021 2:60 PutNamed "y"
+  0022 2:60 Pop
+  0023 2:76 GetLocal 1
+  0024 2:72 JumpIfFalse 0028
+  0025 2:79 Undefined
+  0026 2:79 KeepThis 0
+  0027 2:79 Return
+  0028 2:1 Undefined
+  0029 2:1 KeepThis 0
+  0030 2:1 Return
