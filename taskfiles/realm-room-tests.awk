@@ -10,15 +10,30 @@
 # The rule. A function reads the realm's room when its text names heap_bytes( or live_bytes(,
 # or, in a test file (not a helper file), memory_bytes or MemoryBudget: the readings a room is
 # taken from and the budget a room is cut from. A function also reads it when it names one that
-# does, a function of its own file or of the helper files: by its name followed by "(" (a
-# call), or by its bare name where a value stands, after "=", "(" or "," and before ")", ","
-# or ";" (a function pointer, as in on_bounded_stack(..., body) or let f: fn() = run;), unless
-# the function binds that name itself (let, for, a match pattern, a parameter, a closure's
-# parameter). A path names the function of the module it names (crate::other::run() is run of
-# other.rs); otherwise a function of its own file is taken before a helper of the same name. A
-# name defined more than once in a file (a nested fn and a later top-level fn, a fn in a mod and
-# one outside) is one function whose text is that of every definition, so the rule marks it
-# when any of them reads the room, and a test is printed once. The default budget that
+# does, a function of its own file or of the helper files: by its name followed by "(" or "::<"
+# (a call, with a turbofish of any depth), or by its bare name where a value stands, after "=",
+# "(", ",", "[" or a single ":" and before ")", ",", ";", "]" or "}" (a function pointer, as in
+# on_bounded_stack(..., body), let f: fn() = run;, [run, plain] or Case { body: run }), unless
+# the function binds that name itself (let, for, a match pattern, a parameter of a fn, a
+# closure's parameter; a field of a struct and a comment bind nothing), and not inside a string
+# literal or a comment. A path names the function of the module it names (crate::other::run()
+# is run of other.rs, crate::support::host::run() is run of the helper files); otherwise a
+# function of its own file is taken before a helper of the same name. A fn may be pub, pub(...),
+# const, async, unsafe or extern "...". A name defined more than once in a file (a nested fn and
+# a later top-level fn, a fn in a mod and one outside) is one function whose text is that of
+# every definition, so the rule marks it when any of them reads the room, and a test is printed
+# once. Each definition's lines are read once and count for every function that holds it.
+#
+# Forms the rule does not read: a function reached only through one of them is not marked.
+# - a helper imported by use: use crate::other::run; and then run();
+# - a helper imported under another name: use ... as go; and then go();
+# - a const or static function pointer: const DEEP: fn() = run; and then DEEP();
+# - a function pointer made by a cast: &(run as fn()).
+# For the stack rule the guard of slow-tests catches each of them at run time: the run at
+# opt-level 1 sets SWELL_NO_STACK_TESTS, and stack_with_room and stack_thread of
+# crates/swell/tests/support (the only ways to a bounded stack) panic when it is set.
+#
+# The default budget that
 # support::host::limits sets for every agent (memory_bytes 64 MiB) does not count by itself: it
 # is far above any realm, and the padding moves it only as it moves every reading, which a test
 # sees only through one of the names above. A function's text is its lines up to the next line
@@ -42,7 +57,9 @@
 # "other <module>::<test>". A stack test proves the stack the limits promise with frames whose
 # size depends on the optimization level, so slow-tests runs the tests printed "stack" (and
 # those not printed at all) in the test profile at opt-level 0, and those printed "other" at
-# opt-level 1.
+# opt-level 1. A test whose attributes hold #[cfg(not(feature = "collect-every-safe-point"))]
+# is not in the collect build; its line ends in " not-in-collect", so that slow-tests counts
+# what runs.
 function flush() {
   if (cur != "") {
     occ++
@@ -50,21 +67,23 @@ function flush() {
     occname[occ] = cur
     occparent[occ] = curparent
     occtest[occ] = istest
+    occgone[occ] = curgone
   }
-  cur = ""; body = ""; istest = 0; curparent = 0
+  cur = ""; body = ""; istest = 0; curparent = 0; curgone = 0
 }
 function indent(line) {
   match(line, /^[ \t]*/)
   return RLENGTH
 }
-# bound(t, n): the text t binds the name n itself (a let, a for or a match pattern, a parameter
-# or a typed name, a closure's parameter), so a bare n in t is that binding, not the function n.
+# bound(t, n): the text t (its comments left out) binds the name n itself (a let, a for or a
+# match pattern, a parameter of a fn, a closure's parameter), so a bare n in t is that binding,
+# not the function n. A field n: of a struct is no binding.
 function bound(t, n,   w) {
   w = "[^A-Za-z0-9_]"
   return t ~ ("(^|" w ")let" w "([^=;]*" w ")?" n w "[^=;]*=") ||
     t ~ ("(^|" w ")for" w "([^;{]*" w ")?" n w "([^;{]*" w ")?in" w) ||
     t ~ (w n w "[^=;{}]*=>") ||
-    t ~ ("(^|[^A-Za-z0-9_:])" n "[ \t]*:([^:]|$)") ||
+    t ~ ("(^|" w ")fn[ \t]+[A-Za-z_][A-Za-z0-9_]*[^(]*\\(([^)]*" w ")?" n "[ \t]*:") ||
     t ~ ("\\|([^|]*[^A-Za-z0-9_|])?" n "[ \t]*(:[^|]*)?\\|")
 }
 FNR == 1 {
@@ -73,6 +92,7 @@ FNR == 1 {
   if (scope ~ /(^|\/)support\/[^\/]*$/) scope = "support"
   else { sub(/^.*\//, "", scope); sub(/\.rs$/, "", scope) }
   pending = 0
+  gone = 0
   depth = 0
 }
 /^[ \t]*}/ {
@@ -80,14 +100,18 @@ FNR == 1 {
   while (depth > 0 && openind[depth] >= at) depth--
 }
 /^[ \t]*#\[test\]/ { pending = 1 }
-/^[ \t]*(pub(\([a-z]+\))? )?(const )?(async )?(unsafe )?fn [A-Za-z_]/ {
+/^[ \t]*#\[cfg\(not\(feature = "collect-every-safe-point"\)\)\]/ { gone = 1 }
+!/^[ \t]*(#\[|\/\/|$)/ && !/^[ \t]*(pub(\([^)]*\))? )?(const )?(async )?(unsafe )?(extern ("[^"]*" )?)?fn [A-Za-z_]/ { gone = 0 }
+/^[ \t]*(pub(\([^)]*\))? )?(const )?(async )?(unsafe )?(extern ("[^"]*" )?)?fn [A-Za-z_]/ {
   flush()
   name = $0
-  sub(/^[ \t]*(pub(\([a-z]+\))? )?(const )?(async )?(unsafe )?fn /, "", name)
+  sub(/^[ \t]*(pub(\([^)]*\))? )?(const )?(async )?(unsafe )?(extern ("[^"]*" )?)?fn /, "", name)
   sub(/[^A-Za-z0-9_].*$/, "", name)
   cur = scope ":" name
   istest = pending
+  curgone = gone
   pending = 0
+  gone = 0
   at = indent($0)
   while (depth > 0 && openind[depth] >= at) depth--
   curparent = (depth > 0) ? openocc[depth] : 0
@@ -95,14 +119,15 @@ FNR == 1 {
   openind[depth] = at
   openocc[depth] = occ + 1
 }
-/^[ \t]*(pub(\([a-z]+\))? )?fn \$/ { flush(); pending = 0 }
+/^[ \t]*(pub(\([^)]*\))? )?fn \$/ { flush(); pending = 0; gone = 0 }
 { if (cur != "") body = body "\n" $0 }
 END {
   flush()
+  for (o = 1; o <= occ; o++) own[o] = occtext[o]
   for (o = occ; o >= 1; o--) if (occparent[o]) occtext[occparent[o]] = occtext[occparent[o]] occtext[o]
   for (o = 1; o <= occ; o++) {
     text[occname[o]] = text[occname[o]] occtext[o]
-    if (occtest[o] && !(occname[o] in listed)) { listed[occname[o]] = 1; ntest++; tests[ntest] = occname[o] }
+    if (occtest[o] && !(occname[o] in listed)) { listed[occname[o]] = 1; ntest++; tests[ntest] = occname[o]; testgone[ntest] = occgone[o] }
   }
   for (f in text) {
     s = substr(f, 1, index(f, ":") - 1)
@@ -110,25 +135,63 @@ END {
       marked[f] = 1
       queue[++tail] = f
     }
-    rest = text[f]
-    gsub(/(^|[^A-Za-z0-9_])fn[ \t]+[A-Za-z_][A-Za-z0-9_]*/, " ", rest)
+  }
+  # Each definition's own lines are read once; a function they name counts for the definition's
+  # function and for every function that holds it. A line is read with the last character of the
+  # line before it and the first of the line after it, so that a value whose "," or ")" stands
+  # on another line is read as on one line.
+  for (o = 1; o <= occ; o++) fname[substr(occname[o], index(occname[o], ":") + 1)] = 1
+  for (o = 1; o <= occ; o++) {
+    s = substr(occname[o], 1, index(occname[o], ":") - 1)
+    all = own[o]
+    gsub(/(^|[^A-Za-z0-9_])fn[ \t]+[A-Za-z_][A-Za-z0-9_]*/, " ", all)
+    nl = split(all, line, "\n")
     seen = " "
-    while (match(rest, /([A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*(::<[^>]*>)?\(|[=(,][ \t\n]*([A-Za-z_][A-Za-z0-9_]*::)*[A-Za-z_][A-Za-z0-9_]*[ \t\n]*[),;]/)) {
-      name = substr(rest, RSTART, RLENGTH)
-      rest = substr(rest, RSTART + RLENGTH - 1)
-      call = name ~ /\($/
-      sub(/^[=(,][ \t\n]*/, "", name)
-      sub(/(::<.*)?[ \t\n]*[),;(]$/, "", name)
-      if (index(seen, " " call name " ")) continue
-      seen = seen call name " "
-      k = split(name, seg, "::")
-      callee = seg[k]
-      if (k > 1 && (seg[k - 1] ":" callee) in text) target = seg[k - 1] ":" callee
-      else if ((s ":" callee) in text) target = s ":" callee
-      else if (("support:" callee) in text) target = "support:" callee
-      else continue
-      if (target == f || (!call && k == 1 && bound(text[f], callee))) continue
-      callers[target] = callers[target] " " f
+    for (j = 1; j <= nl; j++) {
+      ln = line[j]
+      # the words of the line (w) and what stands between them (sep: sep[q] before word q)
+      nw = split(ln, sep, /[A-Za-z0-9_]+/)
+      split(ln, w, /[^A-Za-z0-9_]+/)
+      off = (ln ~ /^[^A-Za-z0-9_]/) ? 1 : 0
+      for (q = 1; q < nw; q++) {
+        if (!(w[q + off] in fname)) continue
+        p = q
+        name = w[q + off]
+        while (p > 1 && sep[p] == "::") { p--; name = w[p + off] "::" name }
+        after = sep[q + 1]
+        sub(/^[ \t]+/, "", after)
+        if (after == "" && q + 1 == nw && j < nl) after = substr(line[j + 1], match(line[j + 1], /[^ \t]/), 1)
+        call = (after ~ /^(\(|::<)/)
+        if (!call) {
+          before = sep[p]
+          sub(/[ \t]+$/, "", before)
+          if (before == "" && p == 1 && j > 1) before = substr(line[j - 1], length(line[j - 1]))
+          if (!(before ~ /[=(,[]$/ || (before ~ /:$/ && before !~ /::$/)) || after !~ /^[]),;}]/) continue
+          # a value inside a string literal ("{ n: garbage }") or a comment names no function
+          quotes = 0
+          for (x = 1; x <= p; x++) { t = sep[x]; gsub(/\\"/, "", t); quotes += gsub(/"/, "", t); if (sep[x] ~ /\/\//) break }
+          if (quotes % 2 || x <= p) continue
+        }
+        if (index(seen, " " call name " ")) continue
+        seen = seen call name " "
+        k = split(name, seg, "::")
+        callee = seg[k]
+        if (k > 1 && (seg[k - 1] ":" callee) in text) target = seg[k - 1] ":" callee
+        else if (k > 1 && name ~ /(^|::)support::/ && ("support:" callee) in text) target = "support:" callee
+        else if ((s ":" callee) in text) target = s ":" callee
+        else if (("support:" callee) in text) target = "support:" callee
+        else continue
+        for (r = o; r; r = occparent[r]) {
+          f = occname[r]
+          if (target == f || ((f, target) in edge)) continue
+          if (!call && k == 1) {
+            if (!(f in nocom)) { t = text[f]; gsub(/\/\/[^\n]*/, "", t); nocom[f] = t }
+            if (bound(nocom[f], callee)) continue
+          }
+          edge[f, target] = 1
+          callers[target] = callers[target] " " f
+        }
+      }
     }
   }
   for (head = 1; head <= tail; head++) {
@@ -139,6 +202,6 @@ END {
   }
   for (i = 1; i <= ntest; i++) {
     f = tests[i]
-    print ((f in marked) ? (rule == "stack" ? "stack " : "room ") : "other ") substr(f, 1, index(f, ":") - 1) "::" substr(f, index(f, ":") + 1)
+    print ((f in marked) ? (rule == "stack" ? "stack " : "room ") : "other ") substr(f, 1, index(f, ":") - 1) "::" substr(f, index(f, ":") + 1) ((rule == "stack" && testgone[i]) ? " not-in-collect" : "")
   }
 }

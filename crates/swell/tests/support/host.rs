@@ -235,7 +235,33 @@ pub fn limits() -> Limits {
 /// above are the margin of the build with full debug information, cargo's default for a dev
 /// build: the profile `stack-debug` runs the stack tests in it (`taskfiles/stack-profiles.yml`).
 pub fn stack_with_room(limits: Limits) -> usize {
+    no_stack_test_here();
     limits.min_stack_bytes() / 8 * 7
+}
+
+/// The variable the lane's run of the collect mode at opt-level 1 sets for its test processes
+/// (task `slow-tests` of `Taskfile.yml`): that run holds no test that runs on a bounded stack,
+/// since such a test proves the stack with frames whose size depends on the optimization
+/// level and runs at opt-level 0 there.
+pub const NO_STACK_TESTS: &str = "SWELL_NO_STACK_TESTS";
+
+/// The thread a test runs its body on with a stack of `bytes`: the one way of the tests to a
+/// bounded stack besides [`stack_with_room`], and like it the guard of [`NO_STACK_TESTS`].
+pub fn stack_thread(bytes: usize) -> std::thread::Builder {
+    no_stack_test_here();
+    std::thread::Builder::new().stack_size(bytes)
+}
+
+/// The line a stack test fails with when it runs where [`NO_STACK_TESTS`] is set.
+pub const NO_STACK_TESTS_LINE: &str = "this test runs on a bounded stack, but SWELL_NO_STACK_TESTS is set: it runs in the lane's run at opt-level 1 (task slow-tests), because taskfiles/realm-room-tests.awk -v rule=stack did not find it; it must run at opt-level 0: call stack_with_room or stack_thread in the test's own text, or in a function the rule reads it through";
+
+/// Panics with [`NO_STACK_TESTS_LINE`] when [`NO_STACK_TESTS`] is set: a test the rule of
+/// `slow-tests` did not find fails in that run, by itself, instead of passing on frames of
+/// another size.
+fn no_stack_test_here() {
+    if std::env::var_os(NO_STACK_TESTS).is_some() {
+        panic!("{NO_STACK_TESTS_LINE}");
+    }
 }
 
 /// The seeds the tests use: fixed, so every run is the same.

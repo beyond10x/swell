@@ -10,9 +10,10 @@
 # calls on_bounded_stack, a helper of another test module called by its path
 # (crate::other::run_deep()), a top-level helper whose name an earlier nested fn of the file also
 # has (the rule counts every definition of a name), a helper reached through a function pointer
-# (let f: fn() = run;). The test a macro writes is not printed. Two tests must be printed
-# "other": one that calls only a helper without a stack, and one whose own binding has the name
-# of the stack helper (let run = 3; ... (run, 3)), so that the rule does not mark every name.
+# (let f: fn() = run;). The test a macro writes is not printed. Three tests must be printed
+# "other", in two modules: one that calls only a helper without a stack, one whose own binding
+# has the name of the stack helper (let run = 3; ... (run, 3)), and a test of other.rs beside
+# its stack helper, so that the rule marks neither every name nor every test of a module.
 # Run from the repository root: sh tests/gate/slow-tests-stack-rule-finds-a-stack-test-in-every-form.sh
 name=slow-tests-stack-rule-finds-a-stack-test-in-every-form
 dir=.out/gate-tests/$name
@@ -41,6 +42,11 @@ printf '%s\n' \
 printf '%s\n' \
   'pub fn run_deep() {' \
   '    on_bounded_stack(stack_with_room(1 << 20), || {});' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn a_test_beside_the_helper() {' \
+  '    assert_eq!(1 + 1, 2);' \
   '}' > "$dir/other.rs"
 
 printf '%s\n' \
@@ -142,9 +148,9 @@ for test in two_nested a_closure in_a_mod an_attribute_between through_support \
     bad=1
   fi
 done
-for test in not_on_a_stack a_binding_named_like_the_helper; do
-  if ! grep -qx "other deep::$test" "$dir/lines.txt"; then
-    echo "$name: FAIL deep::$test runs on no bounded stack and is not printed other ($dir/lines.txt)"
+for test in deep::not_on_a_stack deep::a_binding_named_like_the_helper other::a_test_beside_the_helper; do
+  if ! grep -qx "other $test" "$dir/lines.txt"; then
+    echo "$name: FAIL $test runs on no bounded stack and is not printed other ($dir/lines.txt)"
     bad=1
   fi
 done

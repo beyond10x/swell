@@ -23,6 +23,9 @@
 #    the build's process group is gone within 5 s.
 # 4. task slow-tests alone, with no .out/slow-collect: it exits 0 and the stub ran the profile
 #    collect itself (no --no-run build beside it): a part run alone builds what it needs.
+# 5. .out/slow-collect/pid names a process group of setsid sleep 60 (not a watcher of this
+#    tree's lane) and no status: task slow-collect-stop leaves the group alone and says so.
+# 6. PATH without setsid: task slow-collect-start fails with "setsid is not on PATH".
 # Run from the repository root: sh tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SLOW_COLLECT
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -147,5 +150,36 @@ plant part
 go part hang slow-tests || fail "task slow-tests run alone exited non-zero with no background build ($dir/part.out)"
 grep -q '^run collect$' "$dir/run-part/stub/calls" || fail "task slow-tests run alone did not run the profile collect ($dir/run-part/stub/calls)"
 ! grep -q '^build ' "$dir/run-part/stub/calls" || fail "task slow-tests run alone started a build beside it ($dir/run-part/stub/calls)"
+
+# 5. The pid file names a process group this tree's lane did not start (a number the system gave
+#    to another process since): slow-collect-stop leaves it alone.
+plant foreign
+mkdir -p "$dir/run-foreign/.out/slow-collect"
+other=$(sh -c 'setsid sleep 60 < /dev/null > /dev/null 2>&1 & echo $!')
+n=0
+while ! kill -0 -- "-$other" 2>/dev/null && [ "$n" -lt 20 ]; do sleep 0.1; n=$((n + 1)); done
+kill -0 -- "-$other" 2>/dev/null || fail "setsid sleep 60 made no process group of its own"
+echo "$other" > "$dir/run-foreign/.out/slow-collect/pid"
+go foreign ok slow-collect-stop || { kill -KILL -- "-$other" 2>/dev/null; fail "task slow-collect-stop exited non-zero on a pid file of another process ($dir/foreign.out)"; }
+if ! kill -0 -- "-$other" 2>/dev/null; then
+  fail "slow-collect-stop ended process group $other, which this tree's lane did not start ($dir/foreign.out)"
+fi
+kill -KILL -- "-$other" 2>/dev/null
+grep -qF "slow-collect-stop: process $other of .out/slow-collect/pid is not the build this tree's lane started" "$dir/foreign.out" ||
+  fail "slow-collect-stop did not say that it left process $other alone ($dir/foreign.out)"
+
+# 6. No setsid on PATH: the lane's line names setsid. PATH holds the stub cargo and the tools
+#    the task files run, but not setsid.
+plant nosetsid
+mkdir -p "$dir/nosetsid-bin"
+cp "$dir/bin/cargo" "$dir/nosetsid-bin/cargo"
+for tool in sh rm mkdir mv cat date sleep awk grep tr sed git; do
+  p=$(command -v "$tool") && ln -s "$p" "$dir/nosetsid-bin/$tool"
+done
+taskbin=$(command -v task)
+STUB_DIR="$root/$dir/run-nosetsid/stub" STUB_BUILD=ok PATH="$root/$dir/nosetsid-bin" "$taskbin" -d "$dir/run-nosetsid" slow-collect-start > "$dir/nosetsid.out" 2>&1 &&
+  fail "task slow-collect-start exited 0 without setsid on PATH ($dir/nosetsid.out)"
+grep -qF 'slow-collect-start: setsid is not on PATH' "$dir/nosetsid.out" ||
+  fail "slow-collect-start without setsid on PATH did not name setsid ($dir/nosetsid.out)"
 
 echo "$name: ok"
