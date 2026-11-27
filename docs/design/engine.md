@@ -1666,6 +1666,49 @@ mechanism.
       F. Each static run of fields and each static block is called, in source order (item 4).
    5. The private record and the class scope are left, and F is the value. A throw in any step
       leaves the two records as a throw leaves a block's.
+
+   Class code is strict on every instruction (delivered on 2026-11-27 with
+   `story:class-definition-evaluation`). The bodies of the constructor, the methods, the
+   accessors, the field initializers and the static blocks are functions of their own and carry
+   `strict` in their templates. The computed keys and the heritage are compiled into the frame
+   around the class, whose flag `strict` (`interp/frame.rs`) `execute_next` reads once per
+   instruction. So the compiler marks where that code starts and ends:
+   - `SetStrict(true)` where a class starts in non-strict code, before its scope is entered, and
+     `SetStrict(false)` after its scope is left. A class inside class code, or in strict code,
+     emits neither. The instruction writes the running frame's `strict`. The heritage goes after
+     the class scope is entered and before `ClassPrototype`, between the two instructions.
+   - Every other way into an instruction gives the flag the value of that instruction's place in
+     the source:
+     - a handler (`catch`, `finally`, a pattern's, the throw and return handlers of `yield*` and
+       of the async functions) carries the strictness of its target in its record,
+       `Handler::strict`, and `enter_handler` writes it into the frame with the program counter;
+     - a return completion (a `return` of a generator resumed at a `yield` in a key) leaves the
+       class code through `exit_return`, which emits `SetStrict` with the code's own strictness
+       before it jumps to a `finally` or to the end;
+     - a suspended frame moves whole into its holder and back (`interp/suspend.rs`), so a frame
+       suspended in a key resumes strict;
+     - an exception that leaves the frame leaves it to its caller, whose own flag holds.
+   - Cost: no field in `Frame`, and no test of the strictness on the path of an instruction that
+     does not need it. `SetStrict` and `SetClassName` each run in a function of their own, on no
+     re-entry path, so the frames of `execute` and `enter_handler` keep their size in the
+     unoptimised profiles (measured by the unit: dev 392 and 760 bytes, `stack-debug` 808 and
+     808, before and after).
+   - No other code that is strict by its place inside non-strict code runs in the frame around
+     it: the parameter defaults of a function with a `"use strict"` body are in that function's
+     frame, field initializers and static blocks are functions of their own, and direct eval
+     runs in a frame of its own with its own flag.
+
+   An anonymous class under a computed key of an object literal (`({ [k]: class {} })`) takes the
+   key's name before its elements run (NamedEvaluation, step 4 of the named form of the clause):
+   the resolver marks the class constructor in `Resolution::named_by_key`, and the compiler emits
+   `SetClassName` right after `MakeClassConstructor`, while the key stands two below the
+   constructor on the stack. A static method keyed `name` then wins over the key's name, and
+   `Reflect.ownKeys(C)` lists `length`, `name`, `prototype` first. A function or an arrow
+   function under a computed key keeps its `SetFunctionName` after the value. A later position
+   that takes a run-time name (a field with a computed key, static or not) uses the same route:
+   the class constructor joins `named_by_key` where the resolver walks the position, and the key
+   stays where `SetClassName` finds it. A private name is no such position: `#x = class {}` takes
+   the name `#x` at compile time.
 3. The class constructor's box (decision 7 of slice 8). A class constructor is an
    `EcmascriptFunction` (`crates/swell/src/object/ecmascript_function.rs:52`) whose new field
    `class: Option<Box<ClassConstructor>>` is set. The struct lives in a new file,
@@ -1734,6 +1777,16 @@ mechanism.
        (`language/statements/class/static-init-invalid-arguments.js`).
    - A `FieldInitializer` template makes no arguments object: every reference to `arguments` in
      it is an early error, and eval code there refuses it (PerformEval's inClassFieldInitializer).
+   - A field initializer keeps the [Yield] and [Await] of its class body, as the pinned draft's
+     `Initializer[+In, ?Yield, ?Await]` reads, but its code (a class nested in it included, the
+     functions in it not) holds no YieldExpression and no AwaitExpression: the parser refuses each
+     at its `yield` or `await` with `yield expression in a class field initializer` or `await
+     expression in a class field initializer`. This is a stated difference from the pinned draft,
+     which has no early error against them: a field initializer is the body of a function of its
+     own that is neither a generator nor an `async` function, so no step of
+     ClassFieldDefinitionEvaluation could run one there. The computed keys beside it read `yield`
+     and `await` with the [Yield] and [Await] around the class. In a static block the parser
+     clears both, and the early errors refuse `await` there.
 
    The forms against each other, for n fields that are not static, of a class evaluated once and
    constructed k times:
