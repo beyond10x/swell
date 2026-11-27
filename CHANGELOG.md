@@ -106,7 +106,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   the early SyntaxError "super property outside a method", a SuperCall outside a derived class
   constructor is "super call outside a derived class constructor". The refusal `super is not
   supported before slice 8` is gone; `super` in an arrow function inside a method and `super`
-  in eval code stay refused until `story:derived-classes-and-super-call`
+  in eval code run since `story:derived-classes-and-super-call`
   (`story:super-property-and-super-syntax`).
 - `new.target` parses and runs in functions, arrow functions, generators, `async` functions
   and direct eval code (`story:new-target-meta-property`).
@@ -235,6 +235,30 @@ Every number below comes from the gate, `task check`, on the released commit.
   `SyntaxError` `eval in a class field initializer is not supported before slice 8` until
   PerformEval's rule for an initializer is built; an indirect `eval` there runs
   (`story:public-class-fields`).
+
+- Derived classes and `super(...)` (`#sec-runtime-semantics-classdefinitionevaluation`,
+  `#sec-super-keyword-runtime-semantics-evaluation`,
+  `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`): `class C extends H`
+  in declarations and expressions, with `H` a constructor or `null`. The heritage sets both
+  prototype chains (constructor and prototype); `extends null` makes a prototype without a
+  parent, and a non-constructor heritage or a `prototype` that is neither an object nor `null`
+  throws a `TypeError`. A derived constructor's `this` is a hidden binding of its function
+  scope, uninitialized until `super(...)` returns: a read before throws a `ReferenceError`, a
+  second `super(...)` throws a `ReferenceError` after the parent ran. `super(...)` works in the
+  constructor, in its parameters, in arrow functions within it and in direct eval code in it.
+  The derived return rule (an object, `undefined` with `this` bound, else a `TypeError`, or a
+  `ReferenceError` when `this` is unbound) throws its errors in the caller's realm, for a frame
+  of the running loop and for a [[Construct]] from Rust (a bound function,
+  `Reflect.construct`, the host). The default derived constructor passes its arguments to the
+  parent without an iterator, a step per argument. A chain of 1,000 derived classes runs one
+  frame per level and no re-entry. The fields of a derived class are defined when `super(...)`
+  returns. `super` in an arrow within a method and `super.x` in direct eval code in a method
+  now run. An arrow inside a derived constructor keeps the constructor's `this` binding in the
+  function environment whether or not it reads `this` (184 bytes more per kept construction,
+  measured over 100 instances). The compiler emits `ClassHeritage`, `GetSuperConstructor`,
+  `SuperCall`, `SuperCallSpread`, `SuperCallKept`, `BindThis`, `BindThisEnv`, `BindThisName`,
+  `KeepThis`, `KeepThisEnv` and `UninitializeEnv`. The refusal `class heritage is not
+  supported before slice 8` is gone (`story:derived-classes-and-super-call`).
 
 ### Changed
 
