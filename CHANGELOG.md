@@ -219,6 +219,16 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
+- A realm reads larger. The collector's workspace holds a head word per slot of every arena
+  besides the mark word and the room on the worklist, charged with the arenas' capacity
+  (`arena::slot_bytes`, one `u32` per slot more), and the realm holds the intrinsics added
+  since 0.12.0, among them `Reflect`, `Map`, `Set`, `WeakMap`, `WeakSet` and `Proxy`.
+  `heap_bytes()` after `create_realm` reads 389,722 bytes, 357,960 in 0.12.0; `live_bytes()`
+  277,947, before 237,374 (the test `realm_padding::a_padded_realm_holds_k_functions_more`
+  prints both, in the default mode). The reading of HOST-187, a realm with 300 host functions
+  and 40 host objects, is 394,525 bytes, before 386,781; its bound `BINDINGS_REALM_HEAP_BYTES`
+  (506,112) is unchanged (`story:weak-map-and-weak-set`).
+
 - A Proxy method called directly by a builtin no longer counts one re-entry more than code
   that the builtin calls: the builtin's activation is that re-entry, as in
   `Agent::enter_code`. `Object.keys` of a Proxy whose `ownKeys` trap recurses reaches

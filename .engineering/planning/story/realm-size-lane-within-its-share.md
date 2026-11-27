@@ -36,7 +36,7 @@ big-2 on the operator's order of 2026-11-26; no feature unit of the wave merges 
 
 ## Decision
 
-The operator, 2026-11-26 (D53, option A): the lane `slow` gets 15 minutes on the forge and 10
+The operator, 2026-11-26 (option A): the lane `slow` gets 15 minutes on the forge and 10
 minutes for each of its parts; the two profile builds are shared; the lane keeps running on
 every pull request that changes the engine.
 
