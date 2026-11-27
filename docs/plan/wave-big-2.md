@@ -555,3 +555,96 @@ Filed from the adversary's pass, in the backlog: the moves check does not see a 
 2 of a line of `moves.tsv` (added to `story:moves-check-sees-a-block-move-without-its-line`),
 and tests still hold text of a refusal before slice 8
 (`story:tests-name-no-refusal-of-a-delivered-slice`).
+
+## The third part: the gate's lines, what went wrong, where each finding went
+
+This section is the close of the wave's third part: the orders 8.5 to 8.7 of slice 8 (the
+units `privatefields`, `evalprivate`, `hook` and `close8`) and the fifth and sixth unit of
+the lane (`lanefive`, `lanesix`). It is the wave's second pull request. The first pull
+request was merged into `main` on its head `fd71252b`.
+
+### The gate
+
+`slot --timeout 30m task check-runner` on `wave/big-2` at `5aaeb6e8`, on the build node,
+2026-11-27, ended 22:14 CET: exit 0. Its lines are in `AGENTS.md`, "The gate's numbers"; the
+ones this part moved:
+
+```
+host-requirements: 223 requirement(s), 223 line(s): 174 test, 49 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 11:32 12:3 13:2 14:6 16:5 18:1
+build-tests opt-level 1: Finished `collect` profile [optimized] target(s) in 5m 33s
+gate-runner: 32 cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash
+test: swell::main 1647 at opt-level 1, 123 at opt-level 0
+19 test binaries: 2532 passed, 0 failed, 1 ignored
+test-collect: 2 test binaries: 2029 passed, 0 failed, 1 ignored
+test262 total 53801 8982 7 44812 37097 7713 2
+test262-slice 08 9478 18803 0 0 9478 9478 0 0
+test262-moves: 2031 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:378 9:29 10:83 11:4 12:64 13:22 18:4; slices 1 to 19: 44931 85794
+gate-selftest: 112 passed, 0 failed
+gate-time test-steps 46.9 of 120, cpu 360.5, load 21.72 on 32 cores
+gate-time yardstick 4.5 s: conform-engine 1.9 and test262-moves-check 2.6
+```
+
+### What went wrong
+
+- The forge's first attempt of `check` on the head of the first pull request (`fd71252b`)
+  failed its budget: the test steps took 147.6 s of 120 on the forge's runner of 4 cores,
+  on a code the build node had passed; the second attempt took 85.8 s, and the head before
+  (`8d6cfebc`) 77.2 s. The operator put a sixth unit of the lane before any further feature
+  unit (`approval-record:wave-big-2-lane-unit-6`,
+  `story:gate-test-steps-hold-the-budget-on-the-slower-runner`): 1,647 of the 1,770 tests of
+  the binary `swell::main` run at opt-level 1 with debug assertions and overflow checks on,
+  the 123 tests the stack rule names stay at opt-level 0, and the gate prints its runner's
+  CPU (`gate-runner`).
+- That unit's cut could not be shown by CPU seconds on the build node. The story asked for
+  two pairs of gates, base against head, at 0.80 or less. Three pairs read 0.758, 0.782 and
+  0.732; a fourth read 1.151 with the untouched step `test-collect` at twice its seconds, so
+  it does not count; and two gates of one base, run one after the other, read 294.0 and
+  476.5 CPU seconds. No entry for 32 cores could be set in the table of CPU seconds. The
+  acceptance that is left is the forge's own: the first attempt of `check` on this pull
+  request. `story:local-gate-reads-the-cost-of-its-test-steps-on-a-steady-measure` (backlog)
+  holds the gap: a green local gate still says nothing of the forge's 120 s.
+- The build of the run at opt-level 1 is new work before the clock of the test steps: 5 min
+  14 s to 8 min 44 s on the build node in the unit's gates, 5 min 33 s in the gate of this
+  section. The forge's job `check` has a limit of 30 minutes.
+- Both passes of the adversary on that unit were red, with eight findings each, on what the
+  split and its checks hold (a test in no run or in both, a profile that turns the
+  assertions off, a task that fails without a line). Two corrections fixed them; the row of
+  the unit names each.
+- Between the merges of the three feature units and the close of slice 8, `task
+  test262-check` was red on the wave branch: the digest of the expected file was stale, and
+  only the close writes the file again. The unit `lanesix` ran its gates with the digest
+  line set in its tree and not committed, as its story says.
+
+### Where each finding went
+
+- Eight adversary passes on six units: one each on `privatefields`, `hook`, `lanefive` and
+  `close8`, two each on `evalprivate` and `lanesix`
+  (`review-result:adversary-<unit>-pass-<n>`). Four are red: pass 1 on `hook`, pass 1 on
+  `evalprivate` and both on `lanesix`. Two of them showed a defect a script or a host
+  reaches: on `hook`, a hook that refuses an object between the two halves of an accessor
+  after it allowed it; on `evalprivate`, every direct eval read every named slot of its
+  caller's records (992 steps in a function of 1,000 `var`s). Every finding introduced by a
+  unit was corrected by that unit before its merge, or decided in the coordinator's read of
+  the unit; each story carries the outcome of each pass.
+- Filed in the backlog from this part, each a draft that no wave takes before the planned
+  waves are delivered: `story:operand-stack-charges-its-growth-before-it-reserves`,
+  `story:slow-lane-holds-its-bound-on-the-slower-runner`,
+  `story:lane-tasks-say-why-they-fail-without-support-files`,
+  `story:check-runner-starts-task-by-a-path-that-holds`,
+  `story:local-gate-reads-the-cost-of-its-test-steps-on-a-steady-measure` and
+  `story:tests-name-no-refusal-of-a-delivered-slice`; and one more gap of the moves check,
+  added to `story:moves-check-sees-a-block-move-without-its-line`.
+
+### The stories
+
+Implemented with the pull request, each with a `test_result` that names the gate run of this
+section and the commit that merged its unit: `story:private-fields-and-private-in`,
+`story:private-names-in-eval-code`, `story:host-ensure-can-add-private-element` and
+`story:slice-08-conformance-close`. The acceptance of the two stories of the lane,
+`story:property-escape-cases-spend-less-in-the-interpreter-loop` and
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, is read on the forge's runs of
+the pull request's head; each gets its `test_result` from those runs.
+
+Slice 8 and slice 9 are delivered: ten of nineteen slices. Not in this pull request:
+`story:bench-image-and-first-measurements`, which has a draft pull request of its own.

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:private-names-in-eval-code
 kind: story
-status: active
+status: implemented
 title: 'Private names in direct eval code: the private environment of the caller'
 summary: 107 cases (203 runs).
 relations:
@@ -26,10 +26,11 @@ scope:
   path: crates/syntax/src/early.rs
 - confidence: cited
   path: crates/syntax/src/lib.rs
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:48Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T21:14:36Z", actor: "human:operator", revision: 12, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

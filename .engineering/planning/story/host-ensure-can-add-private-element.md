@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:host-ensure-can-add-private-element
 kind: story
-status: active
+status: implemented
 title: 'HOST-119: HostEnsureCanAddPrivateElement for host objects with an override table, and a stale handle in its Throw'
 summary: No test262 case; closes HOST-119 and adds the next free requirement for the hook's Throw value (decision 6).
 relations:
@@ -22,10 +22,11 @@ scope:
   path: crates/swell/tests/private_element_hook.rs
 - confidence: cited
   path: docs/design/host-interface.md
-revision: 10
+revision: 11
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:49Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T21:14:36Z", actor: "human:operator", revision: 11, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
