@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T04:09:32Z",
+  "actor": "human:operator",
+  "artifact": "story:eval-in-class-field-initializers",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/evalfields at 65476932, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax main 80 passed (80 at full counts); swell-compiler main 17 passed; swell main 1562 passed, 1 skipped; swell main with collect-every-safe-point 1541 passed, 1 skipped; swell lib 278 passed; test-stack-profiles release and stack-debug 4 passed each; test-realm-sizes 0 runs red (on 5451f25, the same engine code); task clippy exit 0; cargo fmt --check exit 0"
+  }
+}

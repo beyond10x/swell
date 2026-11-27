@@ -28,7 +28,7 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/scope.rs
-revision: 11
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:47Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
@@ -83,3 +83,43 @@ test262. The full run is not the unit's. With the list as committed on the wave 
 ## Out of scope
 
 Private fields (`story:private-fields-and-private-in`); fields of a derived class run after `super()` and their order with private methods (the cases where the parts meet, on the lists of `story:class-static-blocks` and `story:private-fields-and-private-in`); eval in an initializer (`story:eval-in-class-field-initializers`); static blocks (`story:class-static-blocks`); the counts of `conformance/test262/expected.txt` (`story:slice-08-conformance-close`).
+
+## As delivered
+
+The unit `fields` of wave big-2 delivered the story on `impl/fields` (one correction after the
+adversary's pass), merged into `wave/big-2`. Where the delivery differs from the text above:
+
+- A direct eval in a field initializer is refused. The story leaves eval in an initializer to
+  `story:eval-in-class-field-initializers`; with the hold on fields lifted, eval ran there
+  without PerformEval's rule, and `eval("arguments")` threw a ReferenceError
+  (`review-result:adversary-fields-pass-1`). Until that story, a direct eval whose function is
+  a field initializer, an arrow in one too, throws the SyntaxError `eval in a class field
+  initializer is not supported before slice 8` (`crates/swell/src/dynamic_code.rs`,
+  `eval_context`); an indirect eval and a direct eval in a method run. The test
+  `class_fields::a_direct_eval_in_an_initializer_is_refused` holds it; that story deletes the
+  refusal and the test.
+- The tests are 17, not 13. Added after the adversary's pass:
+  `a_direct_eval_in_an_initializer_is_refused`,
+  `a_computed_key_made_at_run_time_lives_until_the_constructions` (red in the collect build
+  when the collector skips the hidden key bindings),
+  `a_field_error_is_reported_at_the_field_and_at_its_key` (line 3, column 3 for DefineField;
+  line 3, column 4 for the key's ToPropertyKey) and `a_literal_proto_field_is_an_own_property`.
+- The counts of `constructions_of_a_class_with_100_fields_are_charged_and_freed`. The story
+  names 10,000 constructions, and 1,000 with a collection at every safe point. The test runs,
+  per round, 500 in the gate and 3,000 with `SWELL_FULL_COUNTS=1` in the default build (0.44
+  and 2.05 CPU s alone; 10,000 took 6.48, over the 2.5 s of a test there), and 4 and 8 in the
+  collect build (1.44 and 2.10 CPU s; one construction costs about 84 ms there). The collect
+  build skips the memory-budget part and holds 4 instances, not 100. A byte charged and never
+  credited per DefineField, and a DefineField that defines nothing, are red at the gate counts
+  in both builds.
+- The hidden binding of a computed field key is named `#key <n>`, `<n>` the number of the
+  key's expression in the tree: a name with a space, which no identifier and no private name
+  has.
+- Files changed outside the Writes line: `crates/compiler/src/function.rs` (the call of
+  `instance_initializer`, and `expression_value` made `pub(crate)`),
+  `crates/syntax/tests/sources.rs` (three tests that named the hold),
+  `crates/compiler/src/resolve.rs` (`class_scope`, not only `field_key_bindings`) and
+  `crates/swell/src/dynamic_code.rs` (the refusal). `crates/syntax/src/scope.rs`, an inferred
+  scope line, needed no change.
+- The part run of the story's list: 515 cases and the guard, 2,069 runs, all passed
+  (`passed 1038 bound 1037 B 522 F 515 R 0`).

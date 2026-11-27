@@ -161,6 +161,7 @@ impl<H: Host> Agent<H> {
                 let text = self.lexical_text(name);
                 Err(self.not_initialized(&text))
             }
+            SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -174,6 +175,7 @@ impl<H: Host> Agent<H> {
                 let text = self.lexical_text(name);
                 Err(self.not_initialized(&text))
             }
+            SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -193,6 +195,7 @@ impl<H: Host> Agent<H> {
         match self.slot_state(env, hops, slot)? {
             SlotValue::Value(value) => self.push_value(value),
             SlotValue::Uninitialized => self.env_not_initialized(hops, slot),
+            SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -204,6 +207,7 @@ impl<H: Host> Agent<H> {
         match self.slot_state(env, hops, slot)? {
             SlotValue::Value(_) => self.set_slot(env, hops, slot, value),
             SlotValue::Uninitialized => self.env_not_initialized(hops, slot),
+            SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -215,6 +219,7 @@ impl<H: Host> Agent<H> {
         match state {
             SlotValue::Value(_) => self.assign_const(&text),
             SlotValue::Uninitialized => Err(self.not_initialized(&text)),
+            SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 
@@ -228,6 +233,7 @@ impl<H: Host> Agent<H> {
         match state {
             SlotValue::Value(_) => self.assign_const(&text),
             SlotValue::Uninitialized => Err(self.not_initialized(&text)),
+            SlotValue::PrivateName(_) => Err(self.fault()),
         }
     }
 

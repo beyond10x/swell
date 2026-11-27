@@ -977,10 +977,13 @@ impl<H: Host> Agent<H> {
     /// when no builtin runs and no checkpoint runs, it is an outermost entry, whose step counter
     /// starts at 0 and which a set interrupt flag ends before it spends a step (decision 12).
     /// Inside a checkpoint every call of an entry is nested and spends from the checkpoint
-    /// (`engine.md`, decision 3, "The microtask checkpoint is one entry").
+    /// (`engine.md`, decision 3, "The microtask checkpoint is one entry"). Inside the override
+    /// of a host object (`object/host_overrides.rs`), which runs as an internal method of an
+    /// object with no activation of its own, every call is nested too: it spends from the entry
+    /// that called the internal method.
     pub(crate) fn begin(&mut self) -> Completion<()> {
         self.running()?;
-        if self.activations.is_empty() && !self.checkpointing {
+        if self.activations.is_empty() && !self.checkpointing && self.interp.proxy_nesting == 0 {
             self.steps = 0;
             if self.interrupt.is_set() {
                 self.interrupt.clear();

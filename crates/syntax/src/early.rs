@@ -124,6 +124,9 @@
 //!
 //! The walk does not recurse: its pending work is a stack on the heap, so the Rust stack it uses
 //! is the same at any depth of the tree.
+//!
+//! One rule of eval code has its own walk, of the same form: ContainsArguments of eval code whose
+//! eval context has inClassFieldInitializer ([`contains_arguments`], `#sec-performeval`).
 
 use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
@@ -218,6 +221,10 @@ const ARGUMENTS_IN_FIELD: &str = "arguments in a class field initializer";
 /// ContainsArguments of a ClassStaticBlockStatementList
 /// (`#sec-class-definitions-static-semantics-early-errors`).
 const ARGUMENTS_IN_STATIC_BLOCK: &str = "arguments in a class static block";
+
+/// ContainsArguments of eval code whose eval context has inClassFieldInitializer
+/// (`#sec-performeval`, step 12.h; [`contains_arguments`]).
+const ARGUMENTS_IN_EVAL: &str = "arguments in eval code in a class field initializer";
 
 /// What a private name of a class body declares, for the rule on duplicates of
 /// `#sec-class-definitions-static-semantics-early-errors`: a getter or a setter, each with
@@ -317,6 +324,63 @@ pub(crate) fn check(
         m.credit(scratch);
     }
     only_the_refusal(found, m)
+}
+
+/// ContainsArguments (`#sec-static-semantics-containsarguments`) of the eval code `body` of
+/// `ast`, which PerformEval reads when inClassFieldInitializer is set (`#sec-performeval`, step
+/// 12.h): the SyntaxError at the first IdentifierReference `arguments` in source order outside
+/// every function that is not an arrow function, or `None`. A function, a generator, an `async`
+/// function, a method, an accessor and a class's constructor are not looked into (a method's
+/// computed name is, as a child of its class or object literal); an arrow function, and a class's
+/// field initializers and static blocks, are. The walk keeps its work on a stack charged to `m`
+/// before it grows and credited at the end, and calls [`Meter::visit`] for every node; at a stop
+/// it ends with `None`, and the entry answers the stop.
+pub(crate) fn contains_arguments(ast: &Ast, body: &[StmtId], m: &Meter<'_>) -> Option<SyntaxError> {
+    let mut stack: Vec<Child> = Vec::new();
+    let mut found = None;
+    if m.grow_by(&mut stack, body.len()).is_ok() {
+        stack.extend(body.iter().rev().map(|s| Child::Stmt(*s)));
+    }
+    while let Some(node) = stack.pop() {
+        if m.visit().is_err() {
+            break;
+        }
+        match node {
+            Child::Expr(id) => {
+                if let Some(n) = ast.expr(id)
+                    && matches!(&n.expr, Expr::Identifier(name) if name == "arguments")
+                {
+                    found = m
+                        .string(ARGUMENTS_IN_EVAL)
+                        .ok()
+                        .map(|message| SyntaxError::new(message, n.span.line, n.span.column));
+                    break;
+                }
+            }
+            Child::Function(id) => {
+                let looked_into = ast.function(id).is_some_and(|f| {
+                    matches!(
+                        f.kind,
+                        FunctionKind::Arrow
+                            | FunctionKind::FieldInitializer
+                            | FunctionKind::StaticBlock
+                    )
+                });
+                if !looked_into {
+                    continue;
+                }
+            }
+            Child::Stmt(_) => {}
+        }
+        let pushed = ast.push_children_charged(node, &mut stack, |c| c, m);
+        if pushed.is_err() {
+            break;
+        }
+    }
+    let bytes = stack.capacity().saturating_mul(size_of::<Child>());
+    drop(stack);
+    m.credit(bytes);
+    found
 }
 
 /// `errors` as the parse answers them: a refusal stops a parse and is its only error (`lib.rs`,

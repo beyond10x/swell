@@ -16,6 +16,7 @@
 //! answers that parent's own method, with the same receiver, as the clauses' "Return ?
 //! parent.[[Get]](P, Receiver)" order.
 
+use super::host_overrides::Walk;
 use super::property::{Descriptor, Key, Property, Slot};
 use super::{KeyList, ObjectKind};
 use crate::heap::collect::Mark;
@@ -180,7 +181,9 @@ impl<H: Host> Agent<H> {
     }
 
     /// OrdinarySetPrototypeOf (`#sec-ordinarysetprototypeof`). The loop of step 7 charges a step
-    /// per object.
+    /// per object and stops at an object whose [[GetPrototypeOf]] is not the ordinary one
+    /// (step 7.c.i: a Proxy, or a host object whose table has `get_prototype_of`), whose record
+    /// it does not read past.
     pub(crate) fn ordinary_set_prototype_of(
         &mut self,
         object: ObjectRef,
@@ -200,6 +203,9 @@ impl<H: Host> Agent<H> {
         while let Some(next) = p {
             if next == object {
                 return Ok(false);
+            }
+            if self.get_prototype_of_is_exotic(next)? {
+                break;
             }
             self.charge_steps(1)?;
             p = self.engine_object(next)?.prototype;
@@ -321,19 +327,59 @@ impl<H: Host> Agent<H> {
     }
 
     /// Whether a walk of the chain hands over to `parent`'s own [[HasProperty]], [[Get]] or
-    /// [[Set]] instead of going on: a Proxy.
-    fn walk_hands_over_to(&mut self, parent: ObjectRef) -> Completion<bool> {
-        Ok(self.kind_of(parent)? == super::KindTag::Proxy)
+    /// [[Set]] instead of going on: a Proxy, and a host object whose override table has the
+    /// override of the method `walk` makes (`object/host_overrides.rs`).
+    fn walk_hands_over_to(&mut self, parent: ObjectRef, walk: Walk) -> Completion<bool> {
+        match self.kind_of(parent)? {
+            super::KindTag::Proxy => Ok(true),
+            super::KindTag::Host => self.host_overrides_walk(parent, walk),
+            _ => Ok(false),
+        }
     }
 
-    /// OrdinaryHasProperty (`#sec-ordinaryhasproperty`), as a loop over the chain.
+    /// Keep `key` and `values` once, the first time a walk reaches an object `o` whose methods
+    /// may run code: a host object with an override table, whose [[GetPrototypeOf]] or
+    /// [[GetOwnProperty]] the walk calls without handing over. Each such method keeps its own
+    /// arguments while it runs, not what the walk
+    /// holds for later (the key, a value read from a record, the receiver); what is kept here
+    /// is released by the walk's caller ([`Agent::release`] of the mark it took).
+    fn hold_for_walk(
+        &mut self,
+        held: &mut bool,
+        o: ObjectRef,
+        key: Key,
+        values: &[Value],
+    ) -> Completion<()> {
+        if *held || !self.methods_may_run_code(o)? {
+            return Ok(());
+        }
+        *held = true;
+        self.keep_key(key);
+        for &value in values {
+            self.keep(value);
+        }
+        Ok(())
+    }
+
+    /// OrdinaryHasProperty (`#sec-ordinaryhasproperty`), as a loop over the chain; the key is
+    /// kept from the first object whose methods may run code.
     pub(crate) fn ordinary_has_property(
         &mut self,
         object: ObjectRef,
         key: Key,
     ) -> Completion<bool> {
+        let mark = self.kept.len();
+        let answer = self.has_property_walk(object, key);
+        self.release(mark);
+        answer
+    }
+
+    /// The loop of [`Agent::ordinary_has_property`].
+    fn has_property_walk(&mut self, object: ObjectRef, key: Key) -> Completion<bool> {
+        let mut held = false;
         let mut o = object;
         loop {
+            self.hold_for_walk(&mut held, o, key, &[])?;
             if self.get_own_property(o, key)?.is_some() {
                 return Ok(true);
             }
@@ -341,7 +387,7 @@ impl<H: Host> Agent<H> {
                 Some(parent) => {
                     self.charge_steps(1)?;
                     // 4.a. Return ? parent.[[HasProperty]](P).
-                    if self.walk_hands_over_to(parent)? {
+                    if self.walk_hands_over_to(parent, Walk::Has)? {
                         return self.has_property(parent, key);
                     }
                     o = parent;
@@ -351,21 +397,32 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// OrdinaryGet (`#sec-ordinaryget`), as a loop over the chain.
+    /// OrdinaryGet (`#sec-ordinaryget`), as a loop over the chain; the key and the receiver are
+    /// kept from the first object whose methods may run code.
     pub(crate) fn ordinary_get(
         &mut self,
         object: ObjectRef,
         key: Key,
         receiver: Value,
     ) -> Completion<Value> {
+        let mark = self.kept.len();
+        let answer = self.get_walk(object, key, receiver);
+        self.release(mark);
+        answer
+    }
+
+    /// The loop of [`Agent::ordinary_get`].
+    fn get_walk(&mut self, object: ObjectRef, key: Key, receiver: Value) -> Completion<Value> {
+        let mut held = false;
         let mut o = object;
         loop {
+            self.hold_for_walk(&mut held, o, key, &[receiver])?;
             match self.get_own_property(o, key)? {
                 None => match self.get_prototype_of(o)? {
                     Some(parent) => {
                         self.charge_steps(1)?;
                         // 2.c. Return ? parent.[[Get]](P, Receiver).
-                        if self.walk_hands_over_to(parent)? {
+                        if self.walk_hands_over_to(parent, Walk::Get)? {
                             return self.internal_get(parent, key, receiver);
                         }
                         o = parent;
@@ -386,7 +443,8 @@ impl<H: Host> Agent<H> {
     }
 
     /// OrdinarySet (`#sec-ordinaryset`) with OrdinarySetWithOwnDescriptor
-    /// (`#sec-ordinarysetwithowndescriptor`), as a loop over the chain.
+    /// (`#sec-ordinarysetwithowndescriptor`), as a loop over the chain; the key, the value and
+    /// the receiver are kept from the first object of the chain whose methods may run code.
     pub(crate) fn ordinary_set(
         &mut self,
         object: ObjectRef,
@@ -402,8 +460,24 @@ impl<H: Host> Agent<H> {
         {
             return Ok(done);
         }
+        let mark = self.kept.len();
+        let answer = self.set_walk(object, key, value, receiver);
+        self.release(mark);
+        answer
+    }
+
+    /// The loop of [`Agent::ordinary_set`] and the steps after it.
+    fn set_walk(
+        &mut self,
+        object: ObjectRef,
+        key: Key,
+        value: Value,
+        receiver: Value,
+    ) -> Completion<bool> {
+        let mut held = false;
         let mut o = object;
         let own = loop {
+            self.hold_for_walk(&mut held, o, key, &[value, receiver])?;
             match self.get_own_property(o, key)? {
                 Some(property) => break property,
                 None => match self.get_prototype_of(o)? {
@@ -411,7 +485,7 @@ impl<H: Host> Agent<H> {
                         self.charge_steps(1)?;
                         // OrdinarySetWithOwnDescriptor, 1.c. Return ? parent.[[Set]](P, V,
                         // Receiver).
-                        if self.walk_hands_over_to(parent)? {
+                        if self.walk_hands_over_to(parent, Walk::Set)? {
                             return self.internal_set(parent, key, value, receiver);
                         }
                         o = parent;
@@ -428,6 +502,11 @@ impl<H: Host> Agent<H> {
                 let Value::Object(receiver) = receiver else {
                     return Ok(false);
                 };
+                // A receiver other than `object` whose methods may run code comes only from a
+                // caller that keeps the key and the value across this call: [[Set]] of a Proxy
+                // without a `set` trap (`proxy_set_steps`), `Reflect.set` (its arguments and the
+                // key it keeps), PutValue of a Super Reference (`interp/super_ref.rs`) and a `Cx`
+                // call (the host's scope).
                 match self.get_own_property(receiver, key)? {
                     Some(existing) => {
                         let Slot::Data { writable, .. } = existing.slot else {

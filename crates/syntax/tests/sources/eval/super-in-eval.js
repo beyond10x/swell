@@ -1,2 +1,2 @@
-// sec-performeval: refused "super in eval code is not supported before slice 8"
+// sec-performeval: SyntaxError "super property outside a method"
 super.x;

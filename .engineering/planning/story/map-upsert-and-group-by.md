@@ -9,6 +9,7 @@ relations:
 - decomposes: epic:slice-09-collections-proxy-reflect
 - depends_on: story:map-and-set
 - depends_on: story:weak-map-and-weak-set
+- depends_on: story:realm-walk-in-parts-under-the-cpu-bound
 scope:
 - confidence: inferred
   path: crates/swell/src/builtins/map/mod.rs

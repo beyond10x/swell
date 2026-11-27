@@ -18,7 +18,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use swell_compiler::bytecode::{HandlerKind, Instruction, TAG_NORMAL, TAG_THROW};
 
-use super::frame::{Entry, Enumerator, SlotValue};
+use super::frame::{Constructed, Entry, Enumerator, SlotValue};
 use crate::env::{NameReference, NameTable, SlotNames};
 use crate::heap::accounting::ChargedVec;
 use crate::heap::arena::Handle;
@@ -72,14 +72,24 @@ impl<H: Host> Agent<H> {
         }
     }
 
-    /// The return of the running frame with `value` ([[Call]] step 8 and [[Construct]] step 10:
-    /// a constructor's code that returns no object answers its `this`). `Some` when it was the
-    /// base frame; otherwise the value goes on the caller's operand stack, and the interrupt is
-    /// checked.
+    /// The return of the running frame with `value` ([[Call]] step 8 and [[Construct]] steps 10
+    /// to 12: a base constructor's code that returns no object answers its `this`). `Some` when
+    /// it was the base frame; otherwise the value goes on the caller's operand stack, and the
+    /// interrupt is checked. A derived constructor's frame (`Constructed::Derived`) answers the
+    /// object it returned, or its `this` for `undefined`, when there is one; otherwise, past
+    /// the base, the error of the rule is made here with the caller's realm current
+    /// ([`Agent::derived_return`]), and at the base by the Rust caller
+    /// (`object::ecmascript_function::construct`), after the callee's activation is left
+    /// (`docs/design/engine.md`, "Classes", item 8).
     fn return_from_frame(&mut self, base: usize, value: Value) -> Completion<Option<Value>> {
         let frame = self.pop_frame()?;
         let value = match (frame.constructed, value) {
-            (Some(this), value) if !matches!(value, Value::Object(_)) => Value::Object(this),
+            (Constructed::Base(this), value) if !matches!(value, Value::Object(_)) => {
+                Value::Object(this)
+            }
+            (Constructed::Derived, Value::Undefined) if matches!(frame.this, Value::Object(_)) => {
+                frame.this
+            }
             _ => value,
         };
         if self.interp.frames.len() <= base {
@@ -87,6 +97,9 @@ impl<H: Host> Agent<H> {
         }
         let realm = self.top_frame()?.realm;
         self.set_realm_slot(Some(realm));
+        if frame.constructed == Constructed::Derived && !matches!(value, Value::Object(_)) {
+            return Err(self.derived_return(value));
+        }
         self.push_value(value)?;
         self.check_interrupt()?;
         Ok(None)
@@ -298,6 +311,11 @@ impl<H: Host> Agent<H> {
             I::PutNamed(index) => self.put_named(index, strict),
             I::GetIndex => self.get_index(),
             I::PutIndex => self.put_index(strict),
+            // ---- private names (`interp/private.rs`) ----
+            I::GetPrivate { .. }
+            | I::SetPrivate { .. }
+            | I::AddPrivateMethod { .. }
+            | I::NewPrivateName { .. } => self.private_instruction(),
             I::PropertyKey => self.property_key(),
             I::DeleteNamed(index) => self.delete_named(index, strict),
             I::DeleteIndex => self.delete_index(strict),
@@ -321,6 +339,7 @@ impl<H: Host> Agent<H> {
             I::InitProto => self.init_proto(),
             // ---- classes (`interp/class.rs`) ----
             I::ClassPrototype
+            | I::ClassHeritage
             | I::MakeClassConstructor { .. }
             | I::DefineClassMethod(_)
             | I::DefineClassGetter(_)
@@ -350,6 +369,17 @@ impl<H: Host> Agent<H> {
             I::CallSpread => self.call_spread(),
             I::CallEvalSpread => self.call_eval_spread(strict),
             I::NewSpread => self.new_spread(),
+            // ---- derived classes (`interp/class.rs`) ----
+            I::GetSuperConstructor
+            | I::SuperCall(_)
+            | I::SuperCallSpread
+            | I::SuperCallKept(_)
+            | I::BindThis(_)
+            | I::BindThisEnv { .. }
+            | I::BindThisName(_)
+            | I::KeepThis(_)
+            | I::KeepThisEnv { .. }
+            | I::UninitializeEnv { .. } => self.derived_instruction(),
 
             // ---- operators ----
             I::Typeof => self.typeof_value(),
@@ -581,7 +611,7 @@ impl<H: Host> Agent<H> {
         let value = self.top_frame()?.locals.get(position).copied();
         match value {
             Some(SlotValue::Value(value)) => self.replace(0, value),
-            Some(SlotValue::Uninitialized) | None => Err(self.fault()),
+            Some(SlotValue::Uninitialized | SlotValue::PrivateName(_)) | None => Err(self.fault()),
         }
     }
 
@@ -1482,7 +1512,7 @@ impl<H: Host> Agent<H> {
 
     /// The `count` arguments on top of the operand stack, bottom first, left there, in a plain
     /// list: for a frame that copies them into its own charged slots before any code runs.
-    fn peek_arguments(&mut self, count: usize) -> Completion<Vec<Value>> {
+    pub(super) fn peek_arguments(&mut self, count: usize) -> Completion<Vec<Value>> {
         #[cfg(test)]
         note_instruction_copy(count);
         let frame = self.top_frame()?;
@@ -1507,7 +1537,7 @@ impl<H: Host> Agent<H> {
     /// The `count` arguments on top of the operand stack, bottom first, left there, in a list
     /// charged to the memory budget before it is made and credited when it drops. It charges
     /// no step: each value was pushed by an instruction that spent one.
-    fn charged_arguments(&mut self, count: usize) -> Completion<ChargedVec<Value>> {
+    pub(super) fn charged_arguments(&mut self, count: usize) -> Completion<ChargedVec<Value>> {
         #[cfg(test)]
         note_instruction_copy(count);
         let mut args = self.new_charged_vec(count)?;
@@ -1577,7 +1607,7 @@ impl<H: Host> Agent<H> {
     ) -> Completion<Flow> {
         self.check_frame_depth()?;
         self.step()?;
-        let frame = self.make_frame(function, this, args, None, None)?;
+        let frame = self.make_frame(function, this, args, Constructed::None, None)?;
         self.drop_entries(count.saturating_add(2))?;
         self.push_frame(frame);
         self.check_interrupt()?;
@@ -1621,7 +1651,9 @@ impl<H: Host> Agent<H> {
     /// `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`): its frame, with
     /// the object OrdinaryCreateFromConstructor(newTarget, "%Object.prototype%") made as its
     /// `this` and `new_target` as its NewTarget, replaces the `count + 1` entries of the call.
-    /// `New` and `NewSpread` pass the callee as `new_target`.
+    /// `New` and `NewSpread` pass the callee as `new_target`, `SuperCall` the running frame's
+    /// NewTarget. A derived constructor gets no object: its frame is `Constructed::Derived`
+    /// (`docs/design/engine.md`, "Classes", item 7).
     pub(super) fn push_construct_frame(
         &mut self,
         constructor: ObjectRef,
@@ -1630,17 +1662,18 @@ impl<H: Host> Agent<H> {
         count: usize,
     ) -> Completion<Flow> {
         self.check_frame_depth()?;
-        let this = self.ordinary_create_from_constructor(
-            new_target,
-            Intrinsic::ObjectPrototype,
-            OrdinaryData::Plain,
-        )?;
-        let keep = self.keep(Value::Object(this));
+        let constructed = self.construction_of(constructor, new_target)?;
+        let keep = match constructed {
+            Constructed::Base(this) => Some(self.keep(Value::Object(this))),
+            Constructed::None | Constructed::Derived => None,
+        };
         let new_target = Some(new_target);
         let frame = self.step().and_then(|()| {
-            self.make_frame(constructor, Value::Undefined, args, Some(this), new_target)
+            self.make_frame(constructor, Value::Undefined, args, constructed, new_target)
         });
-        self.release(keep);
+        if let Some(keep) = keep {
+            self.release(keep);
+        }
         let frame = frame?;
         self.drop_entries(count.saturating_add(1))?;
         self.push_frame(frame);

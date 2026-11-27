@@ -249,6 +249,7 @@ fn agent_with_long_key(limits: Limits) -> (Agent<TestHost>, Realm) {
                     brand: Brand(1),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

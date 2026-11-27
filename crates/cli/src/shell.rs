@@ -241,6 +241,7 @@ fn install(
         brand: BRAND_CONSOLE,
         data: None,
         error_kind: None,
+        overrides: None,
     })? {
         Ok(console) => console,
         Err(abrupt) => return Ok(Err(abrupt)),

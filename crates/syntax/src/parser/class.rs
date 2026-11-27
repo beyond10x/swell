@@ -16,8 +16,9 @@
 //! (F's [[SourceText]]). A second such method, and a getter, a setter, a generator or an `async`
 //! method named `constructor`, stays an element, which the early errors refuse (`early.rs`).
 //!
-//! A class is parsed whole; its heritage is held ([`Parser::hold`], [`super::HOLDS`]): `class
-//! heritage` at `extends`, so the parse goes on and the early errors of the source come first.
+//! A class is parsed whole. The written constructor of a class with a heritage is read with a
+//! SuperCall admitted ([`SuperProperty::DerivedConstructor`]), and an arrow function in it keeps
+//! that; every other function of the class is read with a SuperProperty only.
 //!
 //! The other elements (`#sec-class-definitions`, ClassElement), each held at its first token:
 //! a field (FieldDefinition, `class field`, or with a private name `private field`), a private
@@ -173,6 +174,7 @@ impl<'a, 'm> Parser<'a, 'm> {
             name,
             heritage: None,
             constructor: FunctionId(u32::MAX),
+            default_constructor: true,
             elements: Vec::new(),
             instance_elements: None,
             span: Span::default(),
@@ -209,25 +211,16 @@ impl<'a, 'm> Parser<'a, 'm> {
         Ok(())
     }
 
-    /// `ClassHeritage : extends LeftHandSideExpression` at the current `extends`, which holds
-    /// the refusal `class heritage`.
+    /// `ClassHeritage : extends LeftHandSideExpression` at the current `extends`.
     fn class_heritage(&mut self, target: Child) -> R<()> {
         self.enter()?;
-        self.extends_keyword()?;
+        self.advance()?;
         let heritage = self.left_hand_side()?;
         if let Some(class) = self.class_mut(target) {
             class.heritage = Some(heritage);
         }
         self.leave();
         Ok(())
-    }
-
-    /// Holds the refusal `class heritage` at the current `extends` and consumes it.
-    #[inline(never)]
-    fn extends_keyword(&mut self) -> R<()> {
-        let span = self.start();
-        self.hold("class heritage", 8, span);
-        self.advance()
     }
 
     /// The `{` of the class body of `target`: the default constructor is numbered here, a
@@ -351,7 +344,8 @@ impl<'a, 'm> Parser<'a, 'm> {
     /// `computed` read before, or the PropertyName or PrivateIdentifier at the current token)
     /// and what follows it. Before `(` it is a method: numbers the element's function and
     /// appends the element to `target`, or, for the constructor, answers the function numbered
-    /// at the `{`; a private method holds `private method`. A plain name (no `get`, `set`,
+    /// at the `{`; a private method that is not static makes the class's initializer of its
+    /// instance elements, if it has none yet. A plain name (no `get`, `set`,
     /// `async` or `*` before it) followed by `=`, `;`, `}` or a line terminator is a field
     /// ([`Parser::field_head`]). Anything else is a grammar error.
     #[inline(never)]
@@ -381,22 +375,22 @@ impl<'a, 'm> Parser<'a, 'm> {
             && modifiers.plain()
             && named(literal, "constructor")
         {
-            let constructor = self.class_mut(target).map(|class| class.constructor);
-            if let Some(id) = constructor
+            let constructor = self
+                .class_mut(target)
+                .map(|class| (class.constructor, class.heritage.is_some()));
+            if let Some((id, derived)) = constructor
                 && self.is_default_constructor(id)
             {
                 self.m.release(key);
                 if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
                     f.span = start;
                 }
+                self.written_constructor(target, id, derived);
                 return Ok(Head::Method(id));
             }
         }
-        if matches!(key, ClassKey::Private(_)) {
-            self.hold("private method", 8, start);
-            if !modifiers.is_static {
-                self.instance_elements(target, start);
-            }
+        if matches!(key, ClassKey::Private(_)) && !modifiers.is_static {
+            self.instance_elements(target, start);
         }
         let id = self.begin_function(modifiers.kind, start, None);
         if let Some(f) = self.ast.functions.get_mut(id.0 as usize) {
@@ -478,10 +472,10 @@ impl<'a, 'm> Parser<'a, 'm> {
     }
 
     /// The FieldDefinition named `key` of `target`, which started at `start`, appended to its
-    /// elements; holds `class field`, or `private field` for a private name, at `start`.
-    /// Answers the function its initializer belongs to: for a static field the function of the
-    /// run of static fields the element before it began, or a new one; for any other field the
-    /// function of the instance elements.
+    /// elements; holds `private field` for a private name at `start` (a public field runs since
+    /// `story:public-class-fields`). Answers the function its initializer belongs to: for a
+    /// static field the function of the run of static fields the element before it began, or a
+    /// new one; for any other field the function of the instance elements.
     #[inline(never)]
     fn field_head(
         &mut self,
@@ -492,8 +486,6 @@ impl<'a, 'm> Parser<'a, 'm> {
     ) -> R<FunctionId> {
         if matches!(key, ClassKey::Private(_)) {
             self.hold("private field", 8, start);
-        } else {
-            self.hold("class field", 8, start);
         }
         let function = if is_static {
             let run = self
@@ -702,6 +694,19 @@ impl<'a, 'm> Parser<'a, 'm> {
             element.end = span.end;
         }
         Ok(())
+    }
+
+    /// The constructor `id` of `target` is written, no longer the default one
+    /// ([`Class::default_constructor`]); of a class with a heritage (`derived`) its parameters
+    /// and body admit a SuperCall ([`Parser::open_context`] reads `derived_constructor`).
+    #[inline(never)]
+    fn written_constructor(&mut self, target: Child, id: FunctionId, derived: bool) {
+        if let Some(class) = self.class_mut(target) {
+            class.default_constructor = false;
+        }
+        if derived {
+            self.derived_constructor = Some(id);
+        }
     }
 
     /// Whether the constructor `id` is still the default one the `{` numbered: its span starts

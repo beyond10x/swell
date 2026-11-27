@@ -331,6 +331,9 @@ impl<H: Host> Agent<H> {
                 ObjectKind::Proxy(_) => false,
                 // Its dense elements are not in its list.
                 ObjectKind::Array(storage) => storage.elements.is_empty(),
+                // Ordinary, unless it has an override table, whose overrides may run host code
+                // (`object/host_overrides.rs`).
+                ObjectKind::Host(host) => host.overridden().is_none(),
                 // Ordinary [[GetOwnProperty]], [[DefineOwnProperty]] and [[Set]]: its list
                 // holds every property it has. A generator object's methods are all ordinary
                 // (`#sec-properties-of-generator-instances`; `object/generator.rs`), and so are a
@@ -339,7 +342,6 @@ impl<H: Host> Agent<H> {
                 | ObjectKind::BuiltinFunction(_)
                 | ObjectKind::BoundFunction(_)
                 | ObjectKind::EcmascriptFunction(_)
-                | ObjectKind::Host(_)
                 | ObjectKind::RegExp(_)
                 | ObjectKind::Generator(_)
                 | ObjectKind::Promise(_)

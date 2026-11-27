@@ -62,8 +62,10 @@ mod tests {
     /// `story:new-target-meta-property`, whose box `ArrowContext` (8 bytes) took the place of an
     /// arrow function's `Option<Value>` (16 bytes), so `EcmascriptFunction`, the largest kind,
     /// shrank by 8. 200 again since `story:class-definition-evaluation`, whose box
-    /// `ClassConstructor` (8 bytes) is the second box of "Classes", item 3: measured.
-    const RECORD_BYTES: usize = 200;
+    /// `ClassConstructor` (8 bytes) is the second box of "Classes", item 3: measured. 208 since
+    /// `story:private-names-and-private-methods`, whose field `private_elements` (a box, 8
+    /// bytes) every object has ("Private names", item 2): measured.
+    const RECORD_BYTES: usize = 208;
 
     /// "Suspended frames", item 2 (`docs/design/engine.md`): the frame lies in a box in the
     /// generator's kind, so the record of every object keeps its size.

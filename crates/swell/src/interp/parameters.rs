@@ -29,7 +29,7 @@ impl<H: Host> Agent<H> {
         let position = usize::try_from(slot).unwrap_or(usize::MAX);
         let value = match self.top_frame()?.locals.get(position) {
             Some(SlotValue::Value(value)) => *value,
-            Some(SlotValue::Uninitialized) => return Err(self.fault()),
+            Some(SlotValue::Uninitialized | SlotValue::PrivateName(_)) => return Err(self.fault()),
             None => Value::Undefined,
         };
         self.push_value(value)

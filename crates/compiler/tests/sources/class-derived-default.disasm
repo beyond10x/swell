@@ -1,0 +1,24 @@
+script locals 0
+  var "C"
+  0000 2:5 ResolveGlobal "C"
+  0001 2:9 SetStrict true
+  0002 2:23 GetGlobal "A"
+  0003 2:23 ClassHeritage
+  0004 2:9 MakeClassConstructor 0 derived
+  0005 2:9 Nip 1
+  0006 2:9 SetStrict false
+  0007 2:5 PutGlobalRef "C"
+  0008 2:5 Pop
+  0009 0:0 LoadCompletion
+  0010 0:0 Return
+
+function 0 class constructor "C" length 0 locals 1 strict binds-parameters
+  0000 2:9 Uninitialize 0
+  0001 2:9 GetSuperConstructor
+  0002 2:9 SuperCallKept 1
+  0003 2:9 BindThis 0
+  0004 2:9 Dup
+  0005 2:9 InitInstance
+  0006 2:9 Pop
+  0007 2:9 KeepThis 0
+  0008 2:9 Return

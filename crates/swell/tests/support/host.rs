@@ -191,6 +191,7 @@ pub fn in_provided_hook<R>(f: impl FnOnce(&mut HookCx<'_, ProvidedHost>) -> R) -
                 brand: Brand(1),
                 data: None,
                 error_kind: None,
+                overrides: None,
             })
             .unwrap()?;
         if let Some(f) = f.take() {
@@ -521,9 +522,9 @@ pub fn pad_realm<H: Host>(agent: &mut Agent<H>, realm: &Realm, k: usize) {
 ///
 /// - `budgets.rs::host_9_zero_steps_ends_before_the_first`: `steps_per_entry` 0, which the
 ///   padding's entry needs steps of.
-/// - `builtins_symbol_values.rs::every_function_of_the_realm_given_a_symbol_answers_or_throws_a_type_error`:
-///   asserts over every function of the realm and prints their count; its full count is at its
-///   bound.
+/// - `builtins_symbol_values.rs::in_a_bare_realm`: the parts of the walk over the functions of
+///   the realm and the test that holds the file of their places equal to the walk make their
+///   realm through it, because the file holds the places of the bare realm.
 /// - `calls.rs::cx_methods_check_their_handles_before_the_sticky_termination`: `steps_per_entry`
 ///   0.
 /// - `calls.rs::a_call_spends_the_step_budget_of_the_outermost_entry`: `steps_per_entry` 0 among

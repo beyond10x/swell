@@ -87,6 +87,10 @@ mod builtins_uri;
 mod builtins_weak_collections;
 #[cfg(any(not(test_modules), test_modules = "calls"))]
 mod calls;
+#[cfg(any(not(test_modules), test_modules = "class_field_eval"))]
+mod class_field_eval;
+#[cfg(any(not(test_modules), test_modules = "class_fields"))]
+mod class_fields;
 #[cfg(any(not(test_modules), test_modules = "classes"))]
 mod classes;
 #[cfg(any(not(test_modules), test_modules = "collect"))]
@@ -105,6 +109,8 @@ mod date_setters;
 mod date_text;
 #[cfg(any(not(test_modules), test_modules = "date_zone"))]
 mod date_zone;
+#[cfg(any(not(test_modules), test_modules = "derived_classes"))]
+mod derived_classes;
 #[cfg(any(not(test_modules), test_modules = "determinism"))]
 mod determinism;
 #[cfg(any(not(test_modules), test_modules = "dynamic_function"))]
@@ -137,6 +143,8 @@ mod generators;
 mod hooks;
 #[cfg(any(not(test_modules), test_modules = "host_objects"))]
 mod host_objects;
+#[cfg(any(not(test_modules), test_modules = "host_overrides"))]
+mod host_overrides;
 #[cfg(any(not(test_modules), test_modules = "index_stores"))]
 mod index_stores;
 #[cfg(any(not(test_modules), test_modules = "interrupt"))]
@@ -167,6 +175,8 @@ mod object_patterns;
 mod objects;
 #[cfg(any(not(test_modules), test_modules = "parameters"))]
 mod parameters;
+#[cfg(any(not(test_modules), test_modules = "private_methods"))]
+mod private_methods;
 #[cfg(any(not(test_modules), test_modules = "promise_reads"))]
 mod promise_reads;
 #[cfg(any(not(test_modules), test_modules = "promise_statics"))]

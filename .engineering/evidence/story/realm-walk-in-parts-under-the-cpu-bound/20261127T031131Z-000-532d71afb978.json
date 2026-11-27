@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-27T03:11:31Z",
+  "actor": "human:operator",
+  "artifact": "story:realm-walk-in-parts-under-the-cpu-bound",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:realmwalk-plan-coordinator-read",
+    "review": "review-result:realmwalk-plan-coordinator-read",
+    "outcome": "fixed"
+  }
+}

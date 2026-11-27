@@ -904,6 +904,7 @@ fn reflect_on_a_host_object_answers_its_internal_methods() {
                     brand: swell::Brand(9),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

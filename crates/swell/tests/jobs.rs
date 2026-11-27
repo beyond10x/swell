@@ -793,6 +793,7 @@ fn host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends() {
                         brand: Brand(196),
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()
                     .unwrap();

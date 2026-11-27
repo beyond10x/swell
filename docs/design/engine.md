@@ -1651,6 +1651,13 @@ mechanism.
 
    A key is a literal, a computed expression or a private name.
 
+   The record says whether the class has a written `constructor` (`default_constructor`), which
+   the resolver reads to place the hidden `this` of a default derived constructor (item 6).
+   Where `super` stands is one state of the parser with three values: outside a method, in a
+   method (a SuperProperty stands), in the constructor of a class with a heritage (a SuperCall
+   stands too). An arrow keeps the state of the code around it; eval code takes it from
+   PerformEval's flags.
+
    Every piece of code that the standard makes a function is a `Function` record with a
    `FunctionId` (`crates/syntax/src/ast.rs:34`, `:686`). Three kinds join those of `FunctionKind`
    (`ast.rs:620`):
@@ -1669,8 +1676,11 @@ mechanism.
    1. The class scope: the class's own name, uninitialized and immutable, and one hidden binding
       per computed field key, placed by the rules of "Lexical bindings" (a record when a function
       of the class or a lookup by name reaches it, which the field initializers do). Then the
-      heritage, evaluated in it. Then the private record of "Private names" (item 3), with a new
-      Private Name per private identifier the class declares.
+      heritage, evaluated in it, and `ClassHeritage`, `[h] -> [constructorParent, protoParent]`,
+      which runs steps 8.d to 8.h of the clause on its value (`null`, a constructor, its
+      `prototype` an object or `null`; a `TypeError` otherwise). Then the private record of
+      "Private names" (item 3), with a new Private Name per private identifier the class
+      declares.
    2. The prototype, with protoParent as its [[Prototype]]. F, made from the constructor's
       template with the prototype as its [[HomeObject]], constructorParent as its [[Prototype]],
       its name at creation and the class box of item 3. F's `prototype` property (not writable)
@@ -1869,15 +1879,24 @@ mechanism.
    binding of the derived constructor's function scope, named `this`, a reserved word that no
    IdentifierReference spells. It is placed by the rules that exist:
    - a checked local slot (`GetLocalChecked`, `bytecode.rs:488`);
-   - a slot of the function environment (`GetEnvChecked`, `bytecode.rs:501`), when an arrow or a
-     direct `eval` in the constructor reaches it ("Lexical bindings", item 1). A direct eval makes
-     its record named ("Names", item 3).
+   - a slot of the function environment (`GetEnvChecked`, `bytecode.rs:501`), when the
+     constructor holds an arrow or a direct `eval` ("Lexical bindings", item 1). A direct eval
+     makes its record named ("Names", item 3).
+
+   Every arrow inside a derived constructor, and inside such an arrow, takes the binding,
+   whether or not its code reads `this` (delivered on 2026-11-27 with
+   `story:derived-classes-and-super-call`). The resolver gives the arrow the `this` site when it
+   opens the arrow's scope, before it reads the arrow's body: a read of `this` can sit in a
+   nested arrow or in a direct `eval` with no `this` token in sight, and finding it would take a
+   second pass over the body. The price is the binding's slot in the function environment:
+   measured, 184 live bytes more per kept construction (1,101 against 917 bytes per instance
+   over 100 kept instances, the same arrow in a base constructor) and no step more.
 
    How code reaches it:
    - The template's first instruction makes it uninitialized, before the parameters are bound,
      since `constructor(a = super())` is legal and records start `undefined`
-     (`crates/swell/src/env/mod.rs:341`). `Uninitialize` has a local form
-     (`bytecode.rs:474`); a record form joins it.
+     (`crates/swell/src/env/mod.rs:341`). `Uninitialize` is the local form
+     (`bytecode.rs:474`), `UninitializeEnv { hops, slot }` the record form.
    - Every `this` in the constructor's own code and in the arrows within it is a checked read of
      the binding. An arrow's read crosses its [[Environment]] by hops and slot, so an arrow made
      before `super()` reads the object after the constructor returned
@@ -1910,9 +1929,10 @@ mechanism.
       - a derived parent gets no object.
       A built-in, bound, proxy or host constructor is constructed from Rust, as `New` constructs
       it today.
-   4. `BindThis`, `[r] -> [r]`: it initializes the binding of item 6 in its form (local, record,
-      or by name in eval code), and throws the `ReferenceError` of BindThisValue when the binding
-      is already initialized (`sec-bindthisvalue`).
+   4. `BindThis`, `[r] -> [r]`: it initializes the binding of item 6 in its form, and throws the
+      `ReferenceError` of BindThisValue when the binding is already initialized
+      (`sec-bindthisvalue`). It is three instructions, one per form: `BindThis(slot)` for a
+      local, `BindThisEnv { hops, slot }` for a record, `BindThisName(name)` in eval code.
    5. `Dup; InitInstance; Pop`, with the initializer of the running frame's function's box.
       InitializeInstanceElements takes F from GetThisEnvironment, the class whose constructor runs
       `super()`, not the parent.
@@ -1921,12 +1941,13 @@ mechanism.
    1,000 derived classes holds at most one frame per class and one initializer's frame at once,
    and spends at least 5 steps per level. The default derived constructor is a template that
    keeps its arguments (`binds_parameters`, `bytecode.rs:1104`, with no parameter, so the call
-   keeps every argument in its locals). It runs `GetSuperConstructor`, then `SuperCallKept(0)`,
-   which passes the kept arguments from local slot 0 on as the list, with no iterator
+   keeps every argument in its locals). Its template is `Uninitialize 0; GetSuperConstructor;
+   SuperCallKept(1); BindThis 0; Dup; InitInstance; Pop; KeepThis 0; Return`. The hidden `this`
+   of item 6 takes local slot 0, so the kept arguments start at local slot 1. `SuperCallKept(1)`
+   passes them on from there as the list, with no iterator
    (`language/statements/class/subclass/default-constructor-spread-override.js`) and a step per
-   argument as `RestArguments` (`bytecode.rs:463`). Then it runs `BindThis; Dup; InitInstance;
-   Pop; Return`. The default base constructor is `This; InitInstance; Pop`, then the return of
-   `undefined`.
+   argument as `RestArguments` (`bytecode.rs:463`), charged at once for their count. The default
+   base constructor is `This; InitInstance; Pop`, then the return of `undefined`.
 
    The standard makes both default constructors built-in functions (CreateBuiltinFunction in
    ClassDefinitionEvaluation), and no script tells a template from one:
@@ -1940,7 +1961,9 @@ mechanism.
 8. The derived return. Every `Return` the compiler emits for a derived constructor, at the end of
    the body and as the last instruction of `exit_return` (`crates/compiler/src/lib.rs:864`), after
    the `finally` blocks, follows a `KeepThis`. `KeepThis` copies the binding of item 6, when it is
-   initialized, into the frame's `this`.
+   initialized, into the frame's `this`. It is two instructions, `KeepThis(slot)` for a local and
+   `KeepThisEnv { hops, slot }` for a record, whose hops count from the environment the `return`
+   stands in. Eval code never returns from a constructor, so there is no form by name.
 
    The frame's `constructed` (`interp/frame.rs:152`) records which [[Construct]] the frame runs:
    - none, for a call;
@@ -1950,10 +1973,14 @@ mechanism.
    The clause is applied with the caller's realm current, in one of two places. For a frame that
    is not the base of its run, `return_from_frame` (`dispatch.rs:78`) applies it after the pop
    and after it has set the caller's realm. For the base frame of a run (a [[Construct]] from
-   Rust: a bound function, `Reflect.construct`, the host's construct call) the callee's realm is
-   still current when `return_from_frame` returns, and `run_frame` restores the caller's only
-   after `run` returns; there `return_from_frame` makes no error, and `construct_function` makes
-   it after `run_frame` returned. For a derived frame:
+   Rust: a bound function, `Reflect.construct`, the host's construct call) `return_from_frame`
+   makes no error. `run_frame` restores the realm that was current when it started, and from
+   Rust that is the realm of the callee's own activation (`enter_code` pushes one with the
+   function's realm), so an error made in `construct_function` after `run_frame` returned would
+   still be of the callee's realm (measured with a bound function's [[Construct]]). There
+   `construct_function` returns the derived answer as it is, and `construct`
+   (`crates/swell/src/object/ecmascript_function.rs`) makes the error after `leave_code`. For a
+   derived frame:
    - an object is the result;
    - any value other than `undefined` throws a `TypeError`;
    - otherwise the frame's `this`, when it is an object;
@@ -2153,6 +2180,19 @@ instead of an abort. Over the budget: `new ArrayBuffer` and the typed array cons
 lower bound, since the run ends at the first growth refused whatever was left below it, so the
 host makes room (roots dropped and a collection, or its own charges given back) before the next
 entry (`host-interface.md`, decision 10, HOST-188 to HOST-190; added on 2026-11-22).
+
+The reading `heap_bytes()` after a script depends on what the budget made the agent do, and
+not only on what the script left live. The arenas count their capacity, and a collection is
+due when the bytes allocated since the last one pass a threshold. So an agent with room
+grows an arena where an agent close to its budget ends its entry in
+`Terminated(MemoryBudget)` and collects at the next safe point instead. Two agents that ran
+the same script can therefore differ by an arena's growth: 114,688 bytes between an agent
+under 64 MiB and one whose budget is 128 KiB above its own reading, at the realm paddings
+`SWELL_TEST_REALM_FUNCTIONS` = 11 and 12 (`proxy_shape_traps::memory_sweep`). The host sees
+this through `heap_bytes()`; `live_bytes()` after a collection does not differ. Script sees
+only whether a later entry ends in the memory budget. A test that uses one agent's reading
+as another agent's budget reads it from an agent under that same budget (added on
+2026-11-27, `story:private-names-and-private-methods`).
 
 The rule, for every slice: storage is charged before it is allocated, and work before it is
 done. A structure's bytes are charged to the memory budget before the structure exists or

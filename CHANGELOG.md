@@ -106,7 +106,7 @@ Every number below comes from the gate, `task check`, on the released commit.
   the early SyntaxError "super property outside a method", a SuperCall outside a derived class
   constructor is "super call outside a derived class constructor". The refusal `super is not
   supported before slice 8` is gone; `super` in an arrow function inside a method and `super`
-  in eval code stay refused until `story:derived-classes-and-super-call`
+  in eval code run since `story:derived-classes-and-super-call`
   (`story:super-property-and-super-syntax`).
 - `new.target` parses and runs in functions, arrow functions, generators, `async` functions
   and direct eval code (`story:new-target-meta-property`).
@@ -217,7 +217,134 @@ Every number below comes from the gate, `task check`, on the released commit.
   a trap answered are visited. A chain of ordinary objects costs the steps it cost before
   (`story:proxy-descriptor-prototype-and-extensibility-traps`).
 
+- Public class fields, instance and static (`#sec-class-definitions`,
+  `#sec-runtime-semantics-classfielddefinitionevaluation`, `#sec-definefield`): a computed field
+  key runs once, when the class is defined, in source order with the keys of the methods, is
+  converted by ToPropertyKey there and kept in a hidden binding of the class scope; each
+  construction defines the instance fields in source order on the new object before the
+  constructor's body runs, each initializer evaluated (or `undefined`) with the instance as
+  `this` and `new.target` undefined, by CreateDataPropertyOrThrow, so a field over a prototype
+  accessor is an own data property and a non-extensible object or a non-configurable property
+  throws a `TypeError`; the static fields are defined on the class in source order after every
+  method, each run of them a function called with the class as `this`; `super.x` in an
+  initializer reads through the prototype (or the class, for a static field); an anonymous
+  function or class takes the field's name. The initializers run as frames of the run loop
+  (`InitInstance`, `Call(0)`), so the step budget, the interrupt and the frame depth reach
+  them. No instruction is added. The refusal `class field is not supported before slice 8` is
+  gone. A direct `eval` in a field initializer (an arrow in one too) runs since
+  `story:eval-in-class-field-initializers`; an indirect `eval` there ran before it
+  (`story:public-class-fields`).
+
+- Derived classes and `super(...)` (`#sec-runtime-semantics-classdefinitionevaluation`,
+  `#sec-super-keyword-runtime-semantics-evaluation`,
+  `#sec-ecmascript-function-objects-construct-argumentslist-newtarget`): `class C extends H`
+  in declarations and expressions, with `H` a constructor or `null`. The heritage sets both
+  prototype chains (constructor and prototype); `extends null` makes a prototype without a
+  parent, and a non-constructor heritage or a `prototype` that is neither an object nor `null`
+  throws a `TypeError`. A derived constructor's `this` is a hidden binding of its function
+  scope, uninitialized until `super(...)` returns: a read before throws a `ReferenceError`, a
+  second `super(...)` throws a `ReferenceError` after the parent ran. `super(...)` works in the
+  constructor, in its parameters, in arrow functions within it and in direct eval code in it.
+  The derived return rule (an object, `undefined` with `this` bound, else a `TypeError`, or a
+  `ReferenceError` when `this` is unbound) throws its errors in the caller's realm, for a frame
+  of the running loop and for a [[Construct]] from Rust (a bound function,
+  `Reflect.construct`, the host). The default derived constructor passes its arguments to the
+  parent without an iterator, a step per argument. A chain of 1,000 derived classes runs one
+  frame per level and no re-entry. The fields of a derived class are defined when `super(...)`
+  returns. `super` in an arrow within a method and `super.x` in direct eval code in a method
+  now run. An arrow inside a derived constructor keeps the constructor's `this` binding in the
+  function environment whether or not it reads `this` (184 bytes more per kept construction,
+  measured over 100 instances). The compiler emits `ClassHeritage`, `GetSuperConstructor`,
+  `SuperCall`, `SuperCallSpread`, `SuperCallKept`, `BindThis`, `BindThisEnv`, `BindThisName`,
+  `KeepThis`, `KeepThisEnv` and `UninitializeEnv`. The refusal `class heritage is not
+  supported before slice 8` is gone (`story:derived-classes-and-super-call`).
+
+- `eval` in a class field initializer (`#sec-performeval`,
+  `#sec-static-semantics-containsarguments`): a direct eval whose GetThisEnvironment is a
+  field initializer's (an instance or a static field, or an arrow function in one) runs with
+  inFunction and inMethod set, inDerivedConstructor clear and inClassFieldInitializer set,
+  read from the template kind `FieldInitializer`: `new.target` in the eval code is
+  `undefined`, `super.x` reads through the initializer's home object, `super()` is a
+  `SyntaxError` (in a derived class too), `this` is the instance (the class in a static
+  field), a `var` stays in the eval's own record, and ContainsArguments of the eval code
+  (`arguments` outside every function that is not an arrow function) is the `SyntaxError`
+  `arguments in eval code in a class field initializer`, answered before any other early
+  error and before a held refusal of the eval code. An indirect eval there has every flag
+  clear. The refusal `eval in a class field initializer is not supported before slice 8` is
+  gone (`story:eval-in-class-field-initializers`).
+
+- Private methods and accessors run (`#sec-private-names`,
+  `#sec-privateelement-specification-type`): each evaluation of a class makes one Private Name
+  per private identifier (a heap record of its own, its description the identifier with its
+  `#`), held by the class's private record, a lexical scope pushed after the heritage. An
+  object holds its private elements in a list of its own, charged to the memory budget before
+  it grows: a box of 24 bytes and 44 bytes per element, reserved once per class level for
+  exactly the elements that level adds (a getter and a setter of one name are one element), so
+  an instance of a class with one private method costs 68 bytes over a plain instance, with 4
+  methods 200, with 17 methods 772
+  (`private_methods::an_instance_pays_for_the_room_of_its_list`). The instance's private
+  methods and accessors are added by the class's instance initializer before any other
+  element, the static ones to the constructor before the first static element runs
+  (PrivateMethodOrAccessorAdd); an object a base constructor returns gets them too, and a
+  second add of the same name is a `TypeError`. `o.#m`, `o.#m()` with `o` as `this`,
+  `o?.#m()`, and every assignment form on a private reference (plain, compound, logical,
+  update, destructuring and the `for`-`in`/`of` head) run PrivateGet and PrivateSet, which
+  throw a `TypeError` for a missing element, a primitive, a write to a method and a read or
+  write of an accessor that lacks that half. A find spends a step per comparison past the
+  eighth entry, so a construction that adds n private elements of one class level spends
+  (n - 9)(n - 8)/2 steps on its adds for n over 9 and none below. Private names are not
+  visible to any listing of the language or of the host interface; the collector frees a
+  Private Name that nothing holds. One class holds at most 32,768 private methods with names
+  of their own (the 65,536 slots of its private record); past it the class is the
+  `SyntaxError` `more private record slots in one class than the bytecode can number`. Direct
+  eval code that reads a private name an enclosing class declares is refused with the
+  `SyntaxError` `private name #x in direct eval code is not supported before slice 8` until
+  `story:private-names-in-eval-code`; a name no enclosing class declares, an indirect `eval`
+  and `Function` keep the early error `private name #x is not declared in an enclosing
+  class`. The hold `private method is not supported before slice 8` is gone
+  (`story:private-names-and-private-methods`).
+
+- Host object overrides, a story of the ninth slice: a host object may carry an override
+  table, `Overrides<H>`, with one optional function per essential internal method. An
+  override's answer, and an answer of the object's record where the table leaves an override
+  out, is checked against the invariants of ECMA-262 6.1.7.3, read as facts of the object's
+  own earlier answers; a broken invariant ends the run in `Terminated(EngineFault)`. "Host
+  interface" below names the surface and the one breaking change, `HostObjectSpec`
+  (`story:host-object-overrides`).
+
 ### Changed
+
+- The walk that calls every function of the realm with a Symbol in each place runs in 2
+  parts and reads the places of the functions from a committed file,
+  `crates/swell/tests/fixtures/realm_places.txt` (344 places), which the task
+  `realm-places-expected` writes. A place is in the part its line hashes to (FNV-1a, 64 bit),
+  so a function the realm gains moves no other place. Each part takes from the file the
+  places, calls and rows it owes and fails when it walked, called or met fewer. The test
+  `the_realm_places_file_equals_the_walk` makes the list again in the default mode at every
+  gate run and fails when the file differs, its two comment lines included; before the writer
+  writes, it reads every place back to its function and fails naming one that does not read
+  back. The cover test `the_parts_of_the_walk_cover_every_function_of_the_realm` holds the
+  file's form, the partition, no empty part, no part under half the mean, at most 8 parts and
+  the rows of `WALK_EXPECTED`, two of which (`Array.prototype.with` with the Symbol as
+  argument 2 or 3) carry the condition their clause tests, an index at least the length that
+  earlier calls left. The slowest part takes 0.022 CPU seconds alone in the default mode,
+  0.317 with a collection at every safe point and 0.672 there at the full count, against
+  0.069, 4.10 and 6.59 for the one walk before. The gate's steps `build`, `build-tests`, `test`
+  and `test-doc` read their flags and nextest arguments from `TEST_RUSTFLAGS` and
+  `TEST_NEXTEST_ARGS` of `taskfiles/realm-places.yml`, which the writer reads too, list both
+  in `gate-vars`, and fail with one line when either is empty or is not that file's value
+  (`story:realm-walk-in-parts-under-the-cpu-bound`).
+
+- The record of every object is 208 bytes, before 200: it holds the box of the object's
+  private elements (`private_elements`, empty for an object without one). Every reading that
+  counts objects rises by 8 bytes per object, over the readings of the next entry:
+  `heap_bytes()` after `create_realm` reads 393,818 bytes (389,722 without the field),
+  `live_bytes()` 281,115 (277,947); the reading of HOST-187 is 398,621 bytes (394,525), its
+  bound `BINDINGS_REALM_HEAP_BYTES` (506,112) unchanged; a host function reads 512 live bytes
+  (504) and a host object 208 (200), with 4,096 bytes of host data 4,624 (4,616) and 4,304
+  (4,296) (`host_186`, `host_187`). `JSON.parse` of 100,000 nested brackets, which returned
+  its result under a memory budget of 64 MiB, needs 66,304 KiB now
+  (`story:private-names-and-private-methods`).
 
 - A realm reads larger. The collector's workspace holds a head word per slot of every arena
   besides the mark word and the room on the worklist, charged with the arenas' capacity
@@ -426,10 +553,39 @@ Every number below comes from the gate, `task check`, on the released commit.
   `swell::determinism::host_214_two_processes_print_the_same_map_order`. A `Map` and a `Set`
   give their keys in insertion order under every `hash_key`, and two child processes print
   the same order (`story:map-and-set`).
-- `HOST-222` (slice 9, pending): an override of a host object whose `Ok` or `Abrupt::Throw`
-  value holds a stale handle or a handle of another agent ends the run with
-  `Terminated(EngineFault)`. It is the start gate of `story:host-object-overrides`, which
-  moves it to a test.
+- `HOST-222` (slice 9): an override of a host object whose `Ok` or `Abrupt::Throw` value
+  holds a stale handle or a handle of another agent ends the run with
+  `Terminated(EngineFault)`. It was the start gate of `story:host-object-overrides`, which
+  holds it with a test.
+- `Overrides`: the override table of a host object, generic over the host type
+  (`Overrides<H>`), with one optional function per internal method:
+  `Overrides::get_prototype_of`, `Overrides::set_prototype_of`,
+  `Overrides::is_extensible`, `Overrides::prevent_extensions`, `Overrides::get_own_property`,
+  `Overrides::define_own_property`, `Overrides::has_property`, `Overrides::get`,
+  `Overrides::set`, `Overrides::delete` and `Overrides::own_property_keys`, as
+  `docs/design/host-interface.md` section 15 states them.
+  - Each override given runs in place of the ordinary method; each one left `None` runs the
+    ordinary one (HOST-114).
+  - An override call is one re-entry and spends a step.
+  - The handles of its answer are checked first (HOST-222). Then the answer is checked
+    against the invariants of the essential internal methods, read as facts of the object's
+    own earlier answers.
+  - An answer of the object's record, where the table leaves an override out, is checked
+    and recorded the same way: an answer is the object's, whoever gives it.
+  - A `has_property` false records nothing and faults only for a non-configurable property
+    (reported by `get_own_property`, or held by the record), extensible or not.
+  - A stale or foreign handle, a descriptor that is not complete (HOST-113), or a broken
+    invariant (HOST-112) ends the run in `Terminated(EngineFault)` and faults the agent.
+    Nothing is thrown to the script.
+  - A global object whose `define_own_property` refuses a property of clause 19 makes
+    `create_realm` answer `Throw` of a `TypeError` (HOST-41).
+- `HostObjectSpec` changed: it takes the host type, `HostObjectSpec<H>`, and has the field
+  `HostObjectSpec::overrides`, of type `Option<&'static Overrides<H>>`.
+- `new_host_object` takes `HostObjectSpec<H>`.
+- **Breaking**: `HostObjectSpec`. A host that names the type or writes a literal stops
+  compiling once. A literal names `overrides` (`overrides: None` for no table), and a type
+  position names the host type (`HostObjectSpec<MyHost>`).
+- Requirements delivered: HOST-41, HOST-112, HOST-113, HOST-114, HOST-222.
 
 ## [0.12.0] - 2026-11-25
 

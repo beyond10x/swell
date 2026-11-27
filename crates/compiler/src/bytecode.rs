@@ -191,6 +191,59 @@ pub enum Instruction {
     /// (`#sec-putvalue`; `#sec-evaluate-property-access-with-expression-key`: the key is converted
     /// after the value is evaluated).
     PutIndex,
+    /// `[o] -> [v]`: GetValue of the private reference `o.#x` (`#sec-getvalue`, step 3:
+    /// ToObject of `o`, then PrivateGet, `#sec-privateget`) whose Private Name is slot `slot` of
+    /// the environment `hops` outward, the private record of the class that declares `#x`
+    /// (`docs/design/engine.md`, "Private names", items 3 and 5): the field's value, the method,
+    /// or the getter called with `o` as `this`; a `TypeError` when `o` has no element of the
+    /// name or the accessor has no getter.
+    GetPrivate {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[o, v] -> [v]`: PutValue of the private reference `o.#x` (`#sec-putvalue`, step 3:
+    /// ToObject of `o`, then PrivateSet, `#sec-privateset`), the Private Name found as
+    /// [`Instruction::GetPrivate`] finds it: a field takes `v`, the setter of an accessor is
+    /// called with `o` as `this` and `v`; a `TypeError` when `o` has no element of the name, for
+    /// a method, and for an accessor with no setter.
+    SetPrivate {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[o] -> [o]`: PrivateMethodOrAccessorAdd (`#sec-privatemethodoraccessoradd`) of the method,
+    /// getter or setter whose function is slot `function_slot` of the environment
+    /// `function_hops` outward, keyed by the Private Name in slot `slot` of the environment
+    /// `hops` outward (both the private record), to `o`: a getter or a setter joins the
+    /// accessor of the name that lacks that half, which its partner added just before (the
+    /// combined element of ClassDefinitionEvaluation, step 27.e); otherwise an element of the
+    /// name already on `o` is a `TypeError`. `room` is the number of elements the adds of this
+    /// class level make (its private methods and accessors that are not static, or those that
+    /// are, a getter and a setter of one name counted once): an add that finds the list of `o`
+    /// full reserves room for exactly `room` elements, so each level of a construction reserves
+    /// once and an instance pays for its elements alone.
+    ///
+    /// The fields are 16 bits wide so the instruction keeps the size of the others. The private
+    /// record of a class holds one slot per private identifier and one per private method,
+    /// getter or setter function, so its slots are numbered 0 to 65,535 at most: 32,768 private
+    /// methods with names of their own fill it. A class with a larger private record, or a
+    /// record more than 65,535 environments out, is refused by the compiler
+    /// (`CompileError::TooManyInClass`).
+    AddPrivateMethod {
+        hops: u16,
+        slot: u16,
+        function_hops: u16,
+        function_slot: u16,
+        room: u16,
+    },
+    /// A new Private Name whose [[Description]] is `strings[name]` into slot `slot` of the
+    /// LexicalEnvironment, the private record the class's code just pushed: one per private
+    /// identifier the class declares, made at each evaluation of the class
+    /// (`#sec-runtime-semantics-classdefinitionevaluation`, step 7; `docs/design/engine.md`,
+    /// "Private names", item 3).
+    NewPrivateName {
+        slot: u32,
+        name: u32,
+    },
     /// `[o, key] -> [o, key']`: the first steps of GetValue of `o[key]` before the reference is
     /// read and written by a compound assignment or an update: a `TypeError` when `o` is
     /// `undefined` or `null` (ToObject), then `key'` is ToPropertyKey of `key`, so the key is
@@ -273,12 +326,19 @@ pub enum Instruction {
     /// heritage): OrdinaryObjectCreate(protoParent), protoParent `%Object.prototype%` of the
     /// current realm.
     ClassPrototype,
+    /// `[h] -> [c, p]`: the ClassHeritage of ClassDefinitionEvaluation (steps 8.d to 8.h and
+    /// 10) with the value `h` of its expression: for `null` protoParent `null` and
+    /// constructorParent `c` `%Function.prototype%` of the current realm; a `TypeError` when `h`
+    /// is no constructor; else protoParent Get(h, "prototype"), a `TypeError` when it is
+    /// neither an object nor `null`, and `c` is `h`. `p` is OrdinaryObjectCreate(protoParent).
+    ClassHeritage,
     /// `[p] -> [p, F]`: the class constructor F made from template `functions[function]` in the
     /// LexicalEnvironment (steps 14 to 18): its [[HomeObject]] `p`, its name and `length` from
     /// the template, its box of kind derived when `derived` and base otherwise (MakeClassConstructor,
     /// `#sec-makeclassconstructor`); then MakeConstructor(F, false, p), F's `prototype`
     /// { [[Writable]]: false, [[Enumerable]]: false, [[Configurable]]: false }, and
-    /// CreateMethodProperty(p, "constructor", F) (step 19).
+    /// CreateMethodProperty(p, "constructor", F) (step 19). When `derived`, `[c, p] -> [p, F]`:
+    /// F's [[Prototype]] is constructorParent `c`, which [`Instruction::ClassHeritage`] left.
     MakeClassConstructor {
         function: u32,
         derived: bool,
@@ -445,6 +505,46 @@ pub enum Instruction {
     CallEvalSpread,
     /// `[f, args] -> [v]`: `New(n)` with the elements of `args`.
     NewSpread,
+    /// `[] -> [c]`: GetSuperConstructor (`#sec-getsuperconstructor`): the [[GetPrototypeOf]] of
+    /// the running frame's function, the derived constructor GetThisEnvironment answers (for an
+    /// arrow function and eval code the function they stand for), before the arguments of a
+    /// SuperCall are evaluated (`docs/design/engine.md`, "Classes", item 7).
+    GetSuperConstructor,
+    /// `[c, a1 .. an] -> [r]`: SuperCall (`#sec-super-keyword-runtime-semantics-evaluation`,
+    /// steps 5 and 6): a `TypeError` when `c` is not a constructor, then Construct(c,
+    /// «a1 .. an», NewTarget) with the running frame's NewTarget, `r` its result. An ECMAScript
+    /// constructor runs in a frame of this loop, as `New(n)` makes one; any other constructor
+    /// is constructed from Rust.
+    SuperCall(u32),
+    /// `[c, args] -> [r]`: `SuperCall(n)` with the elements of the Array `args`.
+    SuperCallSpread,
+    /// `[c] -> [r]`: `SuperCall(n)` with the arguments the call kept in the frame's local slots
+    /// from slot `n` on (the default derived constructor, ClassDefinitionEvaluation step 14.a:
+    /// the arguments passed on as they are, no iterator read), a step per argument.
+    SuperCallKept(u32),
+    /// `[r] -> [r]`: BindThisValue (`#sec-bindthisvalue`) of the `this` binding of a derived
+    /// constructor in local slot `n` ("Classes", item 6): a `ReferenceError` when it is
+    /// initialized already, else it is initialized with `r`.
+    BindThis(u32),
+    /// `[r] -> [r]`: `BindThis` of the binding in slot `slot` of the environment `hops` records
+    /// out from the LexicalEnvironment (an arrow function or a direct `eval` reaches it).
+    BindThisEnv {
+        hops: u32,
+        slot: u32,
+    },
+    /// `[r] -> [r]`: `BindThis` of the binding `strings[k]` (`this`) looked up by name from the
+    /// LexicalEnvironment, for eval code whose context has inDerivedConstructor.
+    BindThisName(u32),
+    /// The frame's `this` becomes the value of the `this` binding of a derived constructor in
+    /// local slot `n` when it is initialized, `undefined` otherwise; it throws nothing. It runs
+    /// before every `Return` of a derived constructor ("Classes", item 8), whose return rule
+    /// reads the frame's `this`.
+    KeepThis(u32),
+    /// `KeepThis` of the binding in slot `slot` of the environment `hops` records out.
+    KeepThisEnv {
+        hops: u32,
+        slot: u32,
+    },
 
     // ---- control --------------------------------------------------------------------------
     /// Continues at instruction `t`, which is after this one.
@@ -575,6 +675,13 @@ pub enum Instruction {
     /// Local slot `n` becomes uninitialized: the entry of the scope of a `let` or `const`
     /// binding that some access checks (`#sec-blockdeclarationinstantiation`).
     Uninitialize(u32),
+    /// Slot `slot` of the environment `hops` records out from the LexicalEnvironment becomes
+    /// uninitialized: the first instruction of a derived constructor whose `this` binding lives
+    /// in its function environment ("Classes", item 6), before the parameters are bound.
+    UninitializeEnv {
+        hops: u32,
+        slot: u32,
+    },
     /// A new declarative environment of one uninitialized slot per name of `scopes[t]` of the
     /// running code, which names its slots, whose outer is the LexicalEnvironment, becomes the
     /// LexicalEnvironment: BlockDeclarationInstantiation of a block, a case block, a `for` or
@@ -901,6 +1008,10 @@ impl Instruction {
             | Instruction::PutNamed(_)
             | Instruction::GetIndex
             | Instruction::PutIndex
+            | Instruction::GetPrivate { .. }
+            | Instruction::SetPrivate { .. }
+            | Instruction::AddPrivateMethod { .. }
+            | Instruction::NewPrivateName { .. }
             | Instruction::PropertyKey
             | Instruction::DeleteNamed(_)
             | Instruction::DeleteIndex
@@ -920,6 +1031,7 @@ impl Instruction {
             | Instruction::DefineMethod(_)
             | Instruction::InitProto
             | Instruction::ClassPrototype
+            | Instruction::ClassHeritage
             | Instruction::MakeClassConstructor { .. }
             | Instruction::DefineClassMethod(_)
             | Instruction::DefineClassGetter(_)
@@ -1033,6 +1145,16 @@ impl Instruction {
             | Instruction::PatternStep(_)
             | Instruction::PatternSkip
             | Instruction::PatternRest(_) => None,
+            Instruction::GetSuperConstructor
+            | Instruction::SuperCall(_)
+            | Instruction::SuperCallSpread
+            | Instruction::SuperCallKept(_)
+            | Instruction::BindThis(_)
+            | Instruction::BindThisEnv { .. }
+            | Instruction::BindThisName(_)
+            | Instruction::KeepThis(_)
+            | Instruction::KeepThisEnv { .. }
+            | Instruction::UninitializeEnv { .. } => None,
             Instruction::JumpIfNotUndefined(t) => Some(t),
         }
     }

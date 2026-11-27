@@ -1003,6 +1003,7 @@ fn a_host_object_with_the_aggregate_error_kind_has_no_errors() {
                     brand: Brand(201),
                     data: None,
                     error_kind: Some(ErrorKind::AggregateError),
+                    overrides: None,
                 })
                 .unwrap()
                 .unwrap();

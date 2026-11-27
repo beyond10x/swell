@@ -272,6 +272,7 @@ fn host_49_setup_closure_and_clause_19_globals() {
                         brand: Brand(round),
                         data: None,
                         error_kind: None,
+                        overrides: None,
                     })
                     .unwrap()?;
                 Ok(GlobalObjects { global, this: None })
@@ -352,6 +353,7 @@ fn host_53_parse_defines_no_global_binding() {
                     brand: Brand(5),
                     data: None,
                     error_kind: None,
+                    overrides: None,
                 })
                 .unwrap()?;
             Ok(GlobalObjects { global, this: None })

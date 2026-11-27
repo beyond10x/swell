@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T02:37:13Z",
+  "actor": "human:operator",
+  "artifact": "story:public-class-fields",
+  "kind": "story",
+  "revision": 11,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/fields at 52307e7b, build node, before the merge into wave/big-2",
+    "reference": "swell-syntax main 79 passed (79 at full counts); swell-compiler main 17 passed; swell main 1523 passed, 1 skipped; swell main with collect-every-safe-point 1502 passed, 1 skipped; swell lib 277 passed; test-stack-profiles release and stack-debug 4 passed each; task clippy exit 0; cargo fmt --check exit 0"
+  }
+}

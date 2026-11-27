@@ -1740,9 +1740,9 @@ a call of a script function with an empty body, and what the host charges with
 **The host makes objects with a brand (the Web IDL interface they implement), host data of any
 Rust type that implements `HostData`, and optionally a table of internal-method overrides.
 The engine traces host data through `HostData::trace`. After each override returns, the engine
-checks the result against the invariants of 6.1.7.3 with the checks the `Proxy` internal
-methods use, and a broken invariant ends the run with `Terminated(EngineFault)`. An object may
-carry [[IsHTMLDDA]].** (`engine.md` decision 9, kept.)
+checks the result against the invariants of 6.1.7.3, read as facts of the object's own
+earlier answers, and a broken invariant ends the run with `Terminated(EngineFault)`. An
+object may carry [[IsHTMLDDA]].** (`engine.md` decision 9, kept.)
 
 Why: "Any implementation provided exotic objects must also maintain these invariants for those
 objects. Violation of these invariants may cause ECMAScript code to have unpredictable
@@ -1761,6 +1761,63 @@ issue the clause names).
 Every handle in an override's `Ok` or `Abrupt::Throw` value is checked first, as decision 6 says
 of a handle the host returns: a stale handle or a handle of another agent ends the run with
 `Terminated(EngineFault)` before any invariant is checked (HOST-222).
+
+The engine checks an answer of a host object with an override table against the invariants
+of the essential internal methods (6.1.7.3) as the clause words them: against facts of the
+object's own earlier answers ("previously observed"), not against a target's live state. A
+host object has no target, and its box of facts is a record of what it answered. An answer
+is the object's whoever gives it: an override, or the record where the table leaves that
+override out. The record's PreventExtensions, SetPrototypeOf, Delete and OwnPropertyKeys are
+checked and recorded as the override's answers are; its other methods read
+[[GetOwnProperty]], [[IsExtensible]] and [[GetPrototypeOf]] through the object's own methods,
+so their answers are made from answers already checked.
+
+- A key that `get_own_property` reported non-configurable is fixed. It is not reported
+  absent, [[Delete]] does not answer true for it, `has_property` does not answer false for
+  it, a non-writable data value does not change, and every key list holds it.
+- A key reported present and configurable may later be reported absent, deleted, or
+  answered false by `has_property`. This holds also after the object reported itself not
+  extensible, as it does for an ordinary object.
+- Once the object reported itself not extensible (`is_extensible` false, or
+  [[PreventExtensions]] true), a key reported non-existent stays non-existent. A key is
+  reported non-existent when `get_own_property` answers absent, [[Delete]] answers true, or
+  a key list leaves it out. After that, a descriptor for the key, a `define_own_property`
+  that answers true for it, or a key list that holds it is a broken invariant. Before that
+  report, an absent answer binds nothing.
+- A `has_property` false records nothing. It breaks an invariant only for a non-configurable
+  property, one `get_own_property` reported or one the record holds, whether or not the
+  object is extensible: the clause binds [[HasProperty]] only for a key observed
+  non-configurable. The Proxy's further check (a false for a configurable property of a
+  non-extensible target) does not apply to a host object.
+- Once the object reported itself not extensible, each key list holds only keys of the list
+  before it and every fixed key. A key list never holds a key twice.
+- The prototype reported after the object reported itself not extensible stays.
+- Where the table lacks `get_own_property`, `is_extensible` or `get_prototype_of`, the record
+  answers for that method and is the fact as it stands; the checks compare with it as the
+  Proxy's compare with a target, except the `has_property` check named above:
+  - the record's own properties, while the table has no `get_own_property`. A key list must
+    then hold each non-configurable property of the record and, while the object is not
+    extensible, only keys of the record;
+  - its [[Extensible]], while the table has no `is_extensible`;
+  - its [[Prototype]], while the table has no `get_prototype_of`.
+
+A broken invariant ends the run in `Terminated(EngineFault)`.
+
+Bounds:
+- The box of facts and each growth of its tables are charged before they are made, and
+  credited when the object is freed.
+- A fixed key costs one entry of 72 bytes and its control byte. A key non-existent costs 32
+  bytes and its control byte.
+- A fact is recorded only from an answer of the object: at most one per override call, and
+  a key list's keys only when it is the first list after the report, a step per key. A key
+  the record's Delete makes non-existent follows a call of the `get_own_property` override.
+  The step budget therefore bounds the facts one entry adds, and the memory budget bounds
+  all of them.
+
+Rejected: the checks of the `Proxy` internal methods as they stand. They compare an answer
+with the live state of a target, and a host object has no target. Applied to the record of
+a host object they also refuse what the clause allows: a configurable key of an object that
+is not extensible could never be deleted, and a `has_property` false for it would fault.
 
 ```rust
 #[derive(Clone, Copy, PartialEq, Eq)] pub struct Brand(pub u32);
