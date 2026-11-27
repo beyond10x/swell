@@ -306,6 +306,27 @@ Every number below comes from the gate, `task check`, on the released commit.
 
 ### Changed
 
+- The walk that calls every function of the realm with a Symbol in each place runs in 2
+  parts and reads the places of the functions from a committed file,
+  `crates/swell/tests/fixtures/realm_places.txt` (344 places), which the task
+  `realm-places-expected` writes. A place is in the part its line hashes to (FNV-1a, 64 bit),
+  so a function the realm gains moves no other place. Each part takes from the file the
+  places, calls and rows it owes and fails when it walked, called or met fewer. The test
+  `the_realm_places_file_equals_the_walk` makes the list again in the default mode at every
+  gate run and fails when the file differs, its two comment lines included; before the writer
+  writes, it reads every place back to its function and fails naming one that does not read
+  back. The cover test `the_parts_of_the_walk_cover_every_function_of_the_realm` holds the
+  file's form, the partition, no empty part, no part under half the mean, at most 8 parts and
+  the rows of `WALK_EXPECTED`, two of which (`Array.prototype.with` with the Symbol as
+  argument 2 or 3) carry the condition their clause tests, an index at least the length that
+  earlier calls left. The slowest part takes 0.022 CPU seconds alone in the default mode,
+  0.317 with a collection at every safe point and 0.672 there at the full count, against
+  0.069, 4.10 and 6.59 for the one walk before. The gate's steps `build`, `build-tests`, `test`
+  and `test-doc` read their flags and nextest arguments from `TEST_RUSTFLAGS` and
+  `TEST_NEXTEST_ARGS` of `taskfiles/realm-places.yml`, which the writer reads too, list both
+  in `gate-vars`, and fail with one line when either is empty or is not that file's value
+  (`story:realm-walk-in-parts-under-the-cpu-bound`).
+
 - The record of every object is 208 bytes, before 200: it holds the box of the object's
   private elements (`private_elements`, empty for an object without one). Every reading that
   counts objects rises by 8 bytes per object, over the readings of the next entry:
