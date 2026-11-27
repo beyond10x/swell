@@ -783,14 +783,18 @@ fn eval_sources_answer_their_header() {
     println!("eval: {} file(s)", files.len());
 }
 
-/// `parse_script` parses a script, never eval code of a caller with every flag false: at the top
-/// of a script and of such eval code `super.x` is the early error of
-/// `#sec-scripts-static-semantics-early-errors` (PerformEval, steps 7 to 11: no flag of the
-/// context is set); with `in_method` eval code admits a SuperProperty and not a SuperCall, with
-/// `in_derived_constructor` both; `new.target` is the early error of its own rule through both
-/// entries, and admitted in eval code only with `in_function`.
+/// `parse_script` parses a script, never eval code under one of PerformEval's flags (steps 7 to
+/// 11): each source that eval code admits under one flag (`new.target` with `in_function`,
+/// `super.x` with `in_method`, `super()` with `in_derived_constructor`) is an early error of a
+/// script (`#sec-scripts-static-semantics-early-errors`), so a `parse_script` that parsed as
+/// eval code with any of the three flags set answers one of them wrong. Eval code with every flag
+/// false is the language of a script: `parser::parse` and `parser::parse_eval` of that context
+/// set up the same parser, so no source tells the two apart, and the test compares them only by
+/// the errors they share (`super.x`, `super()`, `new.target`). With `in_method` eval code admits
+/// a SuperProperty and not a SuperCall, with `in_derived_constructor` both, and a method or
+/// function inside it has its own `super` state.
 #[test]
-fn a_script_is_not_parsed_as_eval_code() {
+fn a_script_refuses_what_each_eval_flag_admits() {
     let options = ParseOptions { max_nesting: LIMIT };
     let eval = |text: &str, context: EvalContext| {
         parse_eval(&units(text), context, options).map_err(|errors| messages(&errors))
@@ -799,8 +803,17 @@ fn a_script_is_not_parsed_as_eval_code() {
     let super_property = vec!["super property outside a method".to_string()];
     let super_call = vec!["super call outside a derived class constructor".to_string()];
     let new_target = vec!["new.target outside a function".to_string()];
-    assert_eq!(script("super.x;"), Err(super_property.clone()));
+    let only = |flag: fn(&mut EvalContext)| {
+        let mut context = EvalContext::from(false);
+        flag(&mut context);
+        context
+    };
+    assert!(eval("new.target;", only(|c| c.in_function = true)).is_ok());
+    assert!(eval("super.x;", only(|c| c.in_method = true)).is_ok());
+    assert!(eval("super();", only(|c| c.in_derived_constructor = true)).is_ok());
     assert_eq!(script("new.target;"), Err(new_target.clone()));
+    assert_eq!(script("super.x;"), Err(super_property.clone()));
+    assert_eq!(script("super();"), Err(super_call.clone()));
     assert_eq!(
         eval("super.x;", EvalContext::from(false)).map(|_| ()),
         Err(super_property.clone())

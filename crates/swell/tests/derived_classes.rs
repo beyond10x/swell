@@ -413,6 +413,60 @@ fn the_default_derived_constructor_passes_arguments_without_an_iterator() {
     );
 }
 
+/// The default derived constructor passes its kept arguments on at a step per argument, as
+/// `RestArguments` copies them (`SuperCallKept`, `docs/design/engine.md`, "Classes", item 7).
+/// `Reflect.construct` with 100 arguments against none, read on `last_entry_steps()`:
+/// - straight into the base class `P`, 200 steps more: 100 for the list CreateListFromArrayLike
+///   makes of the array (`#sec-createlistfromarraylike`) and 100 for `P`'s `arguments` object
+///   (CreateUnmappedArgumentsObject), the cost of the spread and of its reader;
+/// - through the three default constructors of `D3`, `D2` and `D1` down to `P`, 500 steps
+///   more: those 200 and one step per argument at each of the three levels, 300.
+#[test]
+fn the_default_derived_constructor_charges_a_step_per_argument_per_level() {
+    let mut agent = agent().unwrap();
+    let realm = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &realm,
+            "class P { constructor() { this.n = arguments.length; } }\n\
+             class D1 extends P {} class D2 extends D1 {} class D3 extends D2 {}\n\
+             var none = [], hundred = [];\n\
+             for (var i = 0; i < 100; i++) hundred.push(i);\n\
+             true;"
+        ),
+        passed()
+    );
+    let mut steps = |source: &str| {
+        assert_eq!(eval_text(&mut agent, &realm, source), passed(), "{source}");
+        agent.last_entry_steps().unwrap()
+    };
+    let direct = steps("Reflect.construct(P, hundred).n === 100;")
+        - steps("Reflect.construct(P, none).n === 0;");
+    let levels = steps("Reflect.construct(D3, hundred).n === 100;")
+        - steps("Reflect.construct(D3, none).n === 0;");
+    assert_eq!((direct, levels), (200, 200 + 3 * 100));
+}
+
+/// `KeepThisEnv` before each `return` of a derived constructor whose `this` lives in its
+/// function environment counts its hops from the environment the `return` stands in: from a
+/// block with a captured `let`, from such a block inside `try` with a `finally`, from a
+/// `finally` block with one, from a `for (let ...)` body and from a `catch` block, after
+/// `super()`, each returns the object (a hop count that left out the environments the
+/// constructor's own code pushed reads another slot and throws a `ReferenceError`).
+#[test]
+fn a_return_from_an_inner_environment_keeps_the_bound_this() {
+    both_pass(
+        "class A { constructor(x) { this.x = x; } }\n\
+         class B extends A { constructor() { var f = () => this; { let a = 1; var g = () => a; super(1); return; } } }\n\
+         class T extends A { constructor() { var f = () => this; try { let a = 2; var g = () => a; super(2); return; } finally { f(); } } }\n\
+         class F extends A { constructor() { var f = () => this; try { super(3); } finally { let b = 3; var h = () => b; return; } } }\n\
+         class L extends A { constructor() { var f = () => this; for (let i = 4; ; ) { var g = () => i; super(i); return; } } }\n\
+         class C extends A { constructor() { var f = () => this; try { throw 5; } catch (e) { var g = () => e; super(e); return; } } }\n\
+         new B().x === 1 && new T().x === 2 && new F().x === 3 && new L().x === 4 && new C().x === 5;",
+    );
+}
+
 /// How many levels [`a_chain_of_1000_derived_classes_ends_at_the_step_budget`] makes: 1,000,
 /// and 100 with a collection at every safe point, which marks every frame at each instruction,
 /// so the cost grows with the square of the depth; the smaller chain still runs `super()` at
@@ -525,4 +579,198 @@ fn super_into_a_host_constructor_is_bounded_by_reentry_depth() {
         eval_text(&mut agent, &realm, "1 + 1;"),
         Outcome::Normal("2".to_string())
     );
+}
+
+/// What a construction or call answers, as text: `ok`, or the `name` of what it threw.
+const ANSWER_PRELUDE: &str = "function t(f) { try { f(); return 'ok'; } catch (e) { return (e && e.name) || String(e); } }\n\
+     class A { constructor(x) { this.x = x; } }\n\
+     var log = [];\n";
+
+/// GetThisBinding (`#sec-function-environment-records-getthisbinding`, step 2) before
+/// `super()` from every place that reads `this`: `delete this`, a template, a destructuring
+/// default, a parameter's initializer, an arrow in an arrow, direct eval with `typeof` and
+/// `delete`; a SuperProperty reads `this` before its key and before the value of an assignment
+/// (`#sec-super-keyword-runtime-semantics-evaluation`); a `finally` after a parent that threw
+/// still finds `this` unbound, and a second `super()` after one that threw binds it.
+#[test]
+fn this_before_super_throws_in_every_position_that_reads_it() {
+    both_pass(&[
+        ANSWER_PRELUDE,
+        "\
+         var tdz = [\n\
+           t(() => new (class extends A { constructor() { delete this; super(); } })()),\n\
+           t(() => new (class extends A { constructor() { `${this}`; super(); } })()),\n\
+           t(() => new (class extends A { constructor() { var { a = this } = {}; super(); } })()),\n\
+           t(() => new (class extends A { constructor(a = this) { super(); } })()),\n\
+           t(() => new (class extends A { constructor() { (() => () => this)()(); super(); } })()),\n\
+           t(() => new (class extends A { constructor() { eval('typeof this'); super(); } })()),\n\
+           t(() => new (class extends A { constructor() { eval('delete this'); super(); } })()),\n\
+           t(() => new (class extends A { constructor() { super[log.push('key')]; super(); } })()),\n\
+           t(() => new (class extends A { constructor() { super.x = log.push('value'); super(); } })()),\n\
+           t(() => new (class extends A { constructor() { super[log.push('k')] = log.push('v'); super(); } })()),\n\
+           t(() => new (class extends (class { constructor() { throw 1; } }) { constructor() { try { super(); } finally { this.q = 1; } } })())\n\
+         ];\n\
+         var n = 0;\n\
+         class Retry extends (class { constructor() { if (n++ === 0) throw 1; this.ok = 1; } }) { constructor() { try { super(); } catch (e) {} super(); } }\n\
+         class Params extends A { constructor(a = super(1), b = this, f = () => this) { this.same = b === this && f() === this; } }\n\
+         tdz.join() === 'ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError,ReferenceError'\n\
+           && log.length === 0 && new Retry().ok === 1 && new Params().same === true && new Params().x === 1;"
+    ].concat());
+}
+
+/// The return rule of a derived [[Construct]] (steps 10 to 12) through the routes that
+/// [`return_errors_are_of_the_callers_realm`] and
+/// [`return_errors_through_a_bound_function_are_of_the_callers_realm`] do not take, with the
+/// classes of the realm `there`: the errors are made once the
+/// callee's context is removed, so they are of the realm of the context that is current then:
+/// `Reflect.construct` of this realm and of `there` (a builtin function's own context), a
+/// Proxy without a `construct` trap and a SuperCall from a class of this realm (the caller's),
+/// and the host's own construct (the realm it names).
+#[test]
+fn return_errors_by_every_route_of_construct_are_of_the_current_realm() {
+    let (mut agent, here) = two_realms();
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &here,
+            "var r = [];\n\
+             var OtherReflect = Object.getPrototypeOf(OtherTypeError).constructor('return Reflect')();\n\
+             var HereNum = class extends (class {}) { constructor() { super(); return 1; } };\n\
+             function kind(make, Here, There) { try { make(); r.push('none'); } catch (e) { r.push(e instanceof Here ? 'here' : e instanceof There ? 'there' : 'other'); } }\n\
+             kind(function () { Reflect.construct(Num, []); }, TypeError, OtherTypeError);\n\
+             kind(function () { Reflect.construct(None, []); }, ReferenceError, OtherReferenceError);\n\
+             kind(function () { new (new Proxy(Num, {}))(); }, TypeError, OtherTypeError);\n\
+             kind(function () { new (class extends Num { constructor() { super(); } })(); }, TypeError, OtherTypeError);\n\
+             kind(function () { OtherReflect.construct(Num, []); }, TypeError, OtherTypeError);\n\
+             kind(function () { OtherReflect.construct(None, []); }, ReferenceError, OtherReferenceError);\n\
+             kind(function () { OtherReflect.construct(HereNum, []); }, TypeError, OtherTypeError);\n\
+             r.join();"
+        ),
+        Outcome::Normal("\"here,here,here,here,there,there,there\"".to_string())
+    );
+    let HostOutcome::Normal(num) = eval(&mut agent, &here, "Num;") else {
+        panic!("Num");
+    };
+    let elsewhere = realm(&mut agent);
+    for current in [&here, &elsewhere] {
+        let HostOutcome::Throw(thrown) = agent.construct(current, &num, &[], None).unwrap() else {
+            panic!("the host's construct of Num did not throw");
+        };
+        let global_root = global(&mut agent, current);
+        let of_current = agent
+            .with_cx(current, |cx| {
+                let global = object(cx, &global_root);
+                let value = cx.get(&thrown).unwrap();
+                support::host::is_error_of(cx, global, value, "TypeError")
+            })
+            .unwrap();
+        assert!(
+            of_current,
+            "the host's construct makes its error in the realm it names"
+        );
+    }
+}
+
+/// The heritage after the class exists: SuperCall and the default constructor read the parent
+/// at the call (a bound function, `null`, a non-constructor after `Object.setPrototypeOf`),
+/// `prototype` of a Proxy heritage is read once and only at the definition, and the forms
+/// with no usable `prototype` throw a `TypeError` at the definition (`Proxy`, a bound
+/// function), while `extends Symbol` defines and its construction throws.
+#[test]
+fn super_reads_a_parent_changed_after_the_definition() {
+    both_pass(&[
+        ANSWER_PRELUDE,
+        "\
+         class B extends A { constructor() { super(5); } }\n\
+         Object.setPrototypeOf(B, A.bind(null));\n\
+         var b = new B();\n\
+         class C extends A {}\n\
+         Object.setPrototypeOf(C, A.bind(null, 6));\n\
+         var c = new C();\n\
+         class N extends A {} Object.setPrototypeOf(N, null);\n\
+         var ev = 0; class X extends A { constructor() { super(ev++); } } Object.setPrototypeOf(X, {});\n\
+         var H = new Proxy(function () {}, { get(target, k) { log.push(String(k)); return target[k]; } });\n\
+         class P extends H {} var defined = log.join(); new P();\n\
+         class S extends Symbol {}\n\
+         b.x === 5 && Object.getPrototypeOf(b) === B.prototype && c.x === 6 && c instanceof C\n\
+           && t(() => new N()) === 'TypeError' && t(() => new X()) === 'TypeError' && ev === 1\n\
+           && defined === 'prototype' && log.join() === 'prototype'\n\
+           && t(() => { class Q extends Proxy {} }) === 'TypeError'\n\
+           && t(() => { class Q extends (function () {}).bind() {} }) === 'TypeError'\n\
+           && t(() => new S()) === 'TypeError';"
+    ].concat());
+}
+
+/// Builtin parents make the instance from NewTarget's `prototype`, and with one that is no
+/// object from the realm of NewTarget (GetPrototypeFromConstructor, step 4): a derived class
+/// of each, constructed by `Reflect.construct` with a NewTarget of the realm `there` whose
+/// `prototype` is a number.
+#[test]
+fn builtin_parents_fall_back_to_the_realm_of_new_target() {
+    let mut agent = agent().unwrap();
+    let here = realm(&mut agent);
+    let there = realm(&mut agent);
+    let HostOutcome::Normal(other) = eval(
+        &mut agent,
+        &there,
+        "var f = function () {}; f.prototype = 1;\n\
+         ({ f: f, protos: [Object.prototype, Array.prototype, Map.prototype, Error.prototype, Promise.prototype, Function.prototype, Number.prototype] });",
+    ) else {
+        panic!("there");
+    };
+    let global_root = global(&mut agent, &here);
+    agent
+        .with_cx(&here, |cx| {
+            let global = object(cx, &global_root);
+            let value = cx.get(&other).unwrap();
+            let name = key(cx, "other");
+            cx.set(global, name, value, true).unwrap().unwrap();
+        })
+        .unwrap();
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &here,
+            "var made = [\n\
+               Reflect.construct(class extends (class {}) {}, [], other.f),\n\
+               Reflect.construct(class extends Array {}, [], other.f),\n\
+               Reflect.construct(class extends Map {}, [], other.f),\n\
+               Reflect.construct(class extends Error {}, [], other.f),\n\
+               Reflect.construct(class extends Promise {}, [function () {}], other.f),\n\
+               Reflect.construct(class extends Function {}, ['return 1'], other.f),\n\
+               Reflect.construct(class extends Number {}, [1], other.f)\n\
+             ];\n\
+             made.every(function (o, i) { return Object.getPrototypeOf(o) === other.protos[i]; });"
+        ),
+        passed()
+    );
+}
+
+/// Each value a SuperCall holds while script runs survives a collection there (meaningful with
+/// `collect-every-safe-point`): the old parent GetSuperConstructor read when the arguments
+/// replace it, a NewTarget only the frame holds, the arguments the default constructor passes
+/// on, the value `super()` answered, a spread's elements, a Proxy trap's run, the prototype a
+/// heritage getter answered, and `this` an arrow made before `super()` reads after it.
+#[test]
+fn values_of_a_super_call_survive_garbage() {
+    both_pass(&[
+        ANSWER_PRELUDE,
+        "\
+         function garbage() { var a = []; for (var i = 0; i < 2; i++) a.push({ i: i, s: 'x' + i }); return 0; }\n\
+         class Old extends A { constructor() { super((Object.setPrototypeOf(Old, A), garbage())); } }\n\
+         Object.setPrototypeOf(Old, class { constructor() { garbage(); this.v = 'old'; } });\n\
+         class Nt extends A { constructor() { garbage(); super(1); } }\n\
+         var nt = Reflect.construct(Nt, [], (function () { function F() {} F.prototype = { tag: 1 }; return F; })());\n\
+         class Kept extends (class { constructor(o) { garbage(); this.k = o.k; } }) {}\n\
+         class Res extends (class { constructor() { this.v = 7; } }) { constructor() { var r = super(); garbage(); this.same = r === this; } }\n\
+         class Spread extends A { constructor() { super(...{ [Symbol.iterator]() { var k = 0; return { next() { garbage(); return k++ ? { done: true } : { value: 3, done: false }; } }; } }); } }\n\
+         var Trapped = new Proxy(class extends A { constructor() { super(9); } }, { construct(t, a, n) { garbage(); return Reflect.construct(t, a, n); } });\n\
+         var G = function () {}.bind(null);\n\
+         Object.defineProperty(G, 'prototype', { get() { garbage(); return { m() { return 'm'; } }; } });\n\
+         class Got extends G {} garbage(); Object.setPrototypeOf(Got, A);\n\
+         class Early extends A { constructor() { var f = () => this; garbage(); super(1); garbage(); this.ok = f() === this; } }\n\
+         var res = new Res();\n\
+         new Old().v === 'old' && nt.tag === 1 && new Kept({ k: 1 }).k === 1 && res.same && res.v === 7\n\
+           && new Spread().x === 3 && new Trapped().x === 9 && new Got().m() === 'm' && new Early().ok;"
+    ].concat());
 }
