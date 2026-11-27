@@ -232,9 +232,13 @@ const CHUNK_STRIDE: usize = if cfg!(feature = "collect-every-safe-point") {
     1
 };
 
-/// One test per plane, each over [`every_code_point_of_a_plane_round_trips`].
+/// One test per plane, each over [`every_code_point_of_a_plane_round_trips`]. The invocation
+/// writes each test as `#[test]` and `fn <name> = <plane>;`, a line that declares the function
+/// by its name, so that `taskfiles/realm-room-tests.awk` sees each test (as `language_parts!` of
+/// `language.rs` does): it prints them "other", and the gate's step `test` runs them at
+/// opt-level 1.
 macro_rules! round_trip_planes {
-    ($($name:ident $plane:literal),* $(,)?) => {
+    ($(#[test] fn $name:ident = $plane:literal;)*) => {
         $(
             #[test]
             fn $name() {
@@ -245,23 +249,40 @@ macro_rules! round_trip_planes {
 }
 
 round_trip_planes!(
-    every_code_point_of_plane_00_round_trips_through_encode_and_decode 0,
-    every_code_point_of_plane_01_round_trips_through_encode_and_decode 1,
-    every_code_point_of_plane_02_round_trips_through_encode_and_decode 2,
-    every_code_point_of_plane_03_round_trips_through_encode_and_decode 3,
-    every_code_point_of_plane_04_round_trips_through_encode_and_decode 4,
-    every_code_point_of_plane_05_round_trips_through_encode_and_decode 5,
-    every_code_point_of_plane_06_round_trips_through_encode_and_decode 6,
-    every_code_point_of_plane_07_round_trips_through_encode_and_decode 7,
-    every_code_point_of_plane_08_round_trips_through_encode_and_decode 8,
-    every_code_point_of_plane_09_round_trips_through_encode_and_decode 9,
-    every_code_point_of_plane_10_round_trips_through_encode_and_decode 10,
-    every_code_point_of_plane_11_round_trips_through_encode_and_decode 11,
-    every_code_point_of_plane_12_round_trips_through_encode_and_decode 12,
-    every_code_point_of_plane_13_round_trips_through_encode_and_decode 13,
-    every_code_point_of_plane_14_round_trips_through_encode_and_decode 14,
-    every_code_point_of_plane_15_round_trips_through_encode_and_decode 15,
-    every_code_point_of_plane_16_round_trips_through_encode_and_decode 16,
+    #[test]
+    fn every_code_point_of_plane_00_round_trips_through_encode_and_decode = 0;
+    #[test]
+    fn every_code_point_of_plane_01_round_trips_through_encode_and_decode = 1;
+    #[test]
+    fn every_code_point_of_plane_02_round_trips_through_encode_and_decode = 2;
+    #[test]
+    fn every_code_point_of_plane_03_round_trips_through_encode_and_decode = 3;
+    #[test]
+    fn every_code_point_of_plane_04_round_trips_through_encode_and_decode = 4;
+    #[test]
+    fn every_code_point_of_plane_05_round_trips_through_encode_and_decode = 5;
+    #[test]
+    fn every_code_point_of_plane_06_round_trips_through_encode_and_decode = 6;
+    #[test]
+    fn every_code_point_of_plane_07_round_trips_through_encode_and_decode = 7;
+    #[test]
+    fn every_code_point_of_plane_08_round_trips_through_encode_and_decode = 8;
+    #[test]
+    fn every_code_point_of_plane_09_round_trips_through_encode_and_decode = 9;
+    #[test]
+    fn every_code_point_of_plane_10_round_trips_through_encode_and_decode = 10;
+    #[test]
+    fn every_code_point_of_plane_11_round_trips_through_encode_and_decode = 11;
+    #[test]
+    fn every_code_point_of_plane_12_round_trips_through_encode_and_decode = 12;
+    #[test]
+    fn every_code_point_of_plane_13_round_trips_through_encode_and_decode = 13;
+    #[test]
+    fn every_code_point_of_plane_14_round_trips_through_encode_and_decode = 14;
+    #[test]
+    fn every_code_point_of_plane_15_round_trips_through_encode_and_decode = 15;
+    #[test]
+    fn every_code_point_of_plane_16_round_trips_through_encode_and_decode = 16;
 );
 
 /// `#sec-encodeuri-uri` and `#sec-encodeuricomponent-uricomponent`: both keep the ASCII word
