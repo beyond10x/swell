@@ -153,6 +153,8 @@ mod host_objects;
 mod host_overrides;
 #[cfg(any(not(test_modules), test_modules = "index_stores"))]
 mod index_stores;
+#[cfg(any(not(test_modules), test_modules = "interpreter_loop"))]
+mod interpreter_loop;
 #[cfg(any(not(test_modules), test_modules = "interrupt"))]
 mod interrupt;
 #[cfg(any(not(test_modules), test_modules = "jobs"))]
