@@ -521,6 +521,33 @@ impl<H: Host> Agent<H> {
         Ok(self.environment(env)?.outer)
     }
 
+    /// Whether a declarative record on the chain from `env` outward names a slot `key` in the
+    /// table of its compiled code. An Object Environment Record (a `with` object, the global
+    /// object) is passed without a read of its object: no trap or getter runs. One step per
+    /// record and the steps of each table's scan, as [`Agent::resolve_name`] spends them.
+    pub(crate) fn chain_names_slot(&mut self, env: Option<Handle>, key: Key) -> Completion<bool> {
+        let mut current = env;
+        while let Some(handle) = current {
+            self.charge_steps(1)?;
+            let (outer, found, steps) = {
+                let record = self.environment(handle)?;
+                let (named, steps) = match (record.binding_object, record.slot_names()) {
+                    (None, Some(names)) => names.find(key),
+                    _ => (None, 0),
+                };
+                (record.outer, named.is_some(), steps)
+            };
+            if steps > 0 {
+                self.charge_steps(steps)?;
+            }
+            if found {
+                return Ok(true);
+            }
+            current = outer;
+        }
+        Ok(false)
+    }
+
     /// ResolveBinding of `key` (`#sec-resolvebinding`, `#sec-getidentifierreference`) from the
     /// record `env` outward, the global environment of `realm` last: HasBinding of each record,
     /// one step per record visited (decision 3, "Names"). A declarative record binds the names

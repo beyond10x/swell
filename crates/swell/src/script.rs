@@ -406,8 +406,10 @@ impl<H: Host> Agent<H> {
     }
 
     /// The `SyntaxError` objects of `realm` for the errors of a parse, each message with its
-    /// line and column; each refusal among them is counted ([`Agent::refusals`]), and the line
-    /// and column of the first are kept for `parse_script`'s error site (decision 13). Every
+    /// line and column. The first is the error answered (thrown by `eval` and `Function`, the
+    /// error site of `parse_script`, decision 13): its line and column are kept, and it is
+    /// counted when it is a refusal ([`Agent::refusals`]). A refusal is a parse's only error
+    /// (`swell_syntax`, `only_the_refusal`), so no refusal stands behind an error answered. Every
     /// parse of the engine answers its errors here: `parse_script`, `eval` and `Function`.
     pub(crate) fn syntax_errors(
         &mut self,
@@ -418,8 +420,8 @@ impl<H: Host> Agent<H> {
         for error in errors {
             if objects.is_empty() {
                 self.syntax_error_at = Some((error.line, error.column));
+                self.count_refusal(&error.message);
             }
-            self.count_refusal(&error.message);
             let message = format!("{} ({}:{})", error.message, error.line, error.column);
             let object = self.new_error_in(realm, ErrorKind::SyntaxError, &message)?;
             objects.push(Value::Object(object));
@@ -1152,5 +1154,52 @@ mod tests {
             collect(&mut agent);
             assert_eq!(heap_bytes(&agent), before, "{call}");
         }
+    }
+
+    /// The compile step's bound of one class (`CompileError::TooManyInClass`: a private record
+    /// of more than 65,536 slots, `swell-compiler`'s `class.rs`, `narrow_private`, which its own
+    /// unit test holds at 65,535 and 65,536) is answered as a `SyntaxError` of the realm with the
+    /// bound's text, like the bounds of the whole code (`TooMany`), and does not fault the agent.
+    /// A class that reaches it in script needs 32,769 private methods and more than 1 CPU s.
+    #[test]
+    fn a_bound_of_one_class_is_a_syntax_error_of_the_realm() {
+        let mut agent = agent_with(limits());
+        let realm = new_realm(&mut agent);
+        let handle = agent.heap.roots.get_realm(&realm.0).unwrap();
+        let bound = swell_compiler::CompileError::TooManyInClass("private record slots");
+        let Ok(Err(Value::Object(error))) = agent.compiled_code(handle, Err(bound)) else {
+            panic!("no SyntaxError");
+        };
+        let (_, key) = agent
+            .atom_and_key(&"message".encode_utf16().collect::<Vec<u16>>())
+            .unwrap();
+        let Ok(Value::String(message)) = agent.internal_get(error, key, Value::Object(error))
+        else {
+            panic!("no message");
+        };
+        let text = agent
+            .heap
+            .strings
+            .get(message.handle)
+            .unwrap()
+            .to_rust_string_lossy();
+        assert_eq!(
+            text,
+            "more private record slots in one class than the bytecode can number"
+        );
+        let (_, key) = agent
+            .atom_and_key(&"name".encode_utf16().collect::<Vec<u16>>())
+            .unwrap();
+        let Ok(Value::String(name)) = agent.internal_get(error, key, Value::Object(error)) else {
+            panic!("no name");
+        };
+        let name = agent
+            .heap
+            .strings
+            .get(name.handle)
+            .unwrap()
+            .to_rust_string_lossy();
+        assert_eq!(name, "SyntaxError");
+        assert!(agent.alive().is_ok());
     }
 }

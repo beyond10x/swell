@@ -894,53 +894,85 @@ new C().f() === 4 && syntax(function () { Function("o", "return o.#x;"); })
 }
 
 /// What a direct `eval` with a private name gives until `story:private-names-in-eval-code`
-/// passes the class's names to the parse (`#sec-performeval`, step 12): the stated refusal
-/// `private name #x in direct eval code is not supported before slice 8`, a `Refusal` by
-/// `swell_syntax::message_kind`, in a method, a private method, a static method and an arrow in
-/// a method, for a name the class declares and for one it does not. An indirect `eval`,
-/// `Function` and a script keep the early `SyntaxError` the standard gives them.
+/// passes the class's names to the parse (`#sec-performeval`, step 12). A name that a class
+/// enclosing the call declares, which the standard would run, is the stated refusal `private
+/// name #p in direct eval code is not supported before slice 8` (a `Refusal` by
+/// `swell_syntax::message_kind`, counted once per eval): in a method, a private method, a
+/// static method, an arrow in a method and a method of an inner class reading the outer class's
+/// name. A name no enclosing class declares is the early `SyntaxError` the standard gives,
+/// counted as no refusal: in a method, beside a declared name (whose error is dropped), outside
+/// every class, in a direct `eval` in the heritage (which runs before the class's private record
+/// is entered), by indirect `eval` and by `Function`. Code with an early error of the grammar
+/// throws that error, and no refusal is counted for its declared name.
 #[test]
-fn a_direct_eval_naming_a_private_name_is_refused() {
+fn a_direct_eval_is_refused_only_for_a_name_an_enclosing_class_declares() {
     let script = r#"function said(e) { return (e instanceof SyntaxError ? "SyntaxError: " : "other: ") + e.message; }
+function tried(f) { try { f(); } catch (e) { return said(e); } return "none"; }
 class C {
-  #p() { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; }
-  method() { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; }
-  declared() { try { return eval("this.#p()"); } catch (e) { return said(e); } }
-  static s() { try { eval("C.#y"); } catch (e) { return said(e); } return "none"; }
-  arrow() { return (() => { try { eval("this.#z"); } catch (e) { return said(e); } return "none"; })(); }
-  private() { return this.#p(); }
+  #p() { return 1; }
+  static #s() { return 3; }
+  #q() { return tried(() => eval("this.#p()")); }
+  method() { try { eval("this.#p()"); } catch (e) { return said(e); } return "none"; }
+  static st() { try { eval("C.#s()"); } catch (e) { return said(e); } return "none"; }
+  arrow() { return (() => { try { eval("this.#p"); } catch (e) { return said(e); } return "none"; })(); }
+  undeclared() { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; }
+  mixed() { try { eval("this.#p; this.#x"); } catch (e) { return said(e); } return "none"; }
+  grammar() { try { eval("let a; let a; this.#p;"); } catch (e) { return said(e); } return "none"; }
+  priv() { return this.#q(); }
 }
-var c = new C();
-[c.method(), c.private(), c.declared(), C.s(), c.arrow(),
- (function () { try { (0, eval)("this.#x"); } catch (e) { return said(e); } return "none"; })(),
- (function () { try { Function("return this.#x;"); } catch (e) { return said(e); } return "none"; })()].join("|");"#;
-    // Each message, then the position the thrown error's message ends with.
-    let refused = |name: &str| {
-        format!("private name {name} in direct eval code is not supported before slice 8")
+class O { #o() {} static make() { return class { m() { try { eval("this.#o"); } catch (e) { return said(e); } return "none"; } }; } }
+var heritage;
+class D extends (function () { try { eval("this.#d"); } catch (e) { heritage = said(e); } return Object; })() { #d() {} }
+var c = new C(), Inner = O.make();
+[c.method(), c.priv(), C.st(), c.arrow(), new Inner().m(),
+ c.undeclared(), c.mixed(), (function () { try { eval("this.#x"); } catch (e) { return said(e); } return "none"; })(),
+ heritage, tried(() => (0, eval)("this.#x")), tried(() => Function("return this.#x;")),
+ c.grammar()].join("|");"#;
+    let refused = |name: &str, at: &str| {
+        format!(
+            "SyntaxError: private name {name} in direct eval code is not supported before slice 8 ({at})"
+        )
     };
-    let early = "private name #x is not declared in an enclosing class".to_string();
-    let answers = [
-        (refused("#x"), "1:6"),
-        (refused("#x"), "1:6"),
-        (refused("#p"), "1:6"),
-        (refused("#y"), "1:3"),
-        (refused("#z"), "1:6"),
-        (early.clone(), "1:6"),
-        (early, "3:13"),
+    let early = |name: &str, at: &str| {
+        format!("SyntaxError: private name {name} is not declared in an enclosing class ({at})")
+    };
+    let wanted = [
+        refused("#p", "1:6"),
+        refused("#p", "1:6"),
+        refused("#s", "1:3"),
+        refused("#p", "1:6"),
+        refused("#o", "1:6"),
+        early("#x", "1:6"),
+        early("#x", "1:15"),
+        early("#x", "1:6"),
+        early("#d", "1:6"),
+        early("#x", "1:6"),
+        early("#x", "3:13"),
     ];
-    let thrown: Vec<String> = answers
-        .iter()
-        .map(|(message, at)| format!("SyntaxError: {message} ({at})"))
-        .collect();
-    let expected = Outcome::Normal(format!("\"{}\"", thrown.join("|")));
-    assert_eq!(run_both(script), (expected.clone(), expected));
-    for (message, _) in &answers[..5] {
-        assert_eq!(
-            swell_syntax::message_kind(message),
-            swell_syntax::MessageKind::Refusal { slice: 8 },
-            "{message}"
+    for text in [script.to_string(), format!("\"use strict\";\n{script}")] {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let before = agent.refusals();
+        let answer = match eval_text(&mut agent, &r, &text) {
+            Outcome::Normal(answer) => answer,
+            other => panic!("{other:?}"),
+        };
+        let counted = agent.refusals() - before;
+        let answers: Vec<&str> = answer.trim_matches('"').split('|').collect();
+        assert_eq!(answers.len(), wanted.len() + 1, "{answer}");
+        assert_eq!(answers[..wanted.len()], wanted[..], "{answer}");
+        let grammar = answers[wanted.len()];
+        assert!(
+            grammar.starts_with("SyntaxError: ") && !grammar.contains("#p"),
+            "{grammar}"
         );
+        assert_eq!(counted, 5, "{answer}");
     }
+    let message = "private name #p in direct eval code is not supported before slice 8";
+    assert_eq!(
+        swell_syntax::message_kind(message),
+        swell_syntax::MessageKind::Refusal { slice: 8 }
+    );
     for (text, at) in [("this.#x;", "1:6"), ("\"use strict\";\nthis.#x;", "2:6")] {
         assert_eq!(
             run(limits(), text),
@@ -1306,4 +1338,864 @@ fn the_private_record_is_entered_after_the_heritage() {
          }\n\
          Object.getPrototypeOf(O.f(new O())) === Object;",
     );
+}
+
+/// Each `(name, source)` answers `true` as written and as strict code; the
+/// assertion lists every case that does not, with what it answered.
+fn all_pass(cases: &[(&str, String)]) {
+    let wrong: Vec<String> = cases
+        .iter()
+        .filter_map(|(name, source)| {
+            let got = run_both(source);
+            (got != (passed(), passed())).then(|| format!("{name}: {got:?}"))
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// The parent of the derived classes of the scripts below.
+const PARENT: &str = "class P { constructor() { this.p = 1; } }\n";
+
+/// The `this` binding of a derived constructor and the private record of a
+/// class declared inside that constructor live in one function. `super()` in a computed key, a
+/// field key and the heritage of the inner class (each `Contains` SuperCall of the outer
+/// constructor, `#sec-static-semantics-contains`, ClassTail), an arrow made there and called
+/// later, a direct `eval` in a computed key (the inner record named), `super()` from an arrow
+/// and from eval code beside the outer class's own private methods, a second `super()` by eval,
+/// and the return without `super()`: none may reach a slot of a private record as `this`.
+#[test]
+fn this_and_a_private_record_in_one_derived_constructor() {
+    let cases: Vec<(&str, String)> = vec![
+        ("super() in a computed method key", format!("{PARENT}class D extends P {{
+  constructor() {{
+    var self = () => this;
+    class I {{ #m() {{ return 'i'; }} [super().p === 1 ? 'k' : 'j']() {{ return this.#m(); }} }}
+    this.r = new I().k() + (self() === this);
+  }}
+}}
+new D().r === 'itrue';")),
+        ("super() in a static field key", format!("{PARENT}class D extends P {{
+  constructor() {{
+    var self = () => this;
+    class I {{ #m() {{ return 'f'; }} static [(super(), 'k')] = 1; get() {{ return this.#m(); }} }}
+    this.r = new I().get() + I.k + (self() === this);
+  }}
+}}
+new D().r === 'f1true';")),
+        ("super() in an instance field key", format!("{PARENT}class D extends P {{
+  constructor() {{
+    class I {{ #m() {{ return 'g'; }} [(super(), 'k')] = 2; get() {{ return this.#m() + this.k; }} }}
+    this.r = new I().get() + this.p;
+  }}
+}}
+new D().r === 'g21';")),
+        ("super() in the heritage of the inner class", format!("{PARENT}class D extends P {{
+  constructor() {{
+    var self = () => this;
+    class I extends (super(), Object) {{ #m() {{ return 'h'; }} get() {{ return this.#m(); }} }}
+    this.r = new I().get() + (self() === this) + this.p;
+  }}
+}}
+new D().r === 'htrue1';")),
+        ("an arrow made in a computed key calls super() later", format!("{PARENT}class D extends P {{
+  constructor() {{
+    var go;
+    class I {{ #m() {{ return 'late'; }} [(go = () => super(), 'k')]() {{ return this.#m(); }} }}
+    go();
+    this.r = new I().k() + this.p;
+  }}
+}}
+new D().r === 'late1';")),
+        ("eval super() in a computed key, blocks around", format!("{PARENT}class D extends P {{
+  constructor() {{
+    let a = 1;
+    {{
+      let b = 2;
+      class I {{ #m() {{ return a + b; }} g() {{ return this.#m(); }} [eval(\"super(); 'k'\")]() {{ return 'k'; }} }}
+      this.r = new I().g() + this.p + new I().k();
+    }}
+  }}
+}}
+new D().r === '4k';")),
+        ("this before super() in an inner computed key", format!("{PARENT}class D extends P {{
+  constructor() {{
+    try {{ class I {{ #m() {{}} [this.x]() {{}} }} }} catch (e) {{ super(); this.r = e instanceof ReferenceError; return; }}
+    super(); this.r = false;
+  }}
+}}
+new D().r === true;")),
+        ("super() from an arrow, then the own private method", format!("{PARENT}class D extends P {{
+  #m() {{ return 'm4'; }}
+  constructor() {{ var go = () => {{ super(); return this.#m(); }}; var v = go(); this.r = v; }}
+}}
+new D().r === 'm4';")),
+        ("eval super(), then the own private method", format!("{PARENT}class D extends P {{
+  #m() {{ return 'm5'; }}
+  constructor() {{ eval('super()'); this.r = this.#m(); }}
+}}
+new D().r === 'm5';")),
+        ("an arrow's eval super()", format!("{PARENT}class D extends P {{
+  #m() {{ return 'm6'; }}
+  constructor() {{ (() => eval('super()'))(); this.r = this.#m(); }}
+}}
+new D().r === 'm6';")),
+        ("a second super() by eval", format!("{PARENT}class D extends P {{
+  #m() {{ return 'm'; }}
+  constructor() {{ super(); try {{ eval('super()'); this.r = 'no'; }} catch (e) {{ this.r = (e instanceof ReferenceError) + this.#m(); }} }}
+}}
+new D().r === 'truem';")),
+        ("a return override without super()", format!("{PARENT}class D extends P {{
+  #m() {{}}
+  constructor() {{ return {{ o: 1 }}; }}
+  static has(o) {{ try {{ o.#m; return true; }} catch (e) {{ return false; }} }}
+}}
+var d = new D(); d.o === 1 && !D.has(d);")),
+        ("no super() at all", format!("{PARENT}class D extends P {{
+  #m() {{}}
+  constructor() {{ var f = () => this; }}
+}}
+var kind; try {{ new D(); }} catch (e) {{ kind = e instanceof ReferenceError; }} kind === true;")),
+        ("return after super() from an arrow", format!("{PARENT}class D extends P {{
+  #m() {{ return 'r'; }}
+  constructor() {{ (() => super())(); return; }}
+  static read(o) {{ return o.#m(); }}
+}}
+D.read(new D()) === 'r';")),
+    ];
+    all_pass(&cases);
+}
+
+/// The resolver's order where fields, private methods and `super()` meet. Each
+/// class shape (private methods only, fields only, both) as a base and as a derived class with
+/// an explicit constructor, a default one, `super()` from an arrow and from an arrow's eval; a
+/// private method that reads a field; a computed key that calls an outer class's private method;
+/// a computed key whose arrow keeps the class's own private name; four classes nested through
+/// field initializers, the innermost reading every outer private method.
+#[test]
+fn fields_private_methods_and_super_in_one_class() {
+    let shapes = [
+        (
+            "methods",
+            "#m() { return 'm'; } get() { return this.#m(); }",
+            "m",
+        ),
+        ("fields", "f = 'f'; get() { return this.f; }", "f"),
+        (
+            "both",
+            "#m() { return 'm'; } f = this.#m() + 'f'; get() { return this.f + this.#m(); }",
+            "mfm",
+        ),
+    ];
+    let kinds = [
+        ("base", "", ""),
+        ("base explicit", "", "constructor() { this.c = 1; }"),
+        (
+            "derived explicit",
+            " extends P",
+            "constructor() { super(); }",
+        ),
+        ("derived default", " extends P", ""),
+        (
+            "derived arrow",
+            " extends P",
+            "constructor() { var go = () => super(); go(); }",
+        ),
+        (
+            "derived arrow eval",
+            " extends P",
+            "constructor() { (() => eval('super()'))(); }",
+        ),
+    ];
+    let mut cases: Vec<(String, String)> = Vec::new();
+    for (shape, body, expected) in shapes {
+        for (kind, heritage, ctor) in kinds {
+            cases.push((
+                format!("{shape} / {kind}"),
+                format!(
+                    "{PARENT}class K{heritage} {{ {ctor} {body} }}\n\
+                     var k = new K(); k.get() === '{expected}';"
+                ),
+            ));
+        }
+    }
+    cases.push((
+        "a private method reads a field".to_string(),
+        "class K { #m() { return this.f; } f = 1; g = this.#m() + 1; }\n\
+         new K().g === 2;"
+            .to_string(),
+    ));
+    cases.push((
+        "a computed key calls an outer class's private method".to_string(),
+        "class O { static #k() { return 'key'; }\n\
+           static make() { return class { [O.#k()] = 1; #m() { return this.key; } get() { return this.#m(); } }; } }\n\
+         new (O.make())().get() === 1;"
+            .to_string(),
+    ));
+    cases.push((
+        "a computed key's arrow keeps the own private name".to_string(),
+        "var f, g;\n\
+         class C { #m() { return 'own'; } static #s() { return 'static'; }\n\
+           [(f = o => o.#m(), 'k')] = 1; static [(g = () => C.#s(), 's')] = 2; }\n\
+         var c = new C(); f(c) === 'own' && g() === 'static' && c.k === 1 && C.s === 2;"
+            .to_string(),
+    ));
+    cases.push((
+        "four classes nested through field initializers".to_string(),
+        "class A { #a() { return 'A'; }\n\
+           inner = new (class B { #b() { return 'B'; }\n\
+             inner = new (class C { #c() { return 'C'; }\n\
+               inner = new (class D { #d() { return 'D'; }\n\
+                 inner = null;\n\
+                 all(a, b, c) { return a.#a() + b.#b() + c.#c() + this.#d(); } })();\n\
+               r(a, b) { return this.inner.all(a, b, this); } })();\n\
+             r(a) { return this.inner.r(a, this); } })();\n\
+           r() { return this.inner.r(this); } }\n\
+         new A().r() === 'ABCD';"
+            .to_string(),
+    ));
+    cases.push((
+        "four derived classes nested through field initializers".to_string(),
+        format!(
+            "{PARENT}class A extends P {{ #a() {{ return 'A'; }}\n\
+               inner = new (class B extends P {{ #b() {{ return 'B'; }}\n\
+                 inner = new (class C extends P {{ #c() {{ return 'C'; }}\n\
+                   inner = new (class D extends P {{ #d() {{ return 'D'; }}\n\
+                     constructor() {{ (() => super())(); }}\n\
+                     all(a, b, c) {{ return a.#a() + b.#b() + c.#c() + this.#d() + this.p; }} }})();\n\
+                   r(a, b) {{ return this.inner.all(a, b, this); }} }})();\n\
+                 r(a) {{ return this.inner.r(a, this); }} }})();\n\
+               r() {{ return this.inner.r(this); }} }}\n\
+             new A().r() === 'ABCD1';"
+        ),
+    ));
+    let cases: Vec<(&str, String)> = cases
+        .iter()
+        .map(|(name, source)| (name.as_str(), source.clone()))
+        .collect();
+    all_pass(&cases);
+}
+
+/// `super.#m` is an early error (MemberExpression: `super` . PrivateIdentifier
+/// is no production); `super.m()` and a static `super.s()` from private methods of a derived
+/// class; a private method, getter and setter named on `this` before `super()` throw the
+/// `ReferenceError` of `this` (the base is evaluated first); a private getter read on the
+/// value `super()` returns.
+#[test]
+fn super_meets_private_names() {
+    for source in [
+        "class C { #m() {} f() { return super.#m; } }",
+        "class C extends Object { #m() {} f() { return super.#m(); } }",
+    ] {
+        for text in [source.to_string(), format!("\"use strict\";\n{source}")] {
+            assert!(
+                matches!(run(limits(), &text), Outcome::Errors(ref e) if !e.is_empty()),
+                "{text}: {:?}",
+                run(limits(), &text)
+            );
+        }
+    }
+    let cases: Vec<(&str, String)> = vec![
+        (
+            "super.m() from a private method",
+            "class P { m() { return 'pm'; } static s() { return 'ps'; } }\n\
+             class D extends P { #x() { return super.m(); } static #y() { return super.s(); }\n\
+               get #g() { return super.m() + '!'; } g() { return this.#x() + this.#g + D.#y(); } }\n\
+             new D().g() === 'pmpm!ps';"
+                .to_string(),
+        ),
+        (
+            "each private form on this before super()",
+            format!(
+                "{PARENT}var kinds = [];\n\
+                 class D extends P {{ #m() {{}} get #g() {{ return 1; }} set #s(v) {{}}\n\
+                   constructor() {{\n\
+                     try {{ this.#m(); }} catch (e) {{ kinds.push(e.constructor.name); }}\n\
+                     try {{ this.#g; }} catch (e) {{ kinds.push(e.constructor.name); }}\n\
+                     try {{ this.#s = 1; }} catch (e) {{ kinds.push(e.constructor.name); }}\n\
+                     try {{ this.#g++; }} catch (e) {{ kinds.push(e.constructor.name); }}\n\
+                     super(); }} }}\n\
+                 new D(); kinds.join() === 'ReferenceError,ReferenceError,ReferenceError,ReferenceError';"
+            ),
+        ),
+        (
+            "a private getter on the value super() returns",
+            format!(
+                "{PARENT}class D extends P {{ get #g() {{ return 'g' + this.p; }}\n\
+                   constructor() {{ const r = super(); this.r = r.#g + (r === this); }} }}\n\
+                 new D().r === 'g1true';"
+            ),
+        ),
+    ];
+    all_pass(&cases);
+}
+
+/// The heritage runs before the private record is entered. A heritage that reads the
+/// class's own name is in its TDZ (a `ReferenceError`), for a declaration and for a named
+/// class expression; an arrow made in the heritage reads the class later; a class expression in
+/// the heritage with its own `#m` of the same name is a different brand; a direct `eval` in the
+/// heritage; a closure made in the heritage reads a `let` before the class and a `let` of a
+/// block around it, in a function whose bindings live in records.
+#[test]
+fn the_heritage_runs_before_the_private_record() {
+    let cases: Vec<(&str, String)> = vec![
+        (
+            "the class name in the heritage is in its TDZ",
+            "var kind; try { class C extends (C, Object) { #m() {} } } catch (e) { kind = e instanceof ReferenceError; }\n\
+             var kind2; try { (class C extends (C, Object) { #m() {} }); } catch (e) { kind2 = e instanceof ReferenceError; }\n\
+             kind === true && kind2 === true;"
+                .to_string(),
+        ),
+        (
+            "an arrow made in the heritage reads the class later",
+            "var f; class C extends (f = () => C, Object) { #m() { return 1; } r() { return this.#m(); } }\n\
+             var g; var K = class N extends (g = () => N, Object) { #m() { return 2; } static t(o) { return o.#m(); } };\n\
+             f() === C && new C().r() === 1 && g() === K && K.t(new K()) === 2;"
+                .to_string(),
+        ),
+        (
+            "a class expression with its own #m in the heritage",
+            "class C extends (class { #m() { return 'h'; } static t(o) { return o.#m(); } }) { #m() { return 'c'; } r() { return this.#m(); } }\n\
+             var c = new C(); c.r() === 'c' && Object.getPrototypeOf(C).t(c) === 'h';"
+                .to_string(),
+        ),
+        (
+            "a direct eval in the heritage",
+            "class C extends (eval('Object')) { #m() { return 1; } r() { return this.#m(); } }\n\
+             new C().r() === 1;"
+                .to_string(),
+        ),
+        (
+            "closures of the heritage read a let before and a let around",
+            "function make() {\n\
+               let a = 'a', g, K;\n\
+               { let b = 'b';\n\
+                 K = class extends (g = () => a + b, Object) { #m() { return a + b + (() => a)(); } r() { return this.#m(); } };\n\
+                 b = 'B'; }\n\
+               a = 'A';\n\
+               return [K, g];\n\
+             }\n\
+             var made = make();\n\
+             made[1]() === 'AB' && new made[0]().r() === 'ABA';"
+                .to_string(),
+        ),
+    ];
+    all_pass(&cases);
+}
+
+/// A second `super()` with a Proxy as the object the parent returns. SuperCall runs
+/// the parent again (its counter is 2), then BindThisValue throws the `ReferenceError` before
+/// InitializeInstanceElements, so no field initializer runs again and no private method is
+/// added again (which would be the `TypeError` of PrivateMethodOrAccessorAdd). On the first
+/// `super()` the private method is on the Proxy before the field's `defineProperty` trap runs
+/// (InitializeInstanceElements, steps 3 and 4).
+#[test]
+fn a_second_super_with_a_proxy_adds_nothing_again() {
+    both_pass(
+        "var ctor = 0, init = 0, traps = [], proxy;\n\
+         proxy = new Proxy({}, { defineProperty(t, k, d) { traps.push(String(k) + ':' + D.has(proxy)); return Reflect.defineProperty(t, k, d); } });\n\
+         class P { constructor() { ctor++; return proxy; } }\n\
+         class D extends P {\n\
+           #m() { return 'm'; }\n\
+           f = ++init;\n\
+           constructor() { super(); try { super(); this.kind = 'none'; } catch (e) { this.kind = e.constructor.name; } }\n\
+           static has(o) { try { o.#m(); return true; } catch (e) { return false; } }\n\
+         }\n\
+         var d = new D();\n\
+         d === proxy && ctor === 2 && init === 1 && d.kind === 'ReferenceError'\n\
+           && traps.join() === 'f:true,kind:true' && D.has(proxy);",
+    );
+}
+
+/// A direct eval whose source has an early error of the grammar before a private name, one the
+/// class does not declare and one it declares, throws that early error; the engine must not
+/// count a refusal for it (`swell_syntax`, `only_the_refusal`: a refusal is a parse's only error), or a host
+/// that reads `refusals()` (the test262 runner) takes the right answer for a refusal.
+#[test]
+fn an_early_error_before_a_private_name_counts_no_refusal() {
+    for declared in ["", "#x() {}"] {
+        let mut agent = agent().unwrap();
+        let r = realm(&mut agent);
+        let before = agent.refusals();
+        let answer = eval_text(
+            &mut agent,
+            &r,
+            &format!(
+                "class C {{ {declared} m() {{ try {{ eval('let a; let a; this.#x;'); }} catch (e) {{ return e.message; }} }} }}\n\
+                 new C().m();"
+            ),
+        );
+        let counted = agent.refusals() - before;
+        let thrown = match &answer {
+            Outcome::Normal(text) => text.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert!(
+            !thrown.contains("not supported before slice") && !thrown.contains("#x"),
+            "{thrown}"
+        );
+        assert_eq!(counted, 0, "thrown {thrown}, refusals counted {counted}");
+    }
+}
+
+/// A direct eval outside every class with an undeclared private name is the early
+/// `SyntaxError` the standard gives (`#sec-performeval`, step 12: privateIdentifiers is empty
+/// when the running PrivateEnvironment is null), counted as no refusal: the cases
+/// `built-ins/eval/private-identifiers-not-empty.js` and
+/// `language/statements/class/elements/privatename-not-valid-eval-earlyerr-7.js` and `-8.js` of
+/// `story-element-syntax.cases.txt`, which counted a refusal at the head before this rule.
+#[test]
+fn a_direct_eval_outside_every_class_is_the_early_error() {
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    let before = agent.refusals();
+    let answer = eval_text(
+        &mut agent,
+        &r,
+        "var o = {}; (function () { try { eval('o.#f'); } catch (e) { return e.message; } })();",
+    );
+    let counted = agent.refusals() - before;
+    assert_eq!(
+        (answer, counted),
+        (
+            Outcome::Normal(
+                "\"private name #f is not declared in an enclosing class (1:3)\"".to_string()
+            ),
+            0
+        )
+    );
+}
+
+/// How many throws each round of [`a_throw_in_the_class_leaks_no_private_name`]
+/// makes: 1,000, and 8 with a collection at every safe point (for the time: 20 took 2.23 CPU s).
+const THROWS: u32 = if cfg!(feature = "collect-every-safe-point") {
+    8
+} else {
+    1_000
+};
+
+/// A heritage that throws, a heritage that is no constructor, a heritage whose
+/// `prototype` getter throws, and a computed key that throws after the private record was
+/// entered: [`THROWS`] of each, then a collection, leave `heap_bytes()` at the reading of
+/// the round before (the first round grows the arenas).
+#[test]
+fn a_throw_in_the_class_leaks_no_private_name() {
+    let mut agent = agent().unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &r,
+            "var i = 0, n = 0; function bad() { throw 1; }\n\
+             var proto = function () {}.bind(); Object.defineProperty(proto, 'prototype', { get: bad }); 0;"
+        ),
+        Outcome::Normal("0".to_string())
+    );
+    let looped = parse(
+        &mut agent,
+        &r,
+        &format!(
+            "n = 0; for (i = 0; i < {THROWS}; i++) {{\n\
+               try {{ class C extends (bad()) {{ #m() {{}} static #s() {{}} }} }} catch (e) {{ n++; }}\n\
+               try {{ class C extends 5 {{ #m() {{}} }} }} catch (e) {{ n++; }}\n\
+               try {{ class C extends proto {{ #m() {{}} }} }} catch (e) {{ n++; }}\n\
+               try {{ class C extends Object {{ #m() {{}} static #t() {{}} [bad()]() {{}} }} }} catch (e) {{ n++; }}\n\
+             }} n;"
+        ),
+    );
+    let round = |agent: &mut Agent<TestHost>| {
+        let outcome = agent.evaluate_script(&looped).unwrap();
+        assert_eq!(
+            describe(agent, &r, outcome),
+            Outcome::Normal((4 * THROWS).to_string())
+        );
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+        agent.heap_bytes().unwrap()
+    };
+    let first = round(&mut agent);
+    let second = round(&mut agent);
+    let third = round(&mut agent);
+    println!("heap_bytes after each round: {first}, {second}, {third}");
+    assert_eq!((second, third), (first, first));
+}
+
+/// The setups of [`the_room_of_each_shape_and_level`]: each defines `make`, which
+/// makes one object the round keeps.
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn room_setups() -> Vec<(String, String)> {
+    let methods = |k: u32| (0..k).map(|i| format!(" #m{i}() {{}}")).collect::<String>();
+    let class = |name: &str, body: String| {
+        (
+            name.to_string(),
+            format!("var K = class {{{body} }}; var make = function () {{ return new K(); }}; 0;"),
+        )
+    };
+    let mut setups = vec![class("plain", String::new())];
+    for k in [1, 2, 4, 5, 6, 9, 15, 17] {
+        setups.push(class(&k.to_string(), methods(k)));
+    }
+    setups.push(class(
+        "static only",
+        " static #s() {} static get #t() { return 1; } static set #t(v) {}".to_string(),
+    ));
+    setups.push(class(
+        "pair and method",
+        " get #a() { return 1; } set #a(v) {} #m() {}".to_string(),
+    ));
+    setups.push(class(
+        "static and instance accessor",
+        " static get #s() { return 1; } get #a() { return 1; }".to_string(),
+    ));
+    setups.push((
+        "three levels".to_string(),
+        "var make = (function () { class A3 { #a() {} } class B3 extends A3 { #b() {} #c() {} } class C3 extends B3 { #d() {} #e() {} #f() {} }\n\
+         return function () { return new C3(); }; })(); 0;"
+            .to_string(),
+    ));
+    setups.push((
+        "three plain levels".to_string(),
+        "var make = (function () { class A3 {} class B3 extends A3 {} class C3 extends B3 {}\n\
+         return function () { return new C3(); }; })(); 0;"
+            .to_string(),
+    ));
+    let stamps = |name: &str, private: bool| {
+        let mut source =
+            String::from("var make = (function () { class Base { constructor(o) { return o; } }\n");
+        for k in 1..=5 {
+            let body = if private { methods(k) } else { String::new() };
+            source.push_str(&format!("class S{k} extends Base {{{body} }}\n"));
+        }
+        source.push_str(
+            "return function () { var o = {}; new S1(o); new S2(o); new S3(o); new S4(o); new S5(o); return o; }; })(); 0;",
+        );
+        (name.to_string(), source)
+    };
+    setups.push(stamps("five stamps", true));
+    setups.push(stamps("five plain stamps", false));
+    setups
+}
+
+/// The exact room per class level. The rise of `heap_bytes()` per object (200
+/// objects, read as in `an_instance_pays_for_the_room_of_its_list`) for each setup of
+/// [`room_setups`]: a class with only static private elements costs an instance
+/// nothing; a getter and setter pair beside a method costs what two methods do; a static and an
+/// instance accessor cost an instance what one method does; an instance of three levels of 1, 2
+/// and 3 private methods costs what one level of 6 does (each level reserves exactly its own
+/// room, no spare entry after level 3); an object stamped by five classes of 1 to 5 methods
+/// through return overrides costs what one level of 15 does. Default mode only (16 setups).
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn the_room_of_each_shape_and_level() {
+    let n = 200u64;
+    let mut agent = support::host::agent().unwrap();
+    let r = realm(&mut agent);
+    let mut per = std::collections::BTreeMap::new();
+    for (name, setup) in room_setups() {
+        assert_eq!(
+            eval_text(&mut agent, &r, &format!("{setup} var keep = null; 0;")),
+            Outcome::Normal("0".to_string()),
+            "{name}"
+        );
+        let fill = format!("keep = []; for (var i = 0; i < {n}; i++) keep.push(make()); 0;");
+        let mut rise = 0;
+        for _ in 0..2 {
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            let empty = agent.heap_bytes().unwrap();
+            assert_eq!(
+                eval_text(&mut agent, &r, &fill),
+                Outcome::Normal("0".to_string())
+            );
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            rise = agent.heap_bytes().unwrap() - empty;
+            assert_eq!(
+                eval_text(&mut agent, &r, "keep = null; 0;"),
+                Outcome::Normal("0".to_string())
+            );
+        }
+        per.insert(name, rise);
+    }
+    let over = |name: &str, base: &str| {
+        let rise = per[name] - per[base];
+        assert_eq!(rise % n, 0, "{name} over {base}: {per:?}");
+        rise / n
+    };
+    let table: Vec<String> = ["1", "4", "5", "9", "17"]
+        .iter()
+        .map(|k| format!("{k}: {}", over(k, "plain")))
+        .collect();
+    println!("bytes per instance over a plain one: {table:?}; all readings {per:?}");
+    let found = [
+        over("static only", "plain"),
+        over("pair and method", "plain"),
+        over("static and instance accessor", "plain"),
+        over("three levels", "three plain levels"),
+        over("five stamps", "five plain stamps"),
+    ];
+    let wanted = [
+        0,
+        over("2", "plain"),
+        over("1", "plain"),
+        over("6", "plain"),
+        over("15", "plain"),
+    ];
+    assert_eq!(found, wanted, "{per:?}");
+}
+
+/// The steps of one construction by its count of private methods. The adds of a
+/// construction with n methods spend sum over k of max(0, k - 1 - 8) steps past the
+/// instructions, 0 for n <= 9 and (n - 9)(n - 8) / 2 above (`for-coordinator.md`): measured at
+/// 7, 8, 9, 10, 16, 17 and 1,000 methods against the step of one more method below `SMALL`.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn the_steps_of_a_construction_by_private_methods() {
+    let mut limits = limits();
+    limits.steps_per_entry = 4_000_000;
+    let mut agent = agent_with(limits).unwrap();
+    let r = realm(&mut agent);
+    let mut steps = std::collections::BTreeMap::new();
+    for n in [1u64, 7, 8, 9, 10, 16, 17, 1_000] {
+        let body = (0..n).map(|i| format!(" #m{i}() {{}}")).collect::<String>();
+        assert_eq!(
+            eval_text(&mut agent, &r, &format!("var K = class {{{body} }}; 0;")),
+            Outcome::Normal("0".to_string())
+        );
+        let outcome = eval(&mut agent, &r, "new K(); 0;");
+        assert!(matches!(outcome, HostOutcome::Normal(_)), "{n}");
+        steps.insert(n, agent.last_entry_steps().unwrap());
+    }
+    println!("steps of `new K(); 0;` by private methods: {steps:?}");
+    let per = steps[&8] - steps[&7];
+    let extra = |n: u64| steps[&n] - steps[&1] - (n - 1) * per;
+    let formula = |n: u64| if n <= 9 { 0 } else { (n - 9) * (n - 8) / 2 };
+    let found: Vec<u64> = [9, 10, 16, 17, 1_000].iter().map(|&n| extra(n)).collect();
+    let wanted: Vec<u64> = [9, 10, 16, 17, 1_000].iter().map(|&n| formula(n)).collect();
+    assert_eq!(found, wanted, "{steps:?}");
+}
+
+/// The setup of [`memory_budget_at_every_8_bytes_across_two_levels`]: a level of one
+/// private method under a level of five, and a check of every element.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const LEVELS: &str = "class A { #a() { return 1; } static check(o) { return o.#a() === 1; } }\n\
+   class B extends A { #b() {} #c() {} #d() {} #e() {} #f() {}\n\
+     static check(o) { try { o.#b(); o.#c(); o.#d(); o.#e(); o.#f(); return A.check(o); } catch (e) { return 'partial'; } } }\n\
+   var keep = null; 0;";
+
+/// The length of `h` in [`memory_budget_at_every_8_bytes_across_two_levels`], read
+/// by the host function `padLength`, so that the entry that makes it is parsed once.
+#[cfg(not(feature = "collect-every-safe-point"))]
+static PAD_LENGTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// `padLength()`: [`PAD_LENGTH`].
+#[cfg(not(feature = "collect-every-safe-point"))]
+fn pad_length(
+    _cx: &mut swell::Cx<'_, TestHost>,
+    _call: swell::HostCall<'_>,
+) -> swell::Completion<Value> {
+    Ok(Value::Number(
+        PAD_LENGTH.load(std::sync::atomic::Ordering::Relaxed) as f64,
+    ))
+}
+
+/// The memory budget at every 8 bytes across the reservations of the two levels of
+/// `new B()` ([`LEVELS`]), in the form of `proxy_shape_traps::memory_sweep`: one agent with
+/// 64 KiB above its reading after the setup and a warm-up of three constructions; Strings in
+/// `pads` leave a target room (from 2 KiB, 512 more each round), and each entry, parsed once,
+/// makes `h`, a String of `u` code units, then `keep = new B()`, for `u` from 3/8 of the room down
+/// by 4 (the room the construction has grows by at most 8 bytes per run) until 8 constructions
+/// in a row answered. Every run answers (and `B.check(keep)` reads every element) or ends in the
+/// memory budget (and `keep` stays `null`); after each, `keep = null` and a collection give
+/// `heap_bytes()` back its reading after the round's pads. At the last `u` whose construction
+/// started and ended in the budget, 1,000 failed constructions, each with a collection, leave
+/// the reading of that round too.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn memory_budget_at_every_8_bytes_across_two_levels() {
+    use std::sync::atomic::Ordering;
+    let zero = Outcome::Normal("0".to_string());
+    let done = Outcome::Normal("true".to_string());
+    let base = {
+        let mut probe = support::host::agent().unwrap();
+        let r = realm(&mut probe);
+        assert_eq!(eval_text(&mut probe, &r, LEVELS), zero);
+        assert!(matches!(probe.collect(), Ok(HostOutcome::Normal(_))));
+        probe.heap_bytes().unwrap()
+    };
+    let mut l = limits();
+    l.memory_bytes = base + (64 << 10);
+    let budget = l.memory_bytes;
+    let mut agent = agent_with(l).unwrap();
+    let r = realm(&mut agent);
+    support::script::define_function(&mut agent, &r, "padLength", 0, pad_length, false);
+    assert_eq!(
+        eval_text(
+            &mut agent,
+            &r,
+            &format!("var started = 0, pads = []; {LEVELS}")
+        ),
+        zero
+    );
+    let scripts = [
+        "started = 0; (function () { var h = \"x\".repeat(padLength()); started = 1; keep = new B(); })(); 0;",
+        "started;",
+        "B.check(keep);",
+        "keep === null;",
+        "keep = null; 0;",
+        "pads.pop(); 0;",
+        "pads.push(\"x\".repeat(padLength())); 0;",
+        "keep = new B(); 0;",
+    ]
+    .map(|source| parse(&mut agent, &r, source));
+    let [run, started, check, unset, clear, pop, push, make] = &scripts;
+    let go = |agent: &mut Agent<TestHost>, script: &swell::Script| {
+        let outcome = agent.evaluate_script(script).unwrap();
+        describe(agent, &r, outcome)
+    };
+    for _ in 0..3 {
+        assert_eq!(go(&mut agent, make), zero);
+        assert_eq!(go(&mut agent, clear), zero);
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    }
+    let room_now = |agent: &Agent<TestHost>| budget.saturating_sub(agent.heap_bytes().unwrap());
+    let (mut target, mut streak, mut ended, mut before, mut answered) =
+        (2048u64, 0u32, 0u32, 0u32, 0u32);
+    let mut last = None;
+    while streak < 8 && target < (32 << 10) {
+        while room_now(&agent) < target {
+            assert_eq!(go(&mut agent, pop), zero);
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+        }
+        let mut shift = 0;
+        loop {
+            let room = room_now(&agent);
+            let units = (room.saturating_sub(target) / 2) >> shift;
+            if room <= target + 64 || units == 0 {
+                break;
+            }
+            PAD_LENGTH.store(units, Ordering::Relaxed);
+            if go(&mut agent, push) == zero {
+                shift = 0;
+            } else {
+                shift += 1;
+            }
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+        }
+        let reading = agent.heap_bytes().unwrap();
+        let mut u = room_now(&agent) * 3 / 8;
+        loop {
+            PAD_LENGTH.store(u, Ordering::Relaxed);
+            let outcome = go(&mut agent, run);
+            // What the run made, `h` with it, is garbage.
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            let began = go(&mut agent, started) == Outcome::Normal("1".to_string());
+            if outcome == zero {
+                streak += 1;
+                answered += 1;
+                assert_eq!(go(&mut agent, check), done, "{target} {u}");
+            } else {
+                assert_eq!(
+                    outcome,
+                    Outcome::Terminated(Termination::MemoryBudget),
+                    "{target} {u}"
+                );
+                assert_eq!(go(&mut agent, unset), done, "{target} {u}");
+                streak = 0;
+                if began {
+                    ended += 1;
+                    last = Some((u, reading));
+                } else {
+                    before += 1;
+                }
+            }
+            assert_eq!(go(&mut agent, clear), zero);
+            assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+            assert_eq!(
+                agent.heap_bytes().unwrap(),
+                reading,
+                "{target} {u}: {outcome:?}"
+            );
+            if streak >= 8 || u < 4 {
+                break;
+            }
+            u -= 4;
+        }
+        if streak < 8 {
+            target += 512;
+        }
+    }
+    println!(
+        "{ended} ended in the construction, {before} before it, {answered} answered, last target {target}"
+    );
+    let (u, reading) = last.expect("no construction ended in the budget");
+    assert!(answered > 0, "no construction answered");
+    assert_eq!(
+        agent.heap_bytes().unwrap(),
+        reading,
+        "the last failure was in an earlier round"
+    );
+    PAD_LENGTH.store(u, Ordering::Relaxed);
+    for _ in 0..1_000 {
+        assert_eq!(
+            go(&mut agent, run),
+            Outcome::Terminated(Termination::MemoryBudget)
+        );
+        assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
+    }
+    assert_eq!(agent.heap_bytes().unwrap(), reading);
+}
+
+/// `this` read in the same arrow after that arrow's `super()`, in a derived
+/// class with and without private methods and fields. The arrow's answer is kept in a local
+/// first: `this.r = go()` evaluates `this` before the call, a `ReferenceError`.
+#[test]
+fn this_after_super_in_the_same_arrow() {
+    let cases: Vec<(&str, String)> = vec![
+        (
+            "no private, this",
+            format!(
+                "{PARENT}class D extends P {{ constructor() {{ var go = () => {{ super(); return this; }}; var v = go(); this.r = v === this; }} }}\nnew D().r === true;"
+            ),
+        ),
+        (
+            "no private, this.p",
+            format!(
+                "{PARENT}class D extends P {{ constructor() {{ var go = () => {{ super(); return this.p; }}; var v = go(); this.r = v; }} }}\nnew D().r === 1;"
+            ),
+        ),
+        (
+            "no private, a method",
+            format!(
+                "{PARENT}class D extends P {{ m() {{ return 1; }} constructor() {{ var go = () => {{ super(); return this.m(); }}; var v = go(); this.r = v; }} }}\nnew D().r === 1;"
+            ),
+        ),
+        (
+            "private declared, this",
+            format!(
+                "{PARENT}class D extends P {{ #m() {{}} constructor() {{ var go = () => {{ super(); return this; }}; var v = go(); this.r = v === this; }} }}\nnew D().r === true;"
+            ),
+        ),
+        (
+            "private called after the arrow",
+            format!(
+                "{PARENT}class D extends P {{ #m() {{ return 1; }} constructor() {{ var go = () => {{ super(); }}; go(); this.r = this.#m(); }} }}\nnew D().r === 1;"
+            ),
+        ),
+        (
+            "private through a local",
+            format!(
+                "{PARENT}class D extends P {{ #m() {{ return 1; }} constructor() {{ var go = () => {{ super(); var t = this; return t.#m(); }}; var v = go(); this.r = v; }} }}\nnew D().r === 1;"
+            ),
+        ),
+        (
+            "private in the arrow",
+            format!(
+                "{PARENT}class D extends P {{ #m() {{ return 1; }} constructor() {{ var go = () => {{ super(); return this.#m(); }}; var v = go(); this.r = v; }} }}\nnew D().r === 1;"
+            ),
+        ),
+        (
+            "field, this in the arrow",
+            format!(
+                "{PARENT}class D extends P {{ f = 2; constructor() {{ var go = () => {{ super(); return this.f; }}; var v = go(); this.r = v; }} }}\nnew D().r === 2;"
+            ),
+        ),
+    ];
+    all_pass(&cases);
 }

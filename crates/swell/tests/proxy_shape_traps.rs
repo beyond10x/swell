@@ -2225,6 +2225,77 @@ fn memory_budget_at_every_64_bytes_through_json_stringify_of_three_proxies() {
     memory_sweep("JSON.stringify(c).length");
 }
 
+/// The setup of [`a_budget_end_inside_a_trap_gives_back_the_nesting_and_the_bytes`]: `p`, a
+/// Proxy of 50 keys whose values are a String of 1,000 code units, whose `get` trap for `k40`
+/// keeps objects until the memory budget ends the entry; `depth()`, how many `get` traps of a
+/// Proxy reading itself run before the re-entry bound throws its `RangeError`; `fill()`, which
+/// keeps objects in `hold`, counting them in `held`, until the budget ends the entry.
+#[cfg(not(feature = "collect-every-safe-point"))]
+const TRAP_END: &str = "var big = \"x\".repeat(1000), keys = [], held = 0, hold = null;\n\
+  for (var i = 0; i < 50; i++) keys.push(\"k\" + i);\n\
+  var p = new Proxy({}, {\n\
+    ownKeys: function () { return keys; },\n\
+    getOwnPropertyDescriptor: function () { return { value: big, writable: true, enumerable: true, configurable: true }; },\n\
+    get: function (t, k) { if (k === \"k40\") { var hog = []; for (;;) hog.push({}); } return big; }\n\
+  });\n\
+  function depth() { var n = 0; var q = new Proxy({}, { get: function (t, k) { n++; return q[k]; } });\n\
+    try { q.x; } catch (e) { if (!(e instanceof RangeError)) throw e; } return n; }\n\
+  function fill() { held = 0; hold = []; for (;;) { hold.push({}); held++; } }\n\
+  0;";
+
+/// A run that ends in the memory budget inside a Proxy trap gives back what the Proxy method
+/// and the builtin around it hold (`object/proxy.rs`, `in_proxy_method`: the kept values and
+/// the nesting count on every way out; `builtins/json/mod.rs`: what `JSON.stringify` charged
+/// for its output, credited on every way out). `JSON.stringify(p)` has charged 40 values of
+/// [`TRAP_END`]'s `p` when the `get` trap of `k40` ends the entry. Then, after a collection,
+/// as before the run: `heap_bytes()`, the depth `depth()` reaches before the re-entry bound
+/// (a nesting count left behind lowers it), and the objects `fill()` keeps before the budget
+/// ends its entry (a charge left behind lowers it). Three runs, so that a leak of each run
+/// adds up. Beside the sweeps ([`memory_sweep`]), which read bytes only.
+#[cfg(not(feature = "collect-every-safe-point"))]
+#[test]
+fn a_budget_end_inside_a_trap_gives_back_the_nesting_and_the_bytes() {
+    let zero = Outcome::Normal("0".to_string());
+    let base = {
+        let mut probe = agent_with(limits()).unwrap();
+        let r = realm(&mut probe);
+        assert_eq!(eval_text(&mut probe, &r, TRAP_END), zero);
+        collect(&mut probe);
+        probe.heap_bytes().unwrap()
+    };
+    let mut budget = limits();
+    budget.steps_per_entry = 1 << 40;
+    budget.memory_bytes = base + (1 << 18);
+    let mut agent = agent_with(budget).unwrap();
+    let r = realm(&mut agent);
+    assert_eq!(eval_text(&mut agent, &r, TRAP_END), zero);
+    let readings = |agent: &mut swell::Agent<support::host::TestHost>| {
+        let depth = eval_text(agent, &r, "depth();");
+        assert_eq!(
+            eval_text(agent, &r, "fill();"),
+            Outcome::Terminated(Termination::MemoryBudget)
+        );
+        let held = eval_text(agent, &r, "held;");
+        assert_eq!(eval_text(agent, &r, "hold = null; 0;"), zero);
+        collect(agent);
+        (agent.heap_bytes().unwrap(), depth, held)
+    };
+    // Two warm-ups grow the arenas to what the runs need.
+    readings(&mut agent);
+    readings(&mut agent);
+    let before = readings(&mut agent);
+    for round in 0..3 {
+        assert_eq!(
+            eval_text(&mut agent, &r, "JSON.stringify(p).length;"),
+            Outcome::Terminated(Termination::MemoryBudget),
+            "round {round}"
+        );
+        collect(&mut agent);
+        assert_eq!(readings(&mut agent), before, "round {round}");
+    }
+    println!("heap_bytes, depth() and fill()'s objects after each run: {before:?}");
+}
+
 /// `L` `for`-`in` loops in one entry over a Proxy whose `getPrototypeOf` trap answers a
 /// fresh Proxy of `{ a: 1, b: 2 }` at each call, whose handler holds a String of 262,144 code
 /// units. The walk of each loop holds the fresh Proxy it met and records it in the chain the
