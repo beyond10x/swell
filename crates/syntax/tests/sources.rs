@@ -261,7 +261,9 @@ fn held_constructs(path: &Path, result: &str) -> Result<Vec<String>, String> {
 }
 
 /// A source under `held/` holds constructs a story of slice 8 parses whole and refuses at the
-/// end of the parse (`Parser::hold`; "Held sources" of `story:class-syntax-and-early-errors`).
+/// end of the parse while the construct is a line of `HOLDS` ("Held sources" of
+/// `story:class-syntax-and-early-errors`; the list is empty since
+/// `story:private-fields-and-private-in`, so every held source parses).
 /// Its header names each of them, `held "<construct>", ...`, in the order of their first
 /// tokens. The first one that is still a line of [`swell_syntax::HOLDS`] is the one the source
 /// answers, as written and with a `"use strict";` prologue: exactly `<construct> is not
@@ -1171,7 +1173,8 @@ fn parse_through(entry: Entry, source: &[u16], limit: u32) -> Result<Script, Vec
 /// Whether `n` nested `kind`s parse through `entry` at `limit` (`Some(true)`), fail with the
 /// nesting error alone (`Some(false)`), or fail otherwise (`None`). A source whose one error is
 /// the refusal of a line of [`swell_syntax::HOLDS`] counts as parsed: the parse and the early
-/// errors reached the end of the source before the hold was answered (`Parser::hold`).
+/// errors reached the end of the source before the hold was answered (the parser's rule on
+/// holds; no line of `HOLDS` is left since `story:private-fields-and-private-in`).
 fn admitted(entry: Entry, kind: &str, n: usize, limit: u32) -> Option<bool> {
     let source = nested(kind, n)?;
     let held = |message: &str| {
