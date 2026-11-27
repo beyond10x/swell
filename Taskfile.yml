@@ -2,6 +2,10 @@ version: '3'
 
 set: [pipefail]
 
+vars:
+  COLLECT_MAIN: --locked -p swell --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile collect --profile default --test main
+  SLOW_COLLECT_WAIT: '400'
+
 includes:
   test-binaries:
     taskfile: taskfiles/test-binaries.yml
@@ -180,14 +184,28 @@ tasks:
       part and its seconds, the lane's sum or the clock's seconds, so a step without its own
       time line is bounded too. A part that fails stops the lane there, as before, and
       slow-time-sum does not run.
+
+      Right after gate-time-start the lane starts the build of the profile collect that
+      slow-tests and test-realm-sizes run on (slow-collect-start): it runs in the background
+      beside slow-test262, whose run keeps 4 workers busy while that build, which a 32-core node
+      does not make shorter than a 4-core runner (3 min 59 s against 3 min 33 s), runs mostly on
+      one core. slow-tests is called with SLOW_COLLECT=lane and waits for it; a part run alone
+      builds what it needs itself. The parts' slow-time lines stay each part's own wall time;
+      the build's own seconds are on the line "slow-build collect ..." that slow-tests prints.
+      Whatever way the lane ends (a part that fails, the end, an interrupt), the build does not
+      outlive it: the deferred slow-collect-stop ends it, and the build's own watcher ends it
+      when the lane's task process is gone.
     silent: true
     cmds:
       - task: gate-vars
       - task: gate-time-start
+      - defer: {task: slow-collect-stop}
+      - task: slow-collect-start
       - task: slow-test262
       - task: gate-time
         vars: {STEP: slow-test262, LABEL: slow-time}
       - task: slow-tests
+        vars: {SLOW_COLLECT: lane}
       - task: gate-time
         vars: {STEP: slow-tests, LABEL: slow-time}
       - task: test-realm-sizes
@@ -197,6 +215,84 @@ tasks:
       - task: gate-time
         vars: {STEP: stack-profiles, LABEL: slow-time}
       - task: slow-time-sum
+
+  slow-collect-start:
+    desc: Internal, called by slow after gate-time-start. Start the build of the profile collect that slow-tests and test-realm-sizes run on in the background, and return.
+    summary: |
+      Internal, called by the lane slow right after gate-time-start. Starts "cargo nextest run
+      --no-run" with COLLECT_MAIN (the variable at the top of this file, which the run of
+      slow-tests at opt-level 1, build-realm-sizes and test-realm-sizes read too, so the build
+      and the runs cannot differ) and RUSTFLAGS="-D warnings", in the background, and returns.
+      Its files are under .out/slow-collect (emptied first): log, the build's output; pid, the
+      process that runs and watches it, the leader of a process group of its own (setsid) that
+      holds the build; start and end, the clock at both ends; status, the build's exit status,
+      written last. The watcher ends the build's process group when the process of the task
+      that called slow-collect-start (the lane's go-task) is gone, so an interrupted lane leaves
+      no build; slow-collect-stop ends it when the lane ends another way. Prints
+      "slow-collect-start: the build of the profile collect runs in the background, process
+      <pid>, log .out/slow-collect/log"; fails when the process did not start. A part run alone
+      does not need it: slow-tests without SLOW_COLLECT=lane builds what it runs.
+      tests/gate/slow-collect-builds-beside-the-lane-and-ends-with-it.sh holds it.
+    silent: true
+    env:
+      RUSTFLAGS: -D warnings
+    cmds:
+      - |
+        dir=.out/slow-collect
+        rm -rf "$dir" && mkdir -p "$dir" || { echo "slow-collect-start: cannot make $dir"; exit 1; }
+        sh -c '
+          dir=$1; shift
+          lane=$PPID
+          setsid sh -c '\''
+            dir=$1 lane=$2; shift 2
+            echo $$ > "$dir/pid.tmp" && mv "$dir/pid.tmp" "$dir/pid"
+            date +%s.%N > "$dir/start"
+            "$@" > "$dir/log" 2>&1 < /dev/null &
+            build=$!
+            while kill -0 "$build" 2>/dev/null; do
+              if ! kill -0 "$lane" 2>/dev/null; then
+                echo "slow-collect: the lane (process $lane) is gone; the build ends with it" >> "$dir/log"
+                kill -TERM -- "-$$" 2>/dev/null
+                exit 1
+              fi
+              sleep 1
+            done
+            wait "$build"
+            st=$?
+            date +%s.%N > "$dir/end"
+            echo "$st" > "$dir/status.tmp" && mv "$dir/status.tmp" "$dir/status"
+          '\'' slow-collect "$dir" "$lane" "$@" > /dev/null 2>&1 < /dev/null &
+        ' slow-collect-start "$dir" cargo nextest run --no-run {{.COLLECT_MAIN}}
+        n=0
+        while [ ! -s "$dir/pid" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+        [ -s "$dir/pid" ] || { echo "slow-collect-start: the build of the profile collect did not start (no $dir/pid after 5 s)"; exit 1; }
+        echo "slow-collect-start: the build of the profile collect runs in the background, process $(cat "$dir/pid"), log $dir/log"
+
+  slow-collect-stop:
+    desc: Internal, deferred by slow. End the background build of slow-collect-start when it still runs, by its process group.
+    summary: |
+      Internal, deferred by the lane slow, so it runs when the lane ends, whether a part failed
+      or not. When .out/slow-collect/pid names a process and .out/slow-collect/status does not
+      exist (the build still runs), it sends TERM to that process's group (the build and its
+      watcher; never by name), waits up to 10 s for the group to be gone, then sends KILL, and
+      prints "slow-collect-stop: ended the build of the profile collect (process group <pid>),
+      which still ran when the lane ended". Otherwise it prints nothing.
+    silent: true
+    cmds:
+      - |
+        sh -c '
+          dir=.out/slow-collect
+          [ -s "$dir/pid" ] || exit 0
+          [ -f "$dir/status" ] && exit 0
+          pid=$(cat "$dir/pid")
+          case "$pid" in ""|*[!0-9]*) echo "slow-collect-stop: $dir/pid holds no process number"; exit 1 ;; esac
+          kill -0 -- "-$pid" 2>/dev/null || exit 0
+          kill -TERM -- "-$pid" 2>/dev/null
+          n=0
+          while kill -0 -- "-$pid" 2>/dev/null && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+          kill -KILL -- "-$pid" 2>/dev/null
+          echo "slow-collect-stop: ended the build of the profile collect (process group $pid), which still ran when the lane ended"
+        '
 
   slow-tests:
     desc: The lane slow's part of the tests. Run, at their full counts (SWELL_FULL_COUNTS=1), the test binaries whose gate count is a part, in both modes of swell.
@@ -235,7 +331,21 @@ tasks:
       "slow-tests: <b> test binaries: <p> passed, <f> failed, <i> ignored" and the same after
       "slow-tests collect-every-safe-point: " and "slow-tests collect-every-safe-point opt-level
       1: ", each with its ten slowest.
+
+      The run at opt-level 1 is "cargo nextest run" with COLLECT_MAIN, the one definition the
+      lane's background build (slow-collect-start) reads too. Run alone, this task builds it
+      there. In the lane (SLOW_COLLECT=lane) the build was started beside slow-test262; the task
+      first waits for .out/slow-collect/status, at most SLOW_COLLECT_WAIT seconds (400, under
+      the part's 600), then prints "slow-build collect <seconds> s, exit <status>, waited <s> s:
+      ..." (the build's own wall time, a line of its own, not a slow-time line: its seconds lie
+      inside those of slow-test262 and slow-tests). It fails with "slow-tests: the build of the
+      profile collect that the lane started failed, exit <n> (.out/slow-collect/log)" after the
+      log, with "... wrote no status within <bound> s of waiting ..." when the bound passes, and
+      with "... no build of the profile collect was started ..." when there is no
+      .out/slow-collect/pid.
     silent: true
+    vars:
+      SLOW_COLLECT: '{{.SLOW_COLLECT | default ""}}'
     env:
       RUSTFLAGS: -D warnings
     cmds:
@@ -321,8 +431,24 @@ tasks:
       - |
         swell=$(cat .out/slow-tests-collect.filter)
         [ -n "$swell" ] || exit 0
+        if [ '{{.SLOW_COLLECT}}' = lane ]; then
+          dir=.out/slow-collect
+          bound='{{.SLOW_COLLECT_WAIT}}'
+          [ -s "$dir/pid" ] || { echo "slow-tests: SLOW_COLLECT=lane, but no build of the profile collect was started (no $dir/pid; slow-collect-start starts it)"; exit 1; }
+          began=$(date +%s)
+          while [ ! -f "$dir/status" ] && [ $(( $(date +%s) - began )) -lt "$bound" ]; do sleep 1; done
+          [ -f "$dir/status" ] || { echo "slow-tests: the build of the profile collect that the lane started wrote no status within $bound s of waiting ($dir/log)"; exit 1; }
+          st=$(cat "$dir/status")
+          secs=$(awk -v a="$(cat "$dir/start" 2>/dev/null)" -v b="$(cat "$dir/end" 2>/dev/null)" 'BEGIN { printf "%.1f", b - a }')
+          echo "slow-build collect $secs s, exit $st, waited $(( $(date +%s) - began )) s: cargo nextest run --no-run {{.COLLECT_MAIN}}, in the background from the lane's start (slow-collect-start), inside the slow-time lines of slow-test262 and slow-tests"
+          if [ "$st" != 0 ]; then
+            cat "$dir/log"
+            echo "slow-tests: the build of the profile collect that the lane started failed, exit $st ($dir/log)"
+            exit 1
+          fi
+        fi
         status=0
-        SWELL_FULL_COUNTS=1 cargo nextest run --locked -p swell --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile collect --test main --config-file "$(pwd)/.out/slow-tests-collect-stack-nextest.toml" --profile default -E "$swell" > .out/slow-tests-collect-opt1.log 2>&1 || status=$?
+        SWELL_FULL_COUNTS=1 cargo nextest run {{.COLLECT_MAIN}} --config-file "$(pwd)/.out/slow-tests-collect-stack-nextest.toml" -E "$swell" > .out/slow-tests-collect-opt1.log 2>&1 || status=$?
         echo "$status" > .out/slow-tests-collect-opt1.status
       - task: nextest-report
         if: '[ -f .out/slow-tests-collect-opt1.status ]'
@@ -334,7 +460,8 @@ tasks:
       The build step of test-realm-sizes: "cargo nextest run --no-run --locked -p swell
       --profile default --test main" and "cargo nextest run --no-run --locked -p swell
       --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile
-      collect --profile default --test main", with RUSTFLAGS="-D warnings", into
+      collect --profile default --test main" (COLLECT_MAIN, the definition the lane's
+      background build and slow-tests read too), with RUSTFLAGS="-D warnings", into
       .out/realm-sizes-build.log; with "--lib" beside "--test main" when a file under
       crates/swell/src reads SWELL_TEST_REALM_FUNCTIONS (none does: the padding lies in
       crates/swell/tests/support/host.rs). The first is the test profile at opt-level 0 that
@@ -362,7 +489,7 @@ tasks:
           # shellcheck disable=SC2086
           cargo nextest run --no-run --locked -p swell --profile default $targets &&
           # shellcheck disable=SC2086
-          cargo nextest run --no-run --locked -p swell --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile collect --profile default $targets
+          cargo nextest run --no-run {{.COLLECT_MAIN}} ${targets%--test main}
         } > .out/realm-sizes-build.log 2>&1 || status=$?
         if [ "$status" -ne 0 ]; then cat .out/realm-sizes-build.log; echo "build-realm-sizes: cargo nextest run --no-run failed, exit $status"; exit 1; fi
         esc=$(printf '\033')
@@ -517,7 +644,7 @@ tasks:
               SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --config-file "$cfg" --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
             else
               # shellcheck disable=SC2086
-              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run --locked -p swell --features collect-every-safe-point --config .cargo/collect-profile.toml --cargo-profile collect --config-file "$cfg" --profile default $targets -E "$filter" > "$log" 2>&1 || status=$?
+              SWELL_TEST_REALM_FUNCTIONS=$k cargo nextest run {{.COLLECT_MAIN}} ${targets%--test main} --config-file "$cfg" -E "$filter" > "$log" 2>&1 || status=$?
             fi
             cp target/nextest/default/junit.xml ".out/realm-sizes-$k-$mode.junit.xml" 2>/dev/null || :
             LC_ALL=C sed "s/$esc\[[0-9;]*[A-Za-z]//g" "$log" > "$log.plain"
