@@ -20,6 +20,9 @@ use swell::{
     Overrides, Parsed, PropertyKey, Prototype, Realm, Root, Source, Value,
 };
 
+/// A hook of [`HookHost`] a test gives as [`Answer::Custom`].
+type HookAnswer = fn(&mut HookCx<'_, HookHost>, ObjectRef) -> Completion<()>;
+
 /// What [`HookHost`]'s `host_ensure_can_add_private_element` answers at the call it answers.
 #[derive(Clone, Copy, Debug, Default)]
 enum Answer {
@@ -36,7 +39,7 @@ enum Answer {
     /// `Ok(())` after it set the interrupt flag through [`HookHost::interrupt`].
     Interrupt,
     /// What this function answers.
-    Custom(fn(&mut HookCx<'_, HookHost>, ObjectRef) -> Completion<()>),
+    Custom(HookAnswer),
 }
 
 /// A host that records each call of `host_ensure_can_add_private_element` and of the host
@@ -817,8 +820,7 @@ fn a_termination_the_hook_swallowed_ends_the_run_and_adds_nothing() {
     let (mut agent, realm) = hook_agent();
     let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
     assert_eq!(outcome(&mut agent, &realm, FIELD_CLASS), "normal 0");
-    let answers: [fn(&mut HookCx<'_, HookHost>, ObjectRef) -> Completion<()>; 2] =
-        [swallow_memory_budget, swallow_then_throw];
+    let answers: [HookAnswer; 2] = [swallow_memory_budget, swallow_then_throw];
     for answer in answers {
         agent.host_mut().answer = Answer::Custom(answer);
         assert_eq!(
@@ -846,7 +848,7 @@ fn big_string_every_second_throws(
 ) -> Completion<()> {
     let call = cx.host().objects.len();
     let made = cx.new_string(&"x".repeat(BIG))?;
-    if call % 2 == 0 {
+    if call.is_multiple_of(2) {
         return Err(Abrupt::Throw(Value::String(made)));
     }
     Ok(())
@@ -859,7 +861,7 @@ fn small_string_every_second_throws(
 ) -> Completion<()> {
     let call = cx.host().objects.len();
     let made = cx.new_string("made in the hook")?;
-    if call % 2 == 0 {
+    if call.is_multiple_of(2) {
         return Err(Abrupt::Throw(Value::String(made)));
     }
     Ok(())
