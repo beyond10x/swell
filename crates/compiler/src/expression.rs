@@ -734,8 +734,18 @@ impl<'a, 'm> Compiler<'a, 'm> {
                 t.push(emit(Instruction::InitInstance))?;
                 t.push(emit(Instruction::Pop))?;
             }
-            // `story:private-fields-and-private-in` replaces this arm.
-            Expr::PrivateIn { .. } => return Err(malformed("a private name in")),
+            // `#sec-relational-operators-runtime-semantics-evaluation`, RelationalExpression :
+            // PrivateIdentifier `in` ShiftExpression: the right operand, then `PrivateIn` with
+            // the Private Name `#x` resolves to (ResolvePrivateIdentifier, the private record
+            // of the innermost class that declares it).
+            Expr::PrivateIn { right, .. } => {
+                let (hops, slot) = match self.binding(Site::Expr(id))? {
+                    Binding::Env { hops, slot } => (hops, slot),
+                    _ => return Err(malformed("a private name outside its private record")),
+                };
+                t.push(Task::Expr(*right))?;
+                t.push(emit(Instruction::PrivateIn { hops, slot }))?;
+            }
             // `#sec-new-operator-runtime-semantics-evaluation`.
             Expr::New { callee, arguments } => {
                 t.push(Task::Expr(*callee))?;
