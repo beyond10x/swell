@@ -81,8 +81,8 @@ impl<H: Host> Agent<H> {
 
     /// `SetStrict`: the running frame's code is strict mode code from here on, or not
     /// (`#sec-strict-mode-code`): where the code of a class starts in non-strict code and where
-    /// it ends (decision D61). A function of its own, so its error path adds nothing to the frame
-    /// of the class arm.
+    /// it ends. A function of its own, so its error path adds nothing to the frame of the class
+    /// arm.
     #[inline(never)]
     pub(super) fn set_strict(&mut self, strict: bool) -> Completion<Flow> {
         self.top_frame()?.strict = strict;
