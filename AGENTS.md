@@ -85,6 +85,15 @@ and `parseFloat`; and the operator `**` (the gate has the steps `libm-check` and
 slices 9 and 12 with evidence and 72 cases taken in from slice 19: all 1,681 cases of slice 4
 pass in all 3,320 runs (`test262-slice 04 1681 3320 0 0 1681 1681 0 0`), and no host
 requirement is pending for it (`docs/plan/wave-big-1.md`).
+Slice 9, `collections-proxy-reflect` (`epic:slice-09-collections-proxy-reflect`), is delivered
+too (2026-11-27), in ten stories (`docs/plan/waves.md`, "Slice 9"; `docs/plan/wave-big-2.md`):
+the keyed entry table, `Map` and `Set` with their iterators, `WeakMap` and `WeakSet`, the
+seven set methods, `Map.prototype.getOrInsert`, `getOrInsertComputed` and `Map.groupBy`,
+`Proxy` with every trap, `Reflect`, and the table of host overrides of the internal methods;
+and the close, with 37 cases that need `class` or `new.target` moved to slice 8 and 22 that
+need a BigInt literal moved to slice 12, each with evidence, and 130 cases of
+`test/staging/` taken in from slice 19: all 1,858 cases of slice 9 pass in all 3,678 runs
+(`test262-slice 09 1858 3678 0 0 1858 1858 0 0`), and no host requirement is pending for it.
 The foundation is delivered in three waves (`docs/plan/wave-1.md`, `wave-2.md`, `wave-3.md`): the
 workspace, `task check`, test262 and the Unicode data pinned by checksum, both specifications
 of the host interface held by the gate, and `swell-test262`, which counts all 53,801 cases

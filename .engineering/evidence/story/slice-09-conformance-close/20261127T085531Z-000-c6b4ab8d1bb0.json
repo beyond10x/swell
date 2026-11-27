@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:55:31Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-09-conformance-close",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "task check-runner on wave/big-2 at a114833, exit 0, on the build node, with 9 in conformance/slices-delivered.txt; the unit was merged by commit 65b424e, an ancestor of that head",
+    "reference": "test262-slice 09 1858 3678 0 0 1858 1858 0 0; test262 total 53801 8982 7 44812 36027 8783 2; test262-moves: 2022 case(s) moved; host-requirements: pending by slice: 8:1 11:32 12:3 13:2 14:6 16:5 18:1; gate-selftest: 104 passed, 0 failed; gate-time test-steps 38.0 of 120"
+  }
+}

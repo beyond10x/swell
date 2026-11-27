@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T08:45:25Z",
+  "actor": "human:operator",
+  "artifact": "story:slice-09-conformance-close",
+  "kind": "story",
+  "revision": 7,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/close9 at 6cc4ca7, the unit's full run and its pool job on the build node, and the coordinator's checks over the run files, before the merge into wave/big-2",
+    "reference": "test262-slice 09 1858 3678 0 0 1858 1858 0 0; test262-check exit 0; test262-moves: 2022 case(s) moved; check (5) prints 0 over the start run and the 36 moves to slice 8 over the base run; slice-08 lists.sh: slice 9339 lists 9339 incoming 0"
+  }
+}

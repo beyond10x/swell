@@ -5,7 +5,7 @@ kind: epic
 status: draft
 title: 'Slice 9, collections-proxy-reflect: Map, Set, Proxy, Reflect'
 summary: 'Map, Set, WeakMap, WeakSet, Proxy and Reflect: 1,785 cases and 3,541 runs.'
-revision: 3
+revision: 5
 ---
 ## Context
 
@@ -48,7 +48,13 @@ the same internal methods as a `Proxy`), 13.
 
 ## Counts
 
-- Slice 9 (`collections-proxy-reflect`): 1,785 cases, 3,541 runs (section 12 table, `docs/design/engine.md:3019`; the gate on `main` at `62c7cf59` prints `test262-slice 09 1785 3541 0 0 1785 267 1518 0`). The epic first said 1,744 and 3,459, the table before cases of earlier slices moved in.
+- Slice 9 (`collections-proxy-reflect`): 1,858 cases, 3,678 runs after its close (section 12
+  table of `docs/design/engine.md`; `test262-slice 09 1858 3678 0 0 1858 1858 0 0`). Before the
+  close it held 1,787 cases and 3,545 runs, with the 2 cases the close of slice 4 moved in. The
+  close moved 59 cases (118 runs) to later slices with evidence: 37 to slice 8 (`class` 36,
+  `new.target` 1) and 22 to slice 12 (`1n` 15, `0n` 7). It took in 130 cases (251 runs) of
+  `test/staging/` from slice 19 (`docs/plan/slice-09/close-into-09.tsv`). The epic first said
+  1,744 and 3,459, then 1,785 and 3,541 on `62c7cf59`.
 - Directories the design names for it (paths under `test/`, cases): `Set` 381, `Proxy` 308, `Map` 202.
 - Lines of the `swell-slices` block that assign cases to this slice:
   - `dir test/built-ins/Map/ 9`
@@ -83,7 +89,7 @@ Source: `docs/design/engine.md`, section 12 and the output under 'How the counts
 - Web IDL legacy platform objects, `WindowProxy`, `document.all` and the Web IDL bindings that use
   the table of overrides: surf's (decision 9, "Not in scope"). The table itself, its dispatch and
   the checks of what an override answers are in this slice (`story:host-object-overrides`; HOST-41,
-  HOST-112, HOST-113 and HOST-114 are pending for slice 9, and the story adds HOST-222).
+  HOST-112, HOST-113, HOST-114 and HOST-222 have their tests, and none is pending for slice 9).
 - `Temporal` (slice 20), ECMA-402 (slice 21), stage 3 features, concurrent agents.
 
 ## Constraints
