@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:class-syntax-and-early-errors
 kind: story
-status: active
+status: implemented
 title: The grammar of a class and its early errors, parsed and held
 summary: 467 negative cases (917 runs); parser/class.rs, two nesting kinds, the holds class and class heritage.
 relations:
@@ -48,10 +48,11 @@ scope:
   path: crates/syntax/tests/sources/refused/class-declaration.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/class-expression.js
-revision: 13
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T08:23:45Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T08:23:46Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:32Z", actor: "human:operator", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

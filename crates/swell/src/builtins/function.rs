@@ -34,7 +34,7 @@ use swell_syntax::ast::FunctionKind;
 use crate::builtins::object::argument;
 use crate::builtins::string::StringBuilder;
 use crate::host::agent::Agent;
-use crate::host::outcome::{Completion, Termination};
+use crate::host::outcome::{Abrupt, Completion, Termination};
 use crate::host::{ErrorKind, HookCx, Host};
 use crate::object::ObjectKind;
 use crate::object::bound_function::bound_function_create;
@@ -152,6 +152,10 @@ pub(crate) enum FunctionBuiltin {
     /// `Function.prototype.toString ( )` (20.2.3.5).
     ToString,
 }
+
+/// Step 6.c of CreateListFromArrayLike with validElementTypes property-key: the throw for an
+/// element that is not a property key, or `None` for one that is.
+pub(crate) type Refuse<H> = dyn FnMut(&mut Agent<H>, Value) -> Option<Abrupt>;
 
 impl<H: Host> Agent<H> {
     /// `%Function%` (20.2.1, 20.2.2): a built-in constructor of length 1 whose [[Prototype]] is
@@ -278,14 +282,42 @@ impl<H: Host> Agent<H> {
     /// all: each element is pushed on the kept stack as it is read, in `room`, and stays there
     /// until the caller releases it; `charged` counts the bytes charged for the elements' slots
     /// of the list, which the caller credits.
-    #[inline(never)]
     pub(crate) fn create_list_from_array_like(
         &mut self,
         value: Value,
         charged: &mut u64,
         room: &mut KeptRoom,
     ) -> Completion<Vec<Value>> {
-        // 1. validElementTypes is all. 2. If obj is not an Object, throw a TypeError.
+        self.create_list_from_array_like_of(value, None, charged, room)
+    }
+
+    /// CreateListFromArrayLike of `value` with validElementTypes property-key
+    /// (`story:proxy-descriptor-prototype-and-extensibility-traps`, the `ownKeys` trap's
+    /// answer): as [`Agent::create_list_from_array_like`], and `refuse` answers, for each element
+    /// right after it is read (step 6.c), the throw of an element that is not a property key, or
+    /// `None` for one that is.
+    pub(crate) fn create_list_of_property_keys(
+        &mut self,
+        value: Value,
+        refuse: &mut Refuse<H>,
+        charged: &mut u64,
+        room: &mut KeptRoom,
+    ) -> Completion<Vec<Value>> {
+        self.create_list_from_array_like_of(value, Some(refuse), charged, room)
+    }
+
+    /// The steps of CreateListFromArrayLike; `refuse`, when present, is step 6.c of
+    /// validElementTypes property-key.
+    #[inline(never)]
+    fn create_list_from_array_like_of(
+        &mut self,
+        value: Value,
+        mut refuse: Option<&mut Refuse<H>>,
+        charged: &mut u64,
+        room: &mut KeptRoom,
+    ) -> Completion<Vec<Value>> {
+        // 1. validElementTypes is all unless `refuse` is given. 2. If obj is not an Object,
+        // throw a TypeError.
         let Value::Object(object) = value else {
             return Err(self.throw_error(
                 ErrorKind::TypeError,
@@ -302,8 +334,15 @@ impl<H: Host> Agent<H> {
             // 6.a. Let indexName be ! ToString(𝔽(index)). 6.b. Let next be ? Get(obj, indexName).
             let key = self.index_key(index)?;
             let next = self.get(object, key)?;
-            // 6.c does not apply to all. 6.d. Append next to list: kept in the room, and charged
-            // for its slot of the argument list.
+            // 6.c. If validElementTypes is property-key and next is not a property key, throw
+            // a TypeError exception.
+            if let Some(refuse) = refuse.as_mut()
+                && let Some(abrupt) = refuse(self, next)
+            {
+                return Err(abrupt);
+            }
+            // 6.d. Append next to list: kept in the room, and charged for its slot of the
+            // argument list.
             let bytes = vec_bytes::<Value>(1);
             if self.heap.accounting.charge(bytes).is_err() {
                 return Err(self.terminate(Termination::MemoryBudget));

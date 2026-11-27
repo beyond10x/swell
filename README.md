@@ -18,7 +18,7 @@ can use it.
 
 swell runs scripts of the ES5 grammar and of the bindings and iteration of ES2015 in both
 modes, with regular expressions, under a step budget and a memory budget.
-Its gate holds the test262 counts: 26,026 of the 44,812 cases that run pass (58.1 %), measured on 2026-11-26.
+Its gate holds the test262 counts: 32,455 of the 44,812 cases that run pass (72.4 %), measured on 2026-11-27.
 Eight of nineteen delivery slices are delivered:
 
 | slice | what it holds | cases |

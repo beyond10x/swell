@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:proxy-descriptor-prototype-and-extensibility-traps
 kind: story
-status: active
+status: implemented
 title: The Proxy traps getPrototypeOf, setPrototypeOf, isExtensible, preventExtensions, getOwnPropertyDescriptor, defineProperty and ownKeys
 summary: The seven traps with their invariants in object/invariants.rs (IsCompatiblePropertyDescriptor, ownKeys checks); order 3; 204 cases (1 incoming).
 relations:
@@ -20,10 +20,11 @@ scope:
   path: crates/swell/tests/main.rs
 - confidence: inferred
   path: crates/swell/tests/proxy_shape_traps.rs
-revision: 7
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-26T06:32:20Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T01:55:33Z", actor: "human:operator", revision: 9, decided_on: {"recorded":{"test_result":1,"review_outcome":3,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 
@@ -83,3 +84,48 @@ test262. The full run is not the unit's: the unit runs the runner on a part of t
 ## Out of scope
 
 The access traps, the constructor and `revocable` (`story:proxy-objects-and-access-traps`); host objects with overrides (`story:host-object-overrides`); the cases of slice 9 that need slice 8 or 12 (`docs/plan/slice-09/close-later.tsv`, the conformance close); the move of the incoming case (`story:slice-04-conformance-close`).
+
+## As delivered
+
+The unit `proxytraps` of wave big-2 delivered the story on `impl/proxytraps` (two corrections
+after the adversary's two passes and a last step), merged into `wave/big-2`. Where the delivery
+differs from the text above:
+
+- The walks and enumerations that read the seven methods needed changes of their own; the
+  Change says they need none. Seven call sites held a value only in a Rust local across a
+  trap (`ops/objects.rs`, six sites, and `builtins/object/integrity.rs`, one); they keep it
+  now, and all 204 call sites of the seven methods and their wrappers were read for it.
+- `for`-`in` over a chain with a Proxy. Before, the loop's filter called HasProperty: a key
+  of the prototype a `getPrototypeOf` trap answered was dropped whenever the target's own
+  chain lacked it. Now the walk records the chain it goes through from the first Proxy on,
+  and the loop asks [[GetOwnProperty]] of the objects of that chain before each key's turn;
+  it calls no `has` trap and no [[GetPrototypeOf]] again (`docs/design/engine.md`, the
+  paragraph after the memory budget's rule for the `for`-`in` enumerator). Trap calls of a
+  loop over a Proxy of two keys whose prototype is a Proxy of one key: 11 (12 before the
+  second correction; 7 in the clause's informative definition, which reads lazily and
+  filters nothing). A cycle of `getPrototypeOf` answers ends in the walk, at the step budget
+  or at the memory budget, whichever comes first.
+- Each internal method of a Proxy keeps at most 10 values outside a room, counted by the
+  library test `object::proxy::tests::no_method_of_a_proxy_keeps_more_than_ten_values_outside_a_room`:
+  a trap's arguments are released when the trap returns. Highest count before and after:
+  getPrototypeOf 5 and 4, setPrototypeOf 7 and 6, isExtensible 5 and 4, preventExtensions 5
+  and 4, getOwnProperty 11 and 9, defineOwnProperty 13 and 9, ownPropertyKeys 5 and 4,
+  hasProperty 7 and 6, get 9 and 8, set 11 and 10, delete 7 and 6, call 7, construct 7.
+- A Proxy method called directly by a builtin counts no re-entry more than code the builtin
+  calls (`enter_proxy` counts as `Agent::enter_code` does): `Object.keys` of a Proxy whose
+  `ownKeys` trap recurses runs the trap `reentry_depth` times, one more than before.
+  `STACK_BYTES_PER_REENTRY` is unchanged.
+- `crates/swell/tests/proxy.rs` is changed, where the acceptance says it runs as it is: the
+  `super` case the unit `proxy` left, a throw of each trap of shape caught inside nested
+  Proxies, the steps of `ownKeys` per key, the step budget at every step of an `ownKeys`
+  call, and one chain per trap of shape on the promised stack. The chain tests no longer
+  search for the deepest chain: each tries a chain at the depth its `reentry_depth` allows
+  and a chain one Proxy longer; six routes read the chain below again after each trap (get,
+  set, delete, the bound get, getPrototypeOf, ownKeys) and run at half of the depth of the
+  others. With a collection at every safe point three tests run the routes at `reentry_depth`
+  4.
+- The adversary's cases of both passes are tests of `proxy_shape_traps` under the unit's
+  names. `revoke_is_idempotent_and_drops_target_and_handler` holds at the realm sizes 4, 128
+  and 200.
+- Not changed, older than the unit: the box of a `for`-`in` enumerator is not charged (the
+  elements of its recorded chain are).

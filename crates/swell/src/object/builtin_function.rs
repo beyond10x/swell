@@ -1178,6 +1178,40 @@ mod tests {
         (agent, realm, roomy_limit)
     }
 
+    /// A room of the kept stack ([`Agent::reserve_kept`], [`Agent::end_kept_room`]): a
+    /// reservation of more than twice the capacity and more than 16 grows the stack to exactly
+    /// the values reserved, and the room is charged the bytes of that growth before it is made,
+    /// the account rising by them; keeping the values reserved grows nothing more; the end of
+    /// the room gives the stack back its length and its capacity, and the drop of the room gives
+    /// the account back its reading.
+    #[test]
+    fn a_room_of_the_kept_stack_is_charged_for_the_capacity_it_reserved() {
+        let (mut agent, _realm, _) = roomy();
+        agent.kept.shrink_to_fit();
+        let mark = agent.kept.len();
+        let capacity = agent.kept.capacity();
+        let used = agent.heap.accounting.used();
+        let slot = u64::try_from(size_of::<Value>()).unwrap();
+        let mut room = agent.kept_room();
+        let more = 2 * capacity + 17;
+        agent.reserve_kept(&mut room, more).unwrap();
+        let grown = agent.kept.capacity();
+        assert_eq!(grown, mark + more);
+        assert_eq!(
+            room.charge.bytes(),
+            u64::try_from(grown - capacity).unwrap() * slot
+        );
+        assert_eq!(agent.heap.accounting.used(), used + room.charge.bytes());
+        for i in 0..more {
+            agent.keep(Value::Number(f64::from(u32::try_from(i).unwrap())));
+        }
+        assert_eq!(agent.kept.capacity(), grown);
+        agent.end_kept_room(mark, &room);
+        assert_eq!((agent.kept.len(), agent.kept.capacity()), (mark, capacity));
+        drop(room);
+        assert_eq!(agent.heap.accounting.used(), used);
+    }
+
     /// `docs/design/engine.md`, "Memory budget" (storage is charged before it is allocated and
     /// credited where its holder drops it), and the execution context of a built-in function's
     /// [[Call]] (BuiltinCallOrConstruct, `#sec-builtincallorconstruct`, step 8, the push of

@@ -27,6 +27,7 @@ use crate::host::outcome::{Abrupt, Completion};
 use crate::host::{ErrorKind, Host};
 use crate::object::ordinary::OrdinaryData;
 use crate::object::property::{Descriptor, Key};
+use crate::ops::objects::Enumeration;
 use crate::ops::operators::{BinaryOperator, number_bitwise_not, number_unary_minus};
 use crate::realm::intrinsics::Intrinsic;
 use crate::value::{ObjectRef, StringRef, Value};
@@ -1688,13 +1689,14 @@ impl<H: Host> Agent<H> {
                 keys: Vec::new(),
                 next: 0,
                 bytes: 0,
+                chain: ChargedVec::new(),
             },
             _ => {
                 let object = self.to_object(value)?;
                 let keep = self.keep(Value::Object(object));
-                let list = self.enumerate_object_properties(object);
+                let enumeration = self.enumerate_object_properties(object);
                 self.release(keep);
-                let list = list?;
+                let Enumeration { found: list, chain } = enumeration?;
                 match self.interp.frames.last_mut() {
                     Some(frame) => frame.charged = frame.charged.saturating_add(list.bytes),
                     None => {
@@ -1707,6 +1709,7 @@ impl<H: Host> Agent<H> {
                     bytes: list.bytes,
                     keys: list.keys,
                     next: 0,
+                    chain,
                 }
             }
         };
@@ -1717,8 +1720,11 @@ impl<H: Host> Agent<H> {
 
     /// `ForInNext(t)`: the next key of the enumerator that is still a property of the object
     /// ("A property that is deleted before it is processed is ignored",
-    /// `#sec-enumerate-object-properties`), a step per key passed over, or the jump when none is
-    /// left.
+    /// `#sec-enumerate-object-properties`), a step per key passed over, or the jump when none
+    /// is left. Whether it is still one is read by [[GetOwnProperty]], never by a `has` trap:
+    /// along the chain the walk recorded when it met a Proxy ([`Agent::recorded_chain_has`]:
+    /// the loop follows the chain its walk recorded, once), else along [[GetPrototypeOf]] from
+    /// the object (`Agent::enumeration_has_property`).
     fn for_in_next(&mut self, target: u32) -> Completion<Flow> {
         loop {
             let next = {
@@ -1727,22 +1733,62 @@ impl<H: Host> Agent<H> {
                     Some(Entry::Enumerator(enumerator)) => {
                         let key = enumerator.keys.get(enumerator.next).copied();
                         enumerator.next = enumerator.next.saturating_add(1);
-                        Some((key, enumerator.object))
+                        Some((key, enumerator.object, !enumerator.chain.is_empty()))
                     }
                     _ => None,
                 }
             };
-            let (key, object) = match next {
-                Some((Some(key), Some(object))) => (key, object),
-                Some((None, _)) | Some((Some(_), None)) => return self.jump(target),
+            let (key, object, recorded) = match next {
+                Some((Some(key), Some(object), recorded)) => (key, object, recorded),
+                Some((None, _, _)) | Some((Some(_), None, _)) => return self.jump(target),
                 None => return Err(self.fault()),
             };
-            if self.has_property(object, key)? {
+            let present = if recorded {
+                self.recorded_chain_has(key)?
+            } else {
+                self.enumeration_has_property(object, key)?
+            };
+            if present {
                 let value = self.key_value(key)?;
                 self.push_value(value)?;
                 return Ok(Flow::Next);
             }
             self.charge_steps(1)?;
+        }
+    }
+
+    /// Whether `key` is still a property when its turn comes, over the chain of objects the walk
+    /// of the enumerator on top of the running frame's operand stack recorded (the loop
+    /// follows the chain the walk found, once): [[GetOwnProperty]] of each object of it in order,
+    /// and a step before each object after the first, as the walk along [[GetPrototypeOf]]
+    /// charged a step per prototype; no [[GetPrototypeOf]] runs, so each object of the chain is
+    /// asked for its prototype once, by the walk. The enumerator holds the chain and `key` while
+    /// each object's method runs (`Frame::trace`), and is read again after each, so nothing is
+    /// kept here.
+    pub(crate) fn recorded_chain_has(&mut self, key: Key) -> Completion<bool> {
+        let mut index = 0usize;
+        loop {
+            let link = {
+                let frame = self.top_frame()?;
+                match frame.stack.last() {
+                    Some(Entry::Enumerator(enumerator)) => {
+                        Some(enumerator.chain.get(index).copied())
+                    }
+                    _ => None,
+                }
+            };
+            let object = match link {
+                Some(Some(object)) => object,
+                Some(None) => return Ok(false),
+                None => return Err(self.fault()),
+            };
+            if index > 0 {
+                self.charge_steps(1)?;
+            }
+            if self.get_own_property(object, key)?.is_some() {
+                return Ok(true);
+            }
+            index = index.saturating_add(1);
         }
     }
 }
