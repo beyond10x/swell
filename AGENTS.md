@@ -739,7 +739,7 @@ swell v1 — 2 file(s), 10 scenario(s), valid
   60 scenarios: 60 passed, 0 failed, 0 error, 0 unsupported
 host-requirements: 224 requirement(s), 224 line(s): 174 test, 50 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
 host-requirements: pending by slice: 11:33 12:3 13:2 14:6 16:5 18:1
-host-surface: 19 change(s) since 0.12.0, each named
+host-surface: 20 change(s) since 0.12.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 site-data-check: website/data/engines.json equals its regeneration from bench/engines.jsonl, bench/published/*.tsv (held by its SHA256SUMS), bench/results/*.json, conformance/test262/expected.txt, conformance/test262/PIN, Cargo.toml, conformance/host/requirements.txt, crates/swell/src/host/limits.rs, crates/swell/src/host/interrupt.rs and the status file
 test-main: 9 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
