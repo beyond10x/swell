@@ -1,2 +1,3 @@
 test/language/global-code/export.js
 test/language/global-code/import.js
+test/language/module-code/top-level-await/new-await-script-code.js

@@ -470,6 +470,7 @@ test/language/expressions/dynamic-import/usage/top-level-import-then-is-call-exp
 test/language/expressions/dynamic-import/usage/top-level-import-then-returns-thenable.js
 test/language/expressions/dynamic-import/usage/top-level-import-then-specifier-tostring.js
 test/language/import/import-attributes/json-idempotency.js
+test/language/import/import-attributes/json-via-namespace.js
 test/language/module-code/top-level-await/await-dynamic-import-rejection.js
 test/language/module-code/top-level-await/await-dynamic-import-resolution.js
 test/language/module-code/top-level-await/dynamic-import-of-waiting-module.js

@@ -674,7 +674,7 @@ test/language/import/import-attributes/json-value-null.js	json-modules	msyn flag
 test/language/import/import-attributes/json-value-number.js	json-modules	msyn flag module;mrun flag module;mlink flag module, phase none;json feature;	-	msyn,mrun,mlink,json	failed
 test/language/import/import-attributes/json-value-object.js	json-modules	msyn flag module;mrun flag module;mlink flag module, phase none;json feature;	-	msyn,mrun,mlink,json	failed
 test/language/import/import-attributes/json-value-string.js	json-modules	msyn flag module;mrun flag module;mlink flag module, phase none;json feature;	-	msyn,mrun,mlink,json	failed
-test/language/import/import-attributes/json-via-namespace.js	joint	msyn flag module;mrun flag module;mlink flag module, phase none;ns * as;json feature;	-	msyn,mrun,mlink,ns,json	failed
+test/language/import/import-attributes/json-via-namespace.js	dynamic-import	msyn flag module;mrun flag module;mlink flag module, phase none;ns * as;json feature;	-	msyn,mrun,mlink,ns,json	failed
 test/language/module-code/ambiguous-export-bindings/error-export-from-named-as.js	module-linking-and-evaluation	msyn flag module;mrun flag module;mlink flag module, phase resolution;	-	msyn,mrun,mlink	failed
 test/language/module-code/ambiguous-export-bindings/error-export-from-named.js	module-linking-and-evaluation	msyn flag module;mrun flag module;mlink flag module, phase resolution;	-	msyn,mrun,mlink	failed
 test/language/module-code/ambiguous-export-bindings/error-import-named-as.js	module-linking-and-evaluation	msyn flag module;mrun flag module;mlink flag module, phase resolution;	-	msyn,mrun,mlink	failed
@@ -1048,7 +1048,7 @@ test/language/module-code/top-level-await/module-import-unwrapped.js	top-level-a
 test/language/module-code/top-level-await/module-self-import-async-resolution-ticks.js	top-level-await	msyn flag module;mrun flag module;mlink flag module, phase none;tla feature;	-	msyn,mrun,mlink,tla	failed
 test/language/module-code/top-level-await/module-sync-import-async-resolution-ticks.js	top-level-await	msyn flag module;mrun flag module;mlink flag module, phase none;tla feature;	-	msyn,mrun,mlink,tla	failed
 test/language/module-code/top-level-await/new-await-parens.js	top-level-await	msyn flag module;mrun flag module;mlink flag module, phase none;tla feature;	-	msyn,mrun,mlink,tla	failed
-test/language/module-code/top-level-await/new-await-script-code.js	other	passed	-	-	passed
+test/language/module-code/top-level-await/new-await-script-code.js	module-syntax-and-early-errors	no part: passed	-	-	passed
 test/language/module-code/top-level-await/new-await.js	module-records-loading-and-module-runs	msyn flag module;mrun flag module;	-	msyn,mrun	failed
 test/language/module-code/top-level-await/no-operand.js	module-records-loading-and-module-runs	msyn flag module;mrun flag module;	-	msyn,mrun	failed
 test/language/module-code/top-level-await/pending-async-dep-from-cycle.js	top-level-await	msyn flag module;mrun flag module;mlink flag module, phase none;tla feature;	-	msyn,mrun,mlink,tla	failed

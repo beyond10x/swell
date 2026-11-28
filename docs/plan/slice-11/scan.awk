@@ -1,6 +1,7 @@
 # scan.awk: every case of slice 11 by the story of slice 11 that is the first, in the order of the edges, to hold
-# every part of slice 11 the case needs; "joint" when no one story holds them all; "later <n>" for a failing case
-# that needs a part of slice <n>, delivered after slice 11; "other" for a case with no part.
+# every part of slice 11 the case needs ("joint" when no story holds them all, none on f962c324); "later <n>" for a
+# failing case that needs a part of slice <n>, delivered after slice 11; a case with no part goes to the first
+# story, module-syntax-and-early-errors, whose Module goal and await rules it guards.
 # Usage: LC_ALL=C gawk -v root=<test262 checkout> -f docs/plan/slice-11/scan.awk <cases>
 # where <cases> is "path<TAB>detail" of each case of slice 11, the detail the cause of its first failing run or
 # "passed" when every run passes, from the run lines of a full run (taskfiles/test262.yml, "test262-run"):
@@ -38,10 +39,12 @@
 #   meta   story:import-meta                                   holds msyn dsyn mrun mlink meta
 #   json   story:json-modules                                  holds msyn dsyn mrun mlink json
 #   dimp   story:dynamic-import                                holds msyn dsyn mrun mlink ns tla meta json dimp
-# story:module-code-compiles, story:ess-target-module-commands and story:module-determinism-and-emulated-loading
-# have no case of test262; story:slice-11-conformance-close has close-joint.cases.txt and close-later.tsv.
-# A case takes the key of the highest rank among its parts (the order above); when that story does not hold every
-# part the case needs, the key is "joint" and field 5 names the parts (the conformance close checks these cases).
+# story:modules-design-text, story:module-code-compiles, story:ess-target-module-commands,
+# story:module-determinism-and-emulated-loading and story:cli-module-loader have no case of test262;
+# story:slice-11-conformance-close has close-later.tsv.
+# A case takes the key of the first story, from the highest rank among its parts on in the order above, whose
+# closure holds every part the case needs (json-via-namespace.js needs ns and json: dynamic-import); when none
+# does, the key is "joint" and field 5 names the parts (no such case on f962c324).
 # Later parts, "later <n>", for a case with a failing run only: a refusal of a slice delivered after 11 in its first
 # failure, or a token of a later slice in its text: a BigInt literal or BigInt (12), binary data (13), Atomics or
 # SharedArrayBuffer (14), Iterator helpers or DisposableStack (15), WeakRef, FinalizationRegistry or $262.gc (16),
@@ -56,9 +59,6 @@
 # The lists, each sorted (LC_ALL=C sort), read from scan.tsv; lists.sh checks that they partition the slice:
 #   story-<key>.cases.txt, for each key above (the name of the story):
 #     LC_ALL=C awk -F'\t' '$2 == "<key>" { print $1 }' docs/plan/slice-11/scan.tsv
-#   close-joint.cases.txt, the cases no one story holds ("joint", 1 on f962c324) and the cases with no part
-#   ("other", 1, a script case that passes):
-#     LC_ALL=C awk -F'\t' '$2 == "joint" || $2 == "other" { print $1 }' docs/plan/slice-11/scan.tsv
 #   close-later.tsv, path, the later slice and the later parts, the cases the close moves or checks:
 #     LC_ALL=C awk -F'\t' '$2 ~ /^later / { s = $2; sub(/^later /, "", s); print $1 "\t" s "\t" $4 }' docs/plan/slice-11/scan.tsv
 # The guard lists, cases outside slice 11 whose every run passes in the full run on f962c324 (37,074 cases), each a
@@ -158,8 +158,12 @@ BEGIN { FS = "\t"; OFS = "\t"
   best = 0; for (k in has) if (rank[k] > best) best = rank[k]
   parts = ""; for (i = 1; i <= nrank; i++) if (name[i] in has) parts = parts (parts == "" ? "" : ",") name[i]
   if (late > 0) key = "later " late
-  else if (best == 0) { key = "other"; evid = substr($2, 1, 80) }
-  else { key = name[best]; split(holds[key], hl, " "); delete held; for (i in hl) held[hl[i]] = 1
-    for (k in has) if (!(k in held)) key = "joint" }
+  else if (best == 0) { key = name[1]; evid = "no part: " substr($2, 1, 70) }
+  else { key = ""
+    for (j = best; j <= nrank && key == ""; j++) {
+      split(holds[name[j]], hl, " "); delete held; for (i in hl) held[hl[i]] = 1
+      ok = 1; for (k in has) if (!(k in held)) ok = 0
+      if (ok) key = name[j] }
+    if (key == "") key = "joint" }
   if (key in label) key = label[key]
   print p, key, evid, (later == "" ? "-" : later), (parts == "" ? "-" : parts), (failed ? "failed" : "passed") }

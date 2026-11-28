@@ -1,7 +1,7 @@
 #!/bin/sh
 # The lists of slice 11 partition the slice: every case the run counts in slice 11 is on exactly one
-# list of docs/plan/slice-11/ (the story lists story-*.cases.txt and the two lists of the close,
-# close-joint.cases.txt and close-later.tsv, whose first field is the path), and every case of a
+# list of docs/plan/slice-11/ (the story lists story-*.cases.txt and the list of the close,
+# close-later.tsv, whose first field is the path), and every case of a
 # list is counted in slice 11, or is a line of incoming.tsv (a case another slice's close is to
 # move into slice 11; none is named on f962c324, and the file is absent).
 # close-later.tsv holds the decomposition's lines (path, the later slice, the later parts) and the
@@ -28,7 +28,7 @@ if [ $# -lt 1 ] || [ $# -gt 2 ]; then
 fi
 runs=$1
 dir=${2:-docs/plan/slice-11}
-set -- "$dir"/story-*.cases.txt "$dir/close-joint.cases.txt" "$dir/close-later.tsv"
+set -- "$dir"/story-*.cases.txt "$dir/close-later.tsv"
 for f in "$@"; do
   if [ ! -f "$f" ]; then
     echo "lists.sh: $f is not a file" >&2
