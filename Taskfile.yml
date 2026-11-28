@@ -366,7 +366,7 @@ tasks:
             done
             : > "$dir/done"
           '\'' slow-collect "$dir" "$lane" "$@" > "$dir/launch" 2>&1 < /dev/null &
-        ' slow-collect-start "$(pwd)/$dir" opt1 '{{.TEST_OPT1_ARGS}}' lib '{{trimSuffix "--test main" .COLLECT_MAIN}} --lib' collect '{{.COLLECT_MAIN}}'
+        ' slow-collect-start "$(pwd)/$dir" opt1 '{{.TEST_OPT1_ARGS}}' lib '{{trimSuffix " --test main" .COLLECT_MAIN}} --lib' collect '{{.COLLECT_MAIN}}'
         n=0
         while [ ! -s "$dir/pid" ] && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
         [ -s "$dir/pid" ] || { cat "$dir/launch" 2>/dev/null; echo "slow-collect-start: the builds at opt-level 1 did not start (no $dir/pid after 5 s; $dir/launch above)"; exit 1; }
@@ -654,7 +654,7 @@ tasks:
         {{.SLOW_WAIT}}
         lib=$(cat .out/slow-tests-collect.lib)
         [ -n "$lib" ] || exit 0
-        args='{{trimSuffix "--test main" .COLLECT_MAIN}} --lib'
+        args='{{trimSuffix " --test main" .COLLECT_MAIN}} --lib'
         if [ '{{.SLOW_COLLECT}}' = lane ]; then slow_wait lib "$args"; else built lib "$args"; fi
         status=0
         # shellcheck disable=SC2086
