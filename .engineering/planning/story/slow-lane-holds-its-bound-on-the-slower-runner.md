@@ -2,10 +2,13 @@
 format: aep.planning-md/3
 id: story:slow-lane-holds-its-bound-on-the-slower-runner
 kind: story
-status: draft
+status: active
 title: The lane slow holds its bound on the forge's slower runner
 summary: 'The forge ran the lane slow on one head in 1,123.4 s on an AMD EPYC 7763 and 843.8 s on an AMD EPYC 9V74, of its 900. The test binary of swell compiles the engine once per test host type, 19 times, and the lane''s longest part does not end before that build. Step 1: three host types in the test binary, held by a guard. Step 2: the lane''s runs that can move run at opt-level 1. The lane then holds 900 s and 600 s per part on the 7763 with the bounds unchanged. Lane unit 8 of wave big-2.'
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T04:08:07Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T04:08:07Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 
