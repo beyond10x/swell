@@ -13,6 +13,6 @@
 )]
 
 pub mod host;
-pub mod scripted;
 pub mod script;
+pub mod scripted;
 pub mod stack;

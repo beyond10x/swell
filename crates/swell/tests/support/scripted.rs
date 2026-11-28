@@ -15,6 +15,19 @@ use swell::{
     TimeZoneIdentifier, Value,
 };
 
+/// The entry of HostCallJobCallback in [`Hooks`].
+pub type CallJobCallback = fn(
+    &mut Cx<'_, Scripted>,
+    ObjectRef,
+    Option<&HostDefined>,
+    Value,
+    &[Value],
+) -> Completion<Value>;
+
+/// The entry of HostGetImportMetaProperties in [`Hooks`].
+pub type GetImportMetaProperties =
+    fn(&mut HookCx<'_, Scripted>, ModuleRef) -> Completion<Vec<(PropertyKey, Value)>>;
+
 /// The hooks of a [`Scripted`] host, one entry per hook of the trait `Host`
 /// (`crates/swell/src/host/hooks.rs`), each over the context the trait gives that hook. A test
 /// writes the entries it answers and takes the rest from [`Hooks::PROVIDED`]:
@@ -38,13 +51,7 @@ pub struct Hooks {
         fn(&mut HookCx<'_, Scripted>, ObjectRef) -> Completion<()>,
     pub host_has_source_text_available: fn(&mut HookCx<'_, Scripted>, ObjectRef) -> bool,
     pub host_make_job_callback: fn(&mut HookCx<'_, Scripted>, ObjectRef) -> Option<HostDefined>,
-    pub host_call_job_callback: fn(
-        &mut Cx<'_, Scripted>,
-        ObjectRef,
-        Option<&HostDefined>,
-        Value,
-        &[Value],
-    ) -> Completion<Value>,
+    pub host_call_job_callback: CallJobCallback,
     pub host_enqueue_promise_job: fn(&mut HookCx<'_, Scripted>, Option<RealmRef>),
     pub host_prepare_to_run_job: fn(&mut HookCx<'_, Scripted>, RealmRef),
     pub host_clean_up_after_job: fn(&mut HookCx<'_, Scripted>, Option<RealmRef>, Result<(), Value>),
@@ -54,8 +61,7 @@ pub struct Hooks {
     pub host_promise_rejection_tracker:
         fn(&mut HookCx<'_, Scripted>, ObjectRef, RejectionOperation),
     pub host_load_imported_module: fn(&mut HookCx<'_, Scripted>, LoadRequest),
-    pub host_get_import_meta_properties:
-        fn(&mut HookCx<'_, Scripted>, ModuleRef) -> Completion<Vec<(PropertyKey, Value)>>,
+    pub host_get_import_meta_properties: GetImportMetaProperties,
     pub host_finalize_import_meta: fn(&mut HookCx<'_, Scripted>, ObjectRef, ModuleRef),
     pub host_resize_array_buffer:
         fn(&mut HookCx<'_, Scripted>, ObjectRef, u64) -> Completion<Handled>,
