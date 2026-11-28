@@ -4,7 +4,9 @@
 //! `swell`, which links `std` and its system allocator; it calls no system API. It answers the
 //! clock from a fixed value, gives the agent fixed seeds and keeps the jobs it is handed in
 //! memory. Its source names no `std` path and no output macro of the `std` prelude, which
-//! `the_module_names_no_system_api` reads with the scanners of HOST-2.
+//! `the_module_names_no_system_api` reads with the scanners of HOST-2. Its hooks are given as
+//! values to the scripted host of `support/scripted.rs`, so that the test binary compiles the
+//! engine for no host type of its own (`host_types.rs`).
 //!
 //! Module loading from memory, the third part of such a host, is slice 11 and not delivered: the
 //! load hook keeps nothing.

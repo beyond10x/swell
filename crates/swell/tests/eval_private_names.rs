@@ -19,6 +19,7 @@ use crate::support;
 
 use support::host::{agent, agent_with, limits, realm};
 use support::script::{Outcome, eval_text, parse, run_both};
+use support::scripted::{Hooks, Scripted};
 use swell::{Outcome as HostOutcome, Termination};
 
 /// What a script that lists what went wrong answers when nothing did.
@@ -1534,53 +1535,69 @@ struct HashHost {
     interrupt: Option<swell::InterruptHandle>,
 }
 
-impl swell::Host for HashHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut swell::Cx<'_, Self>,
-        _request: &swell::CompileStrings<'_>,
-    ) -> swell::Completion<()> {
-        if let Some(handle) = cx.host_mut().interrupt.take() {
-            handle.interrupt();
-        }
-        Ok(())
+fn host_ensure_can_compile_strings(
+    cx: &mut swell::Cx<'_, Scripted>,
+    _request: &swell::CompileStrings<'_>,
+) -> swell::Completion<()> {
+    if let Some(handle) = cx.host_mut().state_mut::<HashHost>().interrupt.take() {
+        handle.interrupt();
     }
-
-    fn host_get_code_for_eval(
-        cx: &mut swell::HookCx<'_, Self>,
-        _arg: swell::ObjectRef,
-    ) -> Option<swell::StringRef> {
-        let units = cx.host().code.clone();
-        cx.new_string_utf16(&units).ok()
-    }
-
-    fn host_enqueue_generic_job(_cx: &mut swell::HookCx<'_, Self>, _job: swell::Job) {}
-
-    fn host_enqueue_timeout_job(
-        _cx: &mut swell::HookCx<'_, Self>,
-        _job: swell::Job,
-        _milliseconds: f64,
-    ) {
-    }
-
-    fn host_enqueue_finalization_registry_cleanup_job(
-        _cx: &mut swell::HookCx<'_, Self>,
-        _job: swell::Job,
-    ) {
-    }
-
-    fn host_load_imported_module(_cx: &mut swell::HookCx<'_, Self>, _request: swell::LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(
-        _cx: &mut swell::HookCx<'_, Self>,
-        _global: swell::ObjectRef,
-    ) -> i128 {
-        0
-    }
+    Ok(())
 }
 
+fn host_get_code_for_eval(
+    cx: &mut swell::HookCx<'_, Scripted>,
+    _arg: swell::ObjectRef,
+) -> Option<swell::StringRef> {
+    let units = cx.host().state::<HashHost>().code.clone();
+    cx.new_string_utf16(&units).ok()
+}
+
+fn host_enqueue_generic_job(_cx: &mut swell::HookCx<'_, Scripted>, _job: swell::Job) {}
+
+fn host_enqueue_timeout_job(
+    _cx: &mut swell::HookCx<'_, Scripted>,
+    _job: swell::Job,
+    _milliseconds: f64,
+) {
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(
+    _cx: &mut swell::HookCx<'_, Scripted>,
+    _job: swell::Job,
+) {
+}
+
+fn host_load_imported_module(_cx: &mut swell::HookCx<'_, Scripted>, _request: swell::LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(
+    _cx: &mut swell::HookCx<'_, Scripted>,
+    _global: swell::ObjectRef,
+) -> i128 {
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`HashHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
+
 /// An agent of [`HashHost`] with `limits` and its realm.
-fn hash_agent(limits: swell::Limits) -> (swell::Agent<HashHost>, swell::Realm) {
-    let mut agent = swell::Agent::new(HashHost::default(), limits, support::host::seeds()).unwrap();
+fn hash_agent(limits: swell::Limits) -> (swell::Agent<Scripted>, swell::Realm) {
+    let mut agent = swell::Agent::new(
+        Scripted::new(HashHost::default(), HOOKS),
+        limits,
+        support::host::seeds(),
+    )
+    .unwrap();
     let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
     else {
         panic!("create_realm did not answer Normal");
@@ -1591,7 +1608,7 @@ fn hash_agent(limits: swell::Limits) -> (swell::Agent<HashHost>, swell::Realm) {
 /// The steps of the entry `source` and its answer as text: the String of a normal answer,
 /// `throw`, or the termination.
 fn hash_entry(
-    agent: &mut swell::Agent<HashHost>,
+    agent: &mut swell::Agent<Scripted>,
     realm: &swell::Realm,
     source: &str,
 ) -> (u64, String) {
@@ -1642,7 +1659,7 @@ fn a_string_from_the_host_is_scanned_as_one_from_a_script() {
         ("'\u{2603}' // #", true),
         ("'\u{2603}'", false),
     ] {
-        agent.host_mut().code = text.encode_utf16().collect();
+        agent.host_mut().state_mut::<HashHost>().code = text.encode_utf16().collect();
         let (direct, answer) = hash_entry(&mut agent, &r, "sloppy(true, o);");
         let (indirect, indirect_answer) = hash_entry(&mut agent, &r, "sloppy(false, o);");
         let extra = direct as i64 - indirect as i64;
@@ -1667,9 +1684,9 @@ fn an_interrupt_or_the_step_budget_ends_the_eval_around_the_scan() {
     let setup = "class C { #x = 1; m(o) { var a = 1, b = 2; return String(eval(o)); } }\nvar c = new C(), o = {};\n0;";
     assert_eq!(hash_entry(&mut agent, &r, setup).1, "0");
     for (text, answer) in [("1", "1"), ("this.#x", "1"), ("'#'", "#")] {
-        agent.host_mut().code = text.encode_utf16().collect();
+        agent.host_mut().state_mut::<HashHost>().code = text.encode_utf16().collect();
         let handle = agent.interrupt_handle();
-        agent.host_mut().interrupt = Some(handle);
+        agent.host_mut().state_mut::<HashHost>().interrupt = Some(handle);
         assert_eq!(
             hash_entry(&mut agent, &r, "c.m(o);").1,
             "Interrupted",
@@ -1680,7 +1697,7 @@ fn an_interrupt_or_the_step_budget_ends_the_eval_around_the_scan() {
 
     let mut probe = hash_agent(limits());
     assert_eq!(hash_entry(&mut probe.0, &probe.1, "var o = {}; 0;").1, "0");
-    probe.0.host_mut().code = "1".encode_utf16().collect();
+    probe.0.host_mut().state_mut::<HashHost>().code = "1".encode_utf16().collect();
     let (needed, one) = hash_entry(&mut probe.0, &probe.1, "eval(o);");
     assert_eq!(one, "1");
     let mut l = limits();
@@ -1691,12 +1708,12 @@ fn an_interrupt_or_the_step_budget_ends_the_eval_around_the_scan() {
     for tail in ["1", "'\u{2603}'"] {
         let mut code: Vec<u16> = vec![u16::from(b' '); 1_000_000 - tail.encode_utf16().count()];
         code.extend(tail.encode_utf16());
-        agent.host_mut().code = code;
+        agent.host_mut().state_mut::<HashHost>().code = code;
         let start = std::time::Instant::now();
         let (_, answer) = hash_entry(&mut agent, &r, "eval(o);");
         times.push(format!("{tail}: {:?}", start.elapsed()));
         assert_eq!(answer, "StepBudget", "{tail}");
-        agent.host_mut().code = "1".encode_utf16().collect();
+        agent.host_mut().state_mut::<HashHost>().code = "1".encode_utf16().collect();
         assert_eq!(hash_entry(&mut agent, &r, "eval(o);").1, "1");
     }
     println!(

@@ -21,9 +21,10 @@ use std::rc::Rc;
 
 use support::host::{limits, seeds};
 use support::script::{Outcome as Shown, eval, eval_text};
+use support::scripted::{Hooks, Scripted};
 use support::stack::stack_agent;
 use swell::{
-    Agent, CheckpointReport, Completion, Cx, HookCx, Host, HostCall, HostData, HostDefined,
+    Agent, CheckpointReport, Completion, Cx, HookCx, HostCall, HostData, HostDefined,
     InterruptHandle, Job, Limits, LoadRequest, ObjectRef, Outcome, Parsed, PromiseState,
     PropertyKey, Realm, RealmRef, Root, Script, Source, Termination, Tracer, Value,
 };
@@ -53,81 +54,108 @@ struct FromAsyncHost {
     interrupt: Option<InterruptHandle>,
 }
 
-impl Host for FromAsyncHost {
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        callback: ObjectRef,
-    ) -> Option<HostDefined> {
-        cx.host_mut().made += 1;
-        let root = cx.root(Value::Object(callback)).unwrap();
-        cx.host_mut().kept.push(root);
-        Some(Rc::new(Marker(cx.host().made)))
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        host_defined: Option<&HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        let marker = host_defined
-            .and_then(|data| (&**data as &dyn Any).downcast_ref::<Marker>())
-            .map_or(0, |Marker(n)| *n);
-        let kept = std::mem::take(&mut cx.host_mut().kept);
-        // The function the marker names first, so a long run looks up each in one read.
-        let named = usize::try_from(marker)
-            .ok()
-            .and_then(|m| m.checked_sub(1))
-            .filter(|&k| {
-                kept.get(k)
-                    .is_some_and(|root| cx.get(root).unwrap() == Value::Object(callback))
-            });
-        let which = named
-            .or_else(|| {
-                kept.iter()
-                    .position(|root| cx.get(root).unwrap() == Value::Object(callback))
-            })
-            .map_or(0, |k| k + 1);
-        cx.host_mut().kept = kept;
-        cx.host_mut()
-            .events
-            .push(format!("call {which} marker {marker}"));
-        cx.call(Value::Object(callback), this, args).unwrap()
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, realm: RealmRef) {
-        cx.host_mut().events.push("prepare".to_string());
-        cx.host_mut().prepares.push(realm);
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        result: Result<(), Value>,
-    ) {
-        let event = match result {
-            Ok(()) => "clean-up ok",
-            Err(_) => "clean-up err",
-        };
-        cx.host_mut().events.push(event.to_string());
-    }
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
 }
 
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    callback: ObjectRef,
+) -> Option<HostDefined> {
+    cx.host_mut().state_mut::<FromAsyncHost>().made += 1;
+    let root = cx.root(Value::Object(callback)).unwrap();
+    cx.host_mut().state_mut::<FromAsyncHost>().kept.push(root);
+    Some(Rc::new(Marker(cx.host().state::<FromAsyncHost>().made)))
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    host_defined: Option<&HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    let marker = host_defined
+        .and_then(|data| (&**data as &dyn Any).downcast_ref::<Marker>())
+        .map_or(0, |Marker(n)| *n);
+    let kept = std::mem::take(&mut cx.host_mut().state_mut::<FromAsyncHost>().kept);
+    // The function the marker names first, so a long run looks up each in one read.
+    let named = usize::try_from(marker)
+        .ok()
+        .and_then(|m| m.checked_sub(1))
+        .filter(|&k| {
+            kept.get(k)
+                .is_some_and(|root| cx.get(root).unwrap() == Value::Object(callback))
+        });
+    let which = named
+        .or_else(|| {
+            kept.iter()
+                .position(|root| cx.get(root).unwrap() == Value::Object(callback))
+        })
+        .map_or(0, |k| k + 1);
+    cx.host_mut().state_mut::<FromAsyncHost>().kept = kept;
+    cx.host_mut()
+        .state_mut::<FromAsyncHost>()
+        .events
+        .push(format!("call {which} marker {marker}"));
+    cx.call(Value::Object(callback), this, args).unwrap()
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, realm: RealmRef) {
+    cx.host_mut()
+        .state_mut::<FromAsyncHost>()
+        .events
+        .push("prepare".to_string());
+    cx.host_mut()
+        .state_mut::<FromAsyncHost>()
+        .prepares
+        .push(realm);
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    result: Result<(), Value>,
+) {
+    let event = match result {
+        Ok(()) => "clean-up ok",
+        Err(_) => "clean-up err",
+    };
+    cx.host_mut()
+        .state_mut::<FromAsyncHost>()
+        .events
+        .push(event.to_string());
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`FromAsyncHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    ..Hooks::PROVIDED
+};
+
 /// The host function `interruptNow`: it sets the agent's interrupt flag.
-fn interrupt_now(cx: &mut Cx<'_, FromAsyncHost>, _call: HostCall<'_>) -> Completion<Value> {
-    if let Some(interrupt) = &cx.host().interrupt {
+fn interrupt_now(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    if let Some(interrupt) = &cx.host().state::<FromAsyncHost>().interrupt {
         interrupt.interrupt();
     }
     Ok(Value::Undefined)
 }
 
 /// A realm of `agent` whose global `interruptNow` is the host function of this file.
-fn new_realm(agent: &mut Agent<FromAsyncHost>) -> Realm {
+fn new_realm(agent: &mut Agent<Scripted>) -> Realm {
     let realm = match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -153,9 +181,14 @@ fn new_realm(agent: &mut Agent<FromAsyncHost>) -> Realm {
 }
 
 /// An agent of the host of these tests with `limits`, and a realm of [`new_realm`].
-fn new_agent(limits: Limits) -> (Agent<FromAsyncHost>, Realm) {
-    let mut agent = Agent::new(FromAsyncHost::default(), limits, seeds()).unwrap();
-    agent.host_mut().interrupt = Some(agent.interrupt_handle());
+fn new_agent(limits: Limits) -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(FromAsyncHost::default(), HOOKS),
+        limits,
+        seeds(),
+    )
+    .unwrap();
+    agent.host_mut().state_mut::<FromAsyncHost>().interrupt = Some(agent.interrupt_handle());
     let realm = new_realm(&mut agent);
     (agent, realm)
 }
@@ -168,7 +201,7 @@ fn limits_with(steps: u64) -> Limits {
 }
 
 /// The script `source` parsed, which must parse.
-fn parse(agent: &mut Agent<FromAsyncHost>, realm: &Realm, source: &str) -> Script {
+fn parse(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -179,13 +212,13 @@ fn parse(agent: &mut Agent<FromAsyncHost>, realm: &Realm, source: &str) -> Scrip
 }
 
 /// The outcome of the script `source`, which must parse.
-fn evaluate(agent: &mut Agent<FromAsyncHost>, realm: &Realm, source: &str) -> Outcome<Root> {
+fn evaluate(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Outcome<Root> {
     let script = parse(agent, realm, source);
     agent.evaluate_script(&script).unwrap()
 }
 
 /// The script `source`, which must complete normally: its completion value.
-fn run(agent: &mut Agent<FromAsyncHost>, realm: &Realm, source: &str) -> Root {
+fn run(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Root {
     match evaluate(agent, realm, source) {
         Outcome::Normal(value) => value,
         other => panic!("{source:?} answered {other:?}"),
@@ -193,7 +226,7 @@ fn run(agent: &mut Agent<FromAsyncHost>, realm: &Realm, source: &str) -> Root {
 }
 
 /// The parsed script `script`, which must complete normally.
-fn run_parsed(agent: &mut Agent<FromAsyncHost>, script: &Script) {
+fn run_parsed(agent: &mut Agent<Scripted>, script: &Script) {
     match agent.evaluate_script(script).unwrap() {
         Outcome::Normal(_) => {}
         other => panic!("the script answered {other:?}"),
@@ -201,7 +234,7 @@ fn run_parsed(agent: &mut Agent<FromAsyncHost>, script: &Script) {
 }
 
 /// The text of `String(expression)`.
-fn text(agent: &mut Agent<FromAsyncHost>, realm: &Realm, expression: &str) -> String {
+fn text(agent: &mut Agent<Scripted>, realm: &Realm, expression: &str) -> String {
     let root = run(agent, realm, &format!("String({expression})"));
     agent
         .with_cx(realm, |cx| match cx.get(&root).unwrap() {
@@ -212,7 +245,7 @@ fn text(agent: &mut Agent<FromAsyncHost>, realm: &Realm, expression: &str) -> St
 }
 
 /// A checkpoint that must answer `Normal`: its report.
-fn normal(agent: &mut Agent<FromAsyncHost>) -> CheckpointReport {
+fn normal(agent: &mut Agent<Scripted>) -> CheckpointReport {
     match agent.perform_microtask_checkpoint().unwrap() {
         Outcome::Normal(report) => report,
         other => panic!("the checkpoint answered {other:?}"),
@@ -220,7 +253,7 @@ fn normal(agent: &mut Agent<FromAsyncHost>) -> CheckpointReport {
 }
 
 /// A checkpoint that must answer `Terminated`: its reason.
-fn terminated(agent: &mut Agent<FromAsyncHost>) -> Termination {
+fn terminated(agent: &mut Agent<Scripted>) -> Termination {
     match agent.perform_microtask_checkpoint().unwrap() {
         Outcome::Terminated(termination) => termination,
         other => panic!("the checkpoint answered {other:?}"),
@@ -236,7 +269,7 @@ fn report(promise_jobs: u64, host_microtasks: u64) -> CheckpointReport {
 }
 
 /// The global `name` of `realm` set to `value`.
-fn set_global(agent: &mut Agent<FromAsyncHost>, realm: &Realm, name: &str, value: &Root) {
+fn set_global(agent: &mut Agent<Scripted>, realm: &Realm, name: &str, value: &Root) {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -254,7 +287,7 @@ fn set_global(agent: &mut Agent<FromAsyncHost>, realm: &Realm, name: &str, value
 /// `rejected` with the value as a script of `realm` reads it once it is the global
 /// `settledValue`: an error by its `name`, an Array as `[` its `join()` `]`, any other value as
 /// `String` writes it.
-fn state_of(agent: &mut Agent<FromAsyncHost>, realm: &Realm, promise: &Root) -> String {
+fn state_of(agent: &mut Agent<Scripted>, realm: &Realm, promise: &Root) -> String {
     let (label, value) = match agent.promise_state(promise).unwrap() {
         PromiseState::Pending => return "pending".to_string(),
         PromiseState::Fulfilled(value) => ("fulfilled", value),
@@ -271,29 +304,37 @@ fn state_of(agent: &mut Agent<FromAsyncHost>, realm: &Realm, promise: &Root) -> 
 }
 
 /// [`state_of`] the promise the expression `expression` reads.
-fn state(agent: &mut Agent<FromAsyncHost>, realm: &Realm, expression: &str) -> String {
+fn state(agent: &mut Agent<Scripted>, realm: &Realm, expression: &str) -> String {
     let promise = run(agent, realm, expression);
     state_of(agent, realm, &promise)
 }
 
 /// `heap_bytes()` after a `collect()`.
-fn collected(agent: &mut Agent<FromAsyncHost>) -> u64 {
+fn collected(agent: &mut Agent<Scripted>) -> u64 {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     agent.heap_bytes().unwrap()
 }
 
 /// The function `host_make_job_callback` kept `index`-th (from 0), duplicated.
-fn kept(agent: &mut Agent<FromAsyncHost>, index: usize) -> Root {
-    let root = agent.host_mut().kept.remove(index);
+fn kept(agent: &mut Agent<Scripted>, index: usize) -> Root {
+    let root = agent
+        .host_mut()
+        .state_mut::<FromAsyncHost>()
+        .kept
+        .remove(index);
     let function = agent.duplicate(&root).unwrap();
-    agent.host_mut().kept.insert(index, root);
+    agent
+        .host_mut()
+        .state_mut::<FromAsyncHost>()
+        .kept
+        .insert(index, root);
     function
 }
 
 /// `Agent::call` of `function` with `undefined` as `this` and the one argument `value`: whether
 /// it answered `Normal(undefined)`.
 fn call_answers_undefined(
-    agent: &mut Agent<FromAsyncHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     function: &Root,
     value: Value,
@@ -659,7 +700,7 @@ const FILL: &str = "var a = []; for (var n = 1024; ; n = n * 2) a.push('x'.repea
 
 /// An agent of this file whose memory budget is the reading of `heap_bytes()` of a fresh realm,
 /// measured in an agent of its own, plus `room`, with `steps_per_entry` `steps`.
-fn memory_agent(room: u64, steps: u64) -> (Agent<FromAsyncHost>, Realm) {
+fn memory_agent(room: u64, steps: u64) -> (Agent<Scripted>, Realm) {
     let realm_bytes = {
         let (agent, _realm) = new_agent(limits());
         agent.heap_bytes().unwrap()
@@ -670,7 +711,7 @@ fn memory_agent(room: u64, steps: u64) -> (Agent<FromAsyncHost>, Realm) {
 }
 
 /// An agent for each termination, and the statements that end in it.
-fn ending_agents() -> [(Agent<FromAsyncHost>, Realm, &'static str, Termination); 3] {
+fn ending_agents() -> [(Agent<Scripted>, Realm, &'static str, Termination); 3] {
     let (step_agent, step_realm) = new_agent(limits_with(STEP_BUDGET));
     let (memory_agent, memory_realm) = memory_agent(FILL_ROOM, limits().steps_per_entry);
     let (interrupt_agent, interrupt_realm) = new_agent(limits());
@@ -721,7 +762,7 @@ fn a_termination_in_the_steps_of_from_async_leaves_its_promise_pending() {
             "{termination:?}"
         );
         assert_eq!(state_of(&mut agent, &realm, &promise), "pending");
-        let last = agent.host().kept.len() - 2;
+        let last = agent.host().state::<FromAsyncHost>().kept.len() - 2;
         let on_fulfilled = kept(&mut agent, last);
         assert!(call_answers_undefined(
             &mut agent,
@@ -959,23 +1000,23 @@ fn host_207_an_await_of_from_async_goes_through_the_hooks_of_an_await() {
     let array = run(&mut agent, &first, "Array;");
     set_global(&mut agent, &second, "A", &array);
     let promise = run(&mut agent, &second, "A.fromAsync({ length: 1, 0: 1 })");
-    assert_eq!(agent.host().made, 2);
+    assert_eq!(agent.host().state::<FromAsyncHost>().made, 2);
     let one = kept(&mut agent, 0);
     let two = kept(&mut agent, 1);
     let distinct = agent
         .with_cx(&first, |cx| cx.get(&one).unwrap() != cx.get(&two).unwrap())
         .unwrap();
     assert!(distinct, "the two functions of the Await are one");
-    assert!(agent.host().events.is_empty());
+    assert!(agent.host().state::<FromAsyncHost>().events.is_empty());
     assert_eq!(normal(&mut agent), report(1, 0));
     assert_eq!(
-        agent.host().events,
+        agent.host().state::<FromAsyncHost>().events,
         ["prepare", "call 1 marker 1", "clean-up ok"]
     );
     let first_ref = agent
         .with_cx(&first, |cx| cx.realm_ref(&first).unwrap())
         .unwrap();
-    assert_eq!(agent.host().prepares, [first_ref]);
+    assert_eq!(agent.host().state::<FromAsyncHost>().prepares, [first_ref]);
     let steps = agent.last_entry_steps().unwrap();
     println!("last_entry_steps of the checkpoint: {steps}");
     assert!(steps >= 3, "{steps}");
