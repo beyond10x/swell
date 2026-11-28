@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:swell-num-bigint-core
 kind: story
-status: draft
+status: active
 title: 'swell-num BigInt: the signed type, Karatsuba, Knuth division, text, Numbers and costs'
 summary: crates/num/src/bigint.rs on Nat with fallible reservations, cost and bit bounds per operation, limb-op counter; decision 6 settled; order 1; no case.
 relations:
@@ -27,7 +27,10 @@ scope:
   path: crates/num/tests/support/pairs.rs
 - confidence: cited
   path: docs/design/engine.md
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:11Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:12Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

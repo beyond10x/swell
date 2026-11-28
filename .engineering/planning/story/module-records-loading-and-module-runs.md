@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:module-records-loading-and-module-runs
 kind: story
-status: draft
+status: active
 title: Module records, parse_module and the load hand-over with its LoadRequest token; the runner parses module cases and loads from the case's directory
 summary: The module record in crates/swell/src/module/ with an empty state file per later part, its arena and trace; the ScriptOrModule component of two kinds at every site; the LoadRequest payload as a sum; parse_module, load_requested_modules, finish_loading_imported_module, module_status and the reads; the runner's module run and loader; HOST-39, 56-63, 67, 76, 138, 153. Order 3; 193 cases.
 relations:
@@ -92,7 +92,10 @@ scope:
   path: crates/test262/tests/fixtures/modules-load
 - confidence: cited
   path: crates/test262/tests/run.rs
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:08Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:08Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 

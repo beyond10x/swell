@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:swell-num-bigint-powers-shifts-and-bits
 kind: story
-status: draft
+status: active
 title: 'swell-num BigInt: exponentiation, shifts, two''s complement bitwise operations, asIntN and asUintN'
 summary: pow.rs, shift.rs, bitwise.rs under crates/num/src/bigint/ with their cost and bit bounds; order 2; no case.
 relations:
@@ -19,7 +19,10 @@ scope:
   path: crates/num/src/bigint/shift.rs
 - confidence: inferred
   path: crates/num/tests/bigint_ops.rs
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:12Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:13Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 ---
 ## Context
 

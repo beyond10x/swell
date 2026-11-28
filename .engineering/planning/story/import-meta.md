@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:import-meta
 kind: story
-status: draft
+status: active
 title: import.meta with its two hooks; a stale or foreign handle in the hook's answer faults the agent
 summary: Instruction::ImportMeta, the object made once per module through host_get_import_meta_properties and host_finalize_import_meta, each returned handle checked; lifts the hold import.meta; HOST-68, 158 and HOST-224. Order 5; 6 cases.
 relations:
@@ -36,7 +36,10 @@ scope:
   path: crates/syntax/src/parser/expression.rs
 - confidence: cited
   path: crates/syntax/src/parser/mod.rs
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:04Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:05Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 

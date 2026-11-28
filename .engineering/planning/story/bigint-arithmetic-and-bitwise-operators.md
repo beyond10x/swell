@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bigint-arithmetic-and-bitwise-operators
 kind: story
-status: draft
+status: active
 title: BigInt binary operators, ~, ++ and --, with the bigint_bits limit and charges before computing
 summary: bigint_operation in ops/bigint.rs, the BigInt arms of operators.rs and dispatch.rs; HOST-23, HOST-24, epic acceptance 5 and 6; order 3; 46 cases.
 relations:
@@ -24,7 +24,10 @@ scope:
   path: crates/swell/tests/limits_scripts.rs
 - confidence: cited
   path: website/data/status.json
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:00Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:00Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 ---
 ## Context
 

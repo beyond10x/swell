@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bigint-values-and-literals
 kind: story
-status: draft
+status: active
 title: 'BigInt values: literals, the heap record, charges and limit, conversions, equality and keys'
 summary: Lexer and compiler constants, BigIntRecord arena and collector, ops/bigint.rs, ToBoolean, ToString, SameValue, negate, Map and Set keys; HOST-219; order 2; 146 cases (107 failing, 39 passing).
 relations:
@@ -66,7 +66,10 @@ scope:
   path: crates/syntax/tests/sources/valid/bigint-literals.js
 - confidence: cited
   path: website/data/status.json
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:02Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:02Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

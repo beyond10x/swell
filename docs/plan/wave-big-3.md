@@ -1,9 +1,9 @@
 # Wave big-3: slice 11, modules, and slice 12, BigInt
 
-One wave of [the wave plan](waves.md), "After slice 4: bigger waves". Proposed on 2026-11-28.
-Skill version 0.26.0 of `aep:implementing`. This page is stage 1 of the wave: the 23 stories
-below are drafts, no unit is dispatched, and no story moves before the operator accepts the
-wave.
+One wave of [the wave plan](waves.md), "After slice 4: bigger waves". Proposed on 2026-11-28 and accepted
+by the operator the same day (`approval-record:wave-big-3`). Skill version 0.26.0 of
+`aep:implementing`. The 23 stories below are active; no unit is dispatched before the lane
+unit named under "Before the wave" is merged.
 
 The two epics follow the design's order: `epic:slice-11-modules`, then
 `epic:slice-12-bigint`, which depends on it (4 of its cases call `import()` with a second

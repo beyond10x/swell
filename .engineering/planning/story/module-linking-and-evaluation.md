@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:module-linking-and-evaluation
 kind: story
-status: draft
+status: active
 title: link and evaluate_module of a graph without top-level await; the runner judges resolution and runtime negatives of module runs
 summary: InnerModuleLinking, ResolveExport, GetExportedNames, InitializeEnvironment and synchronous evaluation on explicit work stacks; the import slot kind of the environment, read through by slot and by name; the runner links, evaluates and judges; HOST-38, 40, 42-44, 74, 75, 97, 98, 150, 157. Order 4; 122 cases.
 relations:
@@ -58,7 +58,10 @@ scope:
   path: crates/test262/tests/fixtures/modules-link
 - confidence: cited
   path: crates/test262/tests/run.rs
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:07Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:07Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

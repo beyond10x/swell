@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:modules-design-text
 kind: story
-status: draft
+status: active
 title: 'The design text of modules: the paragraphs Modules and Module records of engine.md and HOST-224, written by the design author'
 summary: engine.md section 3 Modules (walks on work stacks and their charge, the module frame, ScriptOrModule of two kinds, the LoadRequest payload), section 4 Module records (arena, Item::Module, per-part state files, import slot kind), section 11 the runner's loader; HOST-224 in host-interface.md and its pending line. Order 1; written by the design author; no case.
 relations:
@@ -14,7 +14,10 @@ scope:
   path: docs/design/engine.md
 - confidence: cited
   path: docs/design/host-interface.md
-revision: 3
+revision: 5
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:09Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:09Z", actor: "human:operator", revision: 5, executor: "agent:coordinator"}
 ---
 ## Context
 

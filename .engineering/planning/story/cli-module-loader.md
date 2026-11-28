@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:cli-module-loader
 kind: story
-status: draft
+status: active
 title: The command-line host runs a module file and its static imports from disk
 summary: 'swell --module <file>: the shell''s load hook reads ./ and ../ specifiers beside the referring module''s file (its path the module''s HostDefined), one module per path, every load finished inside the hook; a dynamic request or one with an attribute stays pending; top-level await through the checkpoint the shell performs; import() and JSON modules in the shell go to a later slice, decided at its decomposition. Order 7; no case.'
 relations:
@@ -24,7 +24,10 @@ scope:
   path: crates/cli/tests/shell.rs
 - confidence: cited
   path: website/docs/embedding.md
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:02Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:03Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-12-conformance-close
 kind: story
-status: draft
+status: active
 title: 'Every run of slice 12 passes: slice 11 cases checked, moves by rule lines, later cases come in'
 summary: close-slice-11.cases.txt (4 cases) checked, close-later.tsv settled, close-into-12.tsv, section 12 and expected.txt; order 5.
 relations:
@@ -31,7 +31,10 @@ scope:
   path: docs/design/engine.md
 - confidence: inferred
   path: docs/plan/slice-12/close-into-12.tsv
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:10Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:11Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 

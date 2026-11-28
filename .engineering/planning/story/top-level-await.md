@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:top-level-await
 kind: story
-status: draft
+status: active
 title: 'Top-level await: the asynchronous evaluation of a module graph'
 summary: await at a module's top level compiled as an asynchronous body (the activation slot in resolve.rs, async_slot set in lib.rs); AsyncEvaluationOrder, pending dependencies, async parents, ExecuteAsyncModule with its two built-in closures, GatherAvailableAncestors and the settling jobs; lifts the hold top-level await; HOST-99. Order 5; 240 cases.
 relations:
@@ -46,7 +46,10 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: cited
   path: crates/syntax/src/parser/statement.rs
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:13Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:13Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

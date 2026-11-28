@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:module-namespace-objects
 kind: story
-status: draft
+status: active
 title: Module namespace exotic objects, import * as and export * as ns
 summary: The namespace object kind with its eleven internal methods and sorted exports, GetModuleNamespace, namespace import slots and the NAMESPACE binding of ResolveExport; lifts the hold namespace import. Order 5; 70 cases.
 relations:
@@ -29,7 +29,10 @@ scope:
   path: crates/syntax/src/parser/mod.rs
 - confidence: inferred
   path: crates/syntax/src/parser/module.rs
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:07Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:08Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

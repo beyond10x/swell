@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:json-modules
 kind: story
-status: draft
+status: active
 title: 'JSON modules: parse_json_module, the synthetic record, the NotJsonModule check and the runner''s .json loads'
 summary: parse_json_module and the synthetic kind with one default export; finish answers NotJsonModule for a source-text module on a type json request; the runner supports the attribute type and loads .json files; HOST-64. Order 5; 10 cases.
 relations:
@@ -33,7 +33,10 @@ scope:
   path: crates/test262/tests/fixtures/modules-json
 - confidence: cited
   path: crates/test262/tests/run.rs
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:05Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:05Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 

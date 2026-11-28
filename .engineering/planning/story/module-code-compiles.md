@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:module-code-compiles
 kind: story
-status: draft
+status: active
 title: 'compile_module: the module environment''s slot layout, import slots, *default* and the functions InitializeEnvironment instantiates'
 summary: 'swell_compiler::compile_module and Code::module: every top-level name in the module environment, import slots marked for InitializeEnvironment, the field async_slot ([[HasTLA]], None until top-level-await) printed by the disassembler, export default to *default* with the name default, import and export-from compile to nothing; disassembly tests. Order 2; no case.'
 relations:
@@ -58,7 +58,10 @@ scope:
   path: crates/compiler/tests/sources/module-this-is-undefined.disasm
 - confidence: inferred
   path: crates/compiler/tests/sources/module-this-is-undefined.js
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:06Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:06Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 

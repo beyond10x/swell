@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bigint-constructor-and-prototype
 kind: story
-status: draft
+status: active
 title: The BigInt constructor, asIntN, asUintN, BigInt.prototype and the BigInt object
 summary: builtins/bigint.rs as the ninth group of part d, intrinsics and global, OrdinaryData::BigInt and ToObject, six realm places; order 3; 100 cases.
 relations:
@@ -32,7 +32,10 @@ scope:
   path: crates/swell/tests/builtins_symbol_values.rs
 - confidence: cited
   path: crates/swell/tests/fixtures/realm_places.txt
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:01Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:01Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 ---
 ## Context
 

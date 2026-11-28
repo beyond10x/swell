@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bigint-comparison-and-loose-equality
 kind: story
-status: draft
+status: active
 title: 'BigInt in IsLooselyEqual and IsLessThan: comparisons with BigInts, Numbers and Strings'
 summary: The BigInt steps of ops/testing.rs is_loosely_equal and is_less_than; order 3; 42 cases.
 relations:
@@ -13,7 +13,10 @@ scope:
   path: crates/swell/src/ops/testing.rs
 - confidence: inferred
   path: crates/swell/tests/bigint_comparison.rs
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:00Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:00Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:bigint-json-number-and-joined-cases
 kind: story
-status: draft
+status: active
 title: JSON.stringify and Number of a BigInt, and the cases that need operators and wrappers together
 summary: SerializeJSONProperty steps 2, 4 and 10, Number step 1.b, the JSON stack entry; order 4; 43 cases.
 relations:
@@ -19,7 +19,10 @@ scope:
   path: crates/swell/src/host/limits.rs
 - confidence: inferred
   path: crates/swell/tests/builtins_bigint_json_and_number.rs
-revision: 7
+revision: 9
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:01Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:02Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
 ---
 ## Context
 

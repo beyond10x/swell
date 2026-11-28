@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:module-determinism-and-emulated-loading
 kind: story
-status: draft
+status: active
 title: Determinism over a corpus of modules, and the emulated host loads modules from memory
 summary: A fixed corpus of modules run by two agents in one process and by two child processes with byte-equal transcripts (HOST-159); EmulatedHost answers the load hook from an in-memory map. Order 6; no case.
 relations:
@@ -18,7 +18,10 @@ scope:
   path: crates/swell/tests/determinism.rs
 - confidence: cited
   path: crates/swell/tests/emulated_host.rs
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:06Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:06Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 

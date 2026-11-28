@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:module-syntax-and-early-errors
 kind: story
-status: draft
+status: active
 title: 'The parser''s Module goal: import and export declarations of every form, attributes and module early errors, with namespace imports and top-level await held'
 summary: swell_syntax::parse_module, the Module goal (strict, no HTML-like comments), every import and export form with attributes and string names, the five lists of entries, module early errors; import and export in a Script become SyntaxErrors; holds namespace import and top-level await with held sources of the Module goal. Order 1; 3 cases.
 relations:
@@ -44,7 +44,10 @@ scope:
   path: crates/syntax/tests/sources/refused/export-declaration.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/import-declaration.js
-revision: 9
+revision: 11
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:09Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:10Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
 ---
 ## Context
 

@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:dynamic-import
 kind: story
-status: draft
+status: active
 title: 'import(): a load from a script, a module or a realm, through linking and evaluation to the namespace'
 summary: Instruction::ImportCall, EvaluateImportCall and ContinueDynamicImport; the referrer of a load from the active script or module or the realm; LoadedModules of scripts and realms; the runner resolves script referrers; lifts the last hold; HOST-55, 65, 66. Order 6; 485 cases.
 relations:
@@ -66,7 +66,10 @@ scope:
   path: crates/test262/tests/fixtures/modules-dynamic
 - confidence: cited
   path: crates/test262/tests/run.rs
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:03Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:03Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

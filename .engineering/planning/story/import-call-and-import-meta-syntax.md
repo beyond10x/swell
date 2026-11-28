@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:import-call-and-import-meta-syntax
 kind: story
-status: draft
+status: active
 title: import() and import.meta parsed whole with their early errors, then held until the stories that run them
 summary: ImportCall with options and import.meta (Module goal only) in the tree with their early errors and assignment-target rules; held dynamic import and import.meta; compiler arms answer CompileError::Tree. Order 2; 152 cases (130 failing on the base).
 relations:
@@ -47,7 +47,10 @@ scope:
   path: crates/syntax/tests/sources/refused/dynamic-import.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/import-meta.js
-revision: 8
+revision: 10
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:04Z", actor: "human:operator", revision: 9, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:04Z", actor: "human:operator", revision: 10, executor: "agent:coordinator"}
 ---
 ## Context
 

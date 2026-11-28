@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:slice-11-conformance-close
 kind: story
-status: draft
+status: active
 title: 'Every run of slice 11 passes: the cases that need a later slice move by rule lines, and passing cases of later slices come in'
 summary: 'The close of slice 11: the full run, the moves with evidence in moves.tsv, cases of later slices that pass come in by dir lines, the lists checked over the base run of the join; section 12 and expected.txt; the two stale slice-11 comments of Map and Set; the epic''s resolver bullet and the waves.md entry for the coordinator. Order 8.'
 relations:
@@ -30,7 +30,10 @@ scope:
   path: docs/plan/slice-11/close-into-11.tsv
 - confidence: cited
   path: docs/plan/slice-11/close-later.tsv
-revision: 10
+revision: 12
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:10Z", actor: "human:operator", revision: 11, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:10Z", actor: "human:operator", revision: 12, executor: "agent:coordinator"}
 ---
 ## Context
 

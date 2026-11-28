@@ -2,7 +2,7 @@
 format: aep.planning-md/3
 id: story:ess-target-module-commands
 kind: story
-status: draft
+status: active
 title: The ESS target runs the seven module commands of the model over the Rust interface
 summary: Arms of the conformance target for ParseModule, LoadRequestedModules, FinishLoadingImportedModule, LinkModule, EvaluateModule and the awaited HostLoadImportedModule and AsyncModuleExecutionSettled; a planted-defect test; the floor and maximum of conform-engine set to the measured counts. Order 6; no case.
 relations:
@@ -18,7 +18,10 @@ scope:
   path: conformance/ess/tests/planted_defect.rs
 - confidence: cited
   path: taskfiles/conform-engine.yml
-revision: 6
+revision: 8
+transitions:
+- {from: "draft", to: "proposed", at: "2026-11-28T03:55:03Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "proposed", to: "active", at: "2026-11-28T03:55:04Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
 ---
 ## Context
 
