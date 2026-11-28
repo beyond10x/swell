@@ -6,7 +6,7 @@ status: draft
 title: Wave big-2 takes the story of the lane slow on the slower runner as lane unit 8
 relations:
 - decides: story:slow-lane-holds-its-bound-on-the-slower-runner
-revision: 1
+revision: 2
 ---
 The forge ran the lane `slow` on the third pull request of wave big-2 at `f962c324` on
 2026-11-28 (run 46091909506, attempt 1) and failed it: `slow-time lane 1123.4 of 900,
@@ -17,9 +17,11 @@ was green on its first attempt (run 46091909500, test steps 84.8 s of 120).
 The pull request changes no task of the lane: it moves tests of the gate's step `test` to
 opt-level 1 (the seventh unit of the lane of work on the gate's time). The lane ran 673.0 s
 on the head of the second pull request (`5ab9f8e5`, run 46069633020) on an AMD EPYC 9V45,
-and 1,142.0 s on the first pull request's code (`d16fe575`, run 45967542195) on the runner
-model of this failure. `story:slow-lane-holds-its-bound-on-the-slower-runner` was filed in
-the backlog from the first pull request for this gap.
+and 1,142.0 s on the first pull request's code (`d16fe575`, run 45967542195). The log of
+that run does not name its runner's CPU; its parts `test-realm-sizes` and `slow-tests` read
+259.6 s and 223.0 s against 260.0 s and 231.2 s in this failure, which points to the same
+runner model and is not proven. `story:slow-lane-holds-its-bound-on-the-slower-runner` was
+filed in the backlog from the first pull request for this gap.
 
 The coordinator put the question to the operator with two options: merge the pull request
 when a second attempt of the lane's run is green, and take the backlog story into the wave
