@@ -9,7 +9,8 @@
 # fails, naming the test, when one is in not exactly one run.
 # No test runs and nothing is built: the script plants a tree of its own
 # (.out/gate-tests/<name>/run) with the repository's Taskfile.yml, whose TEST_OPT0_TESTS line it
-# sets to the pair "swell-syntax::main sources::nests", and taskfiles/, a crate swell whose
+# sets to the pair "swell-test262::main run::at_the_nesting_limit" (a test of a moved binary
+# that stays at opt-level 0), and taskfiles/, a crate swell whose
 # tests/deep.rs holds a test that calls stack_with_room( and one that does not and whose
 # tests/plain.rs holds one test, whose tests/realm_padding.rs holds the test
 # TEST_OPT1_PROFILE_TEST names (the run at opt-level 1 must hold it), and a stub cargo first on
@@ -17,7 +18,7 @@
 # is given (the names after "test(=" of swell::main, the packages after "package(=", the pairs
 # "binary_id(=<binary>) & test(=<test>)" left out of them; a line "not (...)" is the run at
 # opt-level 0, no file the workspace, in JSON) over five tests of two binaries (swell::main
-# and swell-syntax::main, the second from the pair) and one test of swell::main that is
+# and swell-test262::main, the second from the pair) and one test of swell::main that is
 # ignored (in the JSON of the workspace only, as cargo nextest list leaves an ignored test
 # out); it answers cargo nextest run with a Starting and a Summary line over the tests of its
 # list and a JUnit file of its own per run, and logs each run's profile, target, guard and the
@@ -113,7 +114,7 @@ printf '%s\n' '#!/bin/sh' \
   '  if [ "${STUB_OPT1:-}" = fail ]; then echo "     Summary [   0.300s] $n tests run: $((n - 1)) passed, 1 failed, 0 skipped"; exit 100; fi' \
   '  echo "     Summary [   0.300s] $n tests run: $n passed, 0 skipped"' \
   'else' \
-  '  printf "<testsuites><testsuite><testcase name=\"deep::on_the_promised_stack\" classname=\"swell::main\" time=\"0.200\"/><testcase name=\"sources::nests\" classname=\"swell-syntax::main\" time=\"0.100\"/></testsuite></testsuites>\n" > target/nextest/default/junit.xml' \
+  '  printf "<testsuites><testsuite><testcase name=\"deep::on_the_promised_stack\" classname=\"swell::main\" time=\"0.200\"/><testcase name=\"run::at_the_nesting_limit\" classname=\"swell-test262::main\" time=\"0.100\"/></testsuite></testsuites>\n" > target/nextest/default/junit.xml' \
   '  echo "    Starting $n tests across 2 binaries"' \
   '  echo "     Summary [   0.200s] $n tests run: $n passed, 0 skipped"' \
   'fi' \
@@ -122,7 +123,7 @@ chmod +x "$dir/bin/cargo"
 
 run="$dir/run"
 mkdir -p "$run/crates/swell/tests/support" "$run/crates/swell/src" "$run/.out" "$run/.config" || fail "cannot make $run"
-pair='swell-syntax::main sources::nests'
+pair='swell-test262::main run::at_the_nesting_limit'
 grep -q '^  TEST_OPT0_TESTS: ' Taskfile.yml || fail "Taskfile.yml has no line \"  TEST_OPT0_TESTS: <pairs>\" to plant the pair $pair in"
 sed "s/^  TEST_OPT0_TESTS: .*\$/  TEST_OPT0_TESTS: $pair/" Taskfile.yml > "$run/Taskfile.yml" || fail "cannot copy Taskfile.yml"
 grep -qxF "  TEST_OPT0_TESTS: $pair" "$run/Taskfile.yml" || fail "the planted Taskfile.yml does not hold the pair $pair"
@@ -160,7 +161,7 @@ grep -qxF '2 test binaries: 5 passed, 0 failed, 1 ignored' "$dir/split.out" ||
   fail "task test did not print one line of both runs, 2 binaries (the workspace's, swell::main once), 5 passed, 1 ignored (the test neither run ran) ($dir/split.out)"
 [ "$(grep -c 'test binaries:' "$dir/split.out")" = 1 ] ||
   fail "task test printed not one line of counts ($dir/split.out)"
-for slow in 'gate-slowest test 0.30 swell::main deep::on_any_stack' 'gate-slowest test 0.20 swell::main deep::on_the_promised_stack' 'gate-slowest test 0.10 swell-syntax::main sources::nests'; do
+for slow in 'gate-slowest test 0.30 swell::main deep::on_any_stack' 'gate-slowest test 0.20 swell::main deep::on_the_promised_stack' 'gate-slowest test 0.10 swell-test262::main run::at_the_nesting_limit'; do
   grep -qxF "$slow" "$dir/split.out" || fail "task test did not print \"$slow\": the slowest tests are taken over both runs ($dir/split.out)"
 done
 high=$(grep '^run profile collect ' "$dir/stub-split.log")

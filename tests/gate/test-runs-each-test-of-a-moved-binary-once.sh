@@ -6,7 +6,7 @@
 # holds the tests of swell::main the stack rule prints "other" and every test of the other
 # binaries of those packages but for the pairs "<binary> <test>" of TEST_OPT0_TESTS, which stay
 # in the run at opt-level 0 with every test of the other packages. Every test runs once, and a
-# pair of TEST_OPT0_TESTS names a test the workspace holds.
+# pair of TEST_OPT0_TESTS names, once, a test of a moved binary that the workspace holds.
 # No test runs and nothing is built: the script plants a tree of its own
 # (.out/gate-tests/<name>/run) with the repository's Taskfile.yml, whose TEST_OPT0_TESTS line
 # it sets to a pair of its own, and taskfiles/, a crate swell whose tests/deep.rs holds a test
@@ -28,6 +28,13 @@
 #    which the run at opt-level 1 holds: task test fails, naming it in both runs, no test ran.
 # 4. TEST_OPT0_TESTS names a pair the workspace's list does not hold
 #    (swell-test262::main run::no_such_test): task test fails, naming the pair, no test ran.
+# 5. TEST_OPT0_TESTS names, beside the pair of case 1, a test of a binary whose package
+#    TEST_OPT1_ARGS does not name (swell-syntax::main sources::nests) and one of swell::main
+#    (deep::on_the_promised_stack, at opt-level 0 by the stack rule): task test fails before it
+#    lists the workspace, naming each as not of a moved binary (and not the pair of case 1),
+#    no test ran.
+# 6. TEST_OPT0_TESTS names the pair of case 1 twice: task test fails before it lists the
+#    workspace, naming the pair a second time, no test ran.
 # Run from the repository root: sh tests/gate/test-runs-each-test-of-a-moved-binary-once.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS STUB_DEFECT
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -163,5 +170,33 @@ STUB_LOG="$root/$dir/stub-pair.log" PATH="$root/$dir/bin:$PATH" task -d "$run" t
 grep -qF 'swell-test262::main run::no_such_test' "$dir/pair.out" ||
   fail "task test did not name the pair of TEST_OPT0_TESTS that the workspace does not hold ($dir/pair.out)"
 [ ! -s "$dir/stub-pair.log" ] || fail "task test ran tests although TEST_OPT0_TESTS names a test the workspace does not hold ($dir/stub-pair.log)"
+
+# 5. Pairs whose binary is not a moved binary: one of a package TEST_OPT1_ARGS does not name,
+#    one of swell::main (a test the stack rule prints "stack", at opt-level 0 without the pair).
+sed "s/^  TEST_OPT0_TESTS: .*\$/  TEST_OPT0_TESTS: $pair swell-syntax::main sources::nests swell::main deep::on_the_promised_stack/" "$run/Taskfile.yml" > "$run/Taskfile.yml.new" &&
+  mv "$run/Taskfile.yml.new" "$run/Taskfile.yml" || fail "cannot plant the pairs of binaries that do not move"
+rm -f "$run/.out/test-list-all.json"
+: > "$dir/stub-unmoved.log"
+STUB_LOG="$root/$dir/stub-unmoved.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/unmoved.out" 2>&1 &&
+  fail "task test exited 0 with TEST_OPT0_TESTS naming tests of binaries that do not move ($dir/unmoved.out)"
+for t in 'swell-syntax::main sources::nests' 'swell::main deep::on_the_promised_stack'; do
+  grep -qF "test: TEST_OPT0_TESTS names $t, whose binary is not a moved binary" "$dir/unmoved.out" ||
+    fail "task test did not refuse the pair $t, whose binary is not a moved binary ($dir/unmoved.out)"
+done
+grep -qF "names $pair, whose" "$dir/unmoved.out" && fail "task test refused the pair $pair of a moved binary ($dir/unmoved.out)"
+[ ! -e "$run/.out/test-list-all.json" ] || fail "task test listed the workspace although TEST_OPT0_TESTS names tests of binaries that do not move ($run/.out/test-list-all.json)"
+[ ! -s "$dir/stub-unmoved.log" ] || fail "task test ran tests although TEST_OPT0_TESTS names tests of binaries that do not move ($dir/stub-unmoved.log)"
+
+# 6. A pair named twice: the second changes nothing.
+sed "s/^  TEST_OPT0_TESTS: .*\$/  TEST_OPT0_TESTS: $pair $pair/" "$run/Taskfile.yml" > "$run/Taskfile.yml.new" &&
+  mv "$run/Taskfile.yml.new" "$run/Taskfile.yml" || fail "cannot plant the pair twice"
+rm -f "$run/.out/test-list-all.json"
+: > "$dir/stub-twice.log"
+STUB_LOG="$root/$dir/stub-twice.log" PATH="$root/$dir/bin:$PATH" task -d "$run" test > "$dir/twice.out" 2>&1 &&
+  fail "task test exited 0 with TEST_OPT0_TESTS naming $pair twice ($dir/twice.out)"
+grep -qF "test: TEST_OPT0_TESTS names $pair a second time: the pair changes nothing" "$dir/twice.out" ||
+  fail "task test did not refuse the pair named a second time ($dir/twice.out)"
+[ ! -e "$run/.out/test-list-all.json" ] || fail "task test listed the workspace although TEST_OPT0_TESTS names a pair twice ($run/.out/test-list-all.json)"
+[ ! -s "$dir/stub-twice.log" ] || fail "task test ran tests although TEST_OPT0_TESTS names a pair twice ($dir/stub-twice.log)"
 
 echo "$name: ok"

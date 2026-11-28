@@ -1141,8 +1141,9 @@ tasks:
       manifest of its step (RUSTFLAGS="-D warnings" for all of them), so that each step finds
       its binaries fresh and compiles nothing inside the clock (the organization's rule "Tests
       stay fast"). First it refuses a caller's value of TEST_RUSTFLAGS or TEST_NEXTEST_ARGS
-      (task test-vars-check) and of TEST_OPT1_ARGS, NO_STACK_TESTS or TEST_OPT1_PROFILE_TEST
-      (task test-opt1-vars-check), and a profile of one package or of build scripts in the
+      (task test-vars-check) and of TEST_OPT1_ARGS, NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST or
+      TEST_OPT0_TESTS (task test-opt1-vars-check), and a profile of one package or of build
+      scripts in the
       profile dev or test, a definition of the profile collect, or an include of another
       configuration file, in Cargo.toml or .cargo/config.toml, which the test
       TEST_OPT1_PROFILE_TEST of the run at opt-level 1 does not see (task
@@ -1267,10 +1268,14 @@ tasks:
       TEST_OPT1_ARGS and the pairs of TEST_OPT0_TESTS) and .out/test-opt0-nextest.toml ("not
       (...)" of the same), and from "cargo nextest list" of each run and of the workspace
       without a filter it fails, naming the test, when a test is in not exactly one run, and
-      naming the pair, when a pair of TEST_OPT0_TESTS is not a test of that list; it prints
+      naming the pair, before any list, when a pair of TEST_OPT0_TESTS names a binary that is
+      not a moved binary (one of a package TEST_OPT1_ARGS names, other than swell::main, whose
+      tests the stack rule places) or names a test a second time, a pair that changes nothing,
+      and after the lists when a pair is not a test of the workspace's list; it prints
       "test: swell::main <a> at opt-level 1, <b> at opt-level 0" and "test: <n> tests at
-      opt-level 1, <m> at opt-level 0" (the lines of each run's list; n plus m is the count of
-      the list without a filter).
+      opt-level 1, <m> at opt-level 0" (the lines of each run's list, which leaves an ignored
+      test out: n plus m is p plus f of the summed line, and p plus f plus i is the count of
+      tests of the list without a filter).
         - The run at opt-level 1: "cargo nextest run <TEST_OPT1_ARGS>" with that
           configuration, TEST_OPT1_ARGS being "--locked -p swell -p swell-num -p swell-test262
           --config .cargo/collect-profile.toml --cargo-profile collect --profile default" (held,
@@ -1338,8 +1343,15 @@ tasks:
       of TEST_OPT0_TESTS, and .out/test-opt0-nextest.toml, "not (...)" of the same. It fails,
       with a line of its own, when crates/swell/tests/support/ holds no .rs file, when the rule
       prints no test "other", when TEST_OPT1_ARGS names no -p swell, when TEST_OPT0_TESTS is not
-      a line of pairs of plain words, when a file cannot be written, and when the written line
-      does not name each name, package and pair. Then "cargo nextest list" three times: of the
+      a line of pairs of plain words, when a pair names a binary that is not a moved binary (the
+      binary's package, its id up to "::", is not one TEST_OPT1_ARGS names by -p, or the binary
+      is swell::main, whose tests the stack rule places: such a pair changes nothing) or names
+      a pair a second time (which changes nothing either), naming the pair, when a file cannot
+      be written, and when the written line does not name each name, package and pair, or does
+      not hold the term of swell::main and its exclusion from the packages ("& not
+      binary_id(=swell::main)") once each: without the exclusion every test of swell::main, the
+      stack tests among them, would run at opt-level 1 and still be in exactly one run. Then
+      "cargo nextest list" three times: of the
       workspace without a filter (TEST_NEXTEST_ARGS) as --message-format json-pretty into
       .out/test-list-all.json, whose tests that match (an ignored test does not) it writes into
       .out/test-list-all.txt and whose count of binaries and of tests (the ignored ones among
@@ -1357,13 +1369,14 @@ tasks:
       "stack", one in a nested mod or one a macro writes runs at opt-level 0, where it proves
       nothing of the profile collect. It fails after them, before any test runs; otherwise it
       prints "test: swell::main <a> at opt-level 1, <b> at opt-level 0" and "test: <n> tests
-      at opt-level 1, <m> at opt-level 0", n and m the lines of the two lists. The
-      lists run with RUSTFLAGS from TEST_RUSTFLAGS, as the build and the runs do (a task's env
+      at opt-level 1, <m> at opt-level 0", n and m the lines of the two lists (an ignored test
+      is in neither: n plus m is p plus f of test-sum's line). The lists run with RUSTFLAGS from TEST_RUSTFLAGS, as the build and the runs do (a task's env
       does not reach the tasks it calls, so this task sets its own), and a list whose log has a
       cargo Compiling line fails naming build-tests (task compile-check): a list that built
       would build inside the clock. The planted scripts
       tests/gate/test-runs-each-test-once-at-one-opt-level.sh,
       tests/gate/test-runs-each-test-of-a-moved-binary-once.sh,
+      tests/gate/test-lists-and-summed-line-count-the-same-tests.sh,
       tests/gate/test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh and
       tests/gate/test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh hold the
       checks.
@@ -1385,6 +1398,18 @@ tasks:
         keep0={{shellQuote .TEST_OPT0_TESTS}}
         pairs=$(printf '%s\n' "$keep0" | awk '{ if (NF % 2) bad = 1; for (i = 1; i <= NF; i++) if ($i !~ /^[A-Za-z0-9_:\/.-]+$/) bad = 1 } END { if (bad) exit 1; print int(NF / 2) }') ||
           { echo "test: TEST_OPT0_TESTS is not one line of pairs <binary> <test> of letters, digits and _ : / . - ($keep0)"; exit 1; }
+        printf '%s\n' "$keep0" | awk -v pkgs="$pkgs" '
+          BEGIN { np = split(pkgs, p, " "); for (i = 1; i <= np; i++) moved[p[i]] = 1 }
+          {
+            for (i = 1; i < NF; i += 2) {
+              t = $i " " $(i + 1); pk = $i; sub(/::.*/, "", pk)
+              if ($i == "swell::main" || !(pk in moved)) { printf "test: TEST_OPT0_TESTS names %s, whose binary is not a moved binary (a binary of a package TEST_OPT1_ARGS names by -p, %s, other than swell::main, whose tests the stack rule places): the pair changes nothing; each pair names a test of a moved binary that stays at opt-level 0\n", t, pkgs; bad++ }
+              else if (t in seen) { printf "test: TEST_OPT0_TESTS names %s a second time: the pair changes nothing, the test is at opt-level 0 without it\n", t; bad++ }
+              seen[t] = 1
+            }
+          }
+          END { if (bad) exit 1 }
+        ' || exit 1
         npkgs=$(printf '%s\n' "$pkgs" | awk '{ print NF }')
         for form in opt1 opt0; do
           cfg=.out/test-$form-nextest.toml
@@ -1411,6 +1436,12 @@ tasks:
           moved=$(awk '/^default-filter = / { c += gsub(/package\(=/, "&") } END { print c + 0 }' "$cfg")
           if [ ! -s "$cfg" ] || [ "$lines" != 1 ] || [ "$named" != "$((want + pairs))" ] || [ "$moved" != "$npkgs" ]; then
             echo "test: $cfg holds $lines default-filter line(s) naming $named of the $want tests printed other and the $pairs test(s) of TEST_OPT0_TESTS, and $moved of the $npkgs package(s) of TEST_OPT1_ARGS, not one line naming all of them (.config/nextest.toml has no line [profile.default], or a default-filter of its own)"
+            exit 1
+          fi
+          main=$(awk '/^default-filter = / { c += gsub(/binary_id\(swell::main\) & \(/, "&") } END { print c + 0 }' "$cfg")
+          apart=$(awk '/^default-filter = / { c += gsub(/\) & not binary_id\(=swell::main\)/, "&") } END { print c + 0 }' "$cfg")
+          if [ "$main" != 1 ] || [ "$apart" != 1 ]; then
+            echo "test: $cfg holds the term of swell::main, \"binary_id(swell::main) & (\", $main time(s) and its exclusion from the packages, \"& not binary_id(=swell::main)\", $apart time(s), not once each: without the exclusion every test of swell::main, the stack tests among them, would run at opt-level 1"
             exit 1
           fi
         done
