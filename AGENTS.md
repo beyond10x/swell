@@ -214,8 +214,9 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   depends on: it has its own `Cargo.lock`, and it may take the `ess-conformance` crates by
   `git = "https://github.com/beyond10x/ess"` with a pinned tag. A read of a public dependency
   by cargo for such a workspace is allowed (ruled on 2026-11-21 by the session that decides
-  for the operator). The coordinating session and its units make no call to a forge: no push,
-  no remote, nothing created or written there ("Publishing").
+  for the operator). A unit makes no call to a forge: no push, no remote, nothing created or
+  written there; what the coordinating session pushes and opens is under "Publishing", "Who
+  does what".
 - A deliberate omission is recorded where the gate reads it (`conformance/test262/features.txt`
   for a test262 feature, the section's omission list for a requirement), never left implicit. A
   test262 feature the list does not name fails the gate.
@@ -738,7 +739,7 @@ swell v1 — 2 file(s), 10 scenario(s), valid
   60 scenarios: 60 passed, 0 failed, 0 error, 0 unsupported
 host-requirements: 224 requirement(s), 224 line(s): 174 test, 50 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
 host-requirements: pending by slice: 11:33 12:3 13:2 14:6 16:5 18:1
-host-surface: 19 change(s) since 0.12.0, each named
+host-surface: 20 change(s) since 0.12.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 site-data-check: website/data/engines.json equals its regeneration from bench/engines.jsonl, bench/published/*.tsv (held by its SHA256SUMS), bench/results/*.json, conformance/test262/expected.txt, conformance/test262/PIN, Cargo.toml, conformance/host/requirements.txt, crates/swell/src/host/limits.rs, crates/swell/src/host/interrupt.rs and the status file
 test-main: 9 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
@@ -810,11 +811,18 @@ coordinating session (not heard in the coordinating session itself): "A. Yes, bo
 replaced by one bot-made first commit, as surf)". Published on 2026-11-21 at the close of wave 2
 of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made by the bot.
 
-- **Who does what.** The session that decides for the operator does the whole forge side: the
-  bot-made first commit of `main`'s tree, the policy entry, audit, `check`, `verify`,
-  `publish`. The coordinating session and its units make no call to a forge, add no remote
-  and push nothing. At each wave boundary the coordinator sends that session `main`'s commit
-  and the gate's numbers and waits for its answer before the next wave opens.
+- **Who does what.** Units push nothing and make no call to the forge. The coordinating
+  session merges finished unit branches into one integration branch per batch (the wave
+  branch), runs the gate on it, and pushes that branch through the gates
+  (`b10x-gates ... check --receipt <file>`, then `b10x-gates ... bot -- push origin
+  <branch>`): one push per batch, not per commit, since the organization's runner pool is
+  shared. It opens one pull request for the branch (`b10x-gates ... gh -- pr create`), whose
+  body lists the units it carries, reads the forge's runs, and sends the session that
+  decides for the operator one line with the pull request's number and full head commit
+  when the checks are green. That session scans the head and merges it. `main` is never
+  pushed by the coordinating session, no branch is force-pushed, and a tag, a release or
+  another publication is that session's, on the operator's word. (Until 2026-11-23 the
+  deciding session did the whole forge side.)
 - **A pull request is opened for its checks, not to be merged on the forge.** `main`'s rules
   restrict updates and require the bot as committer, and a merge made on the forge has the
   forge's committer, so the forge refuses it ("the base branch policy prohibits the merge").

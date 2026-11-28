@@ -783,6 +783,10 @@ Every number below comes from the gate, `task check`, on the released commit.
   holds a stale handle or a handle of another agent ends the run with
   `Terminated(EngineFault)`. It was the start gate of `story:host-object-overrides`, which
   holds it with a test.
+- `HOST-224` (new, slice 11) is pending: a `host_get_import_meta_properties` whose `Ok`
+  vector holds a key or a value with a stale handle or a handle of another agent ends the
+  evaluation of `import.meta` with `Terminated(EngineFault)`. No public item of `value.rs`
+  or of `host/*.rs` is added or changed; the requirement is text until slice 11 builds it.
 - `Overrides`: the override table of a host object, generic over the host type
   (`Overrides<H>`), with one optional function per internal method:
   `Overrides::get_prototype_of`, `Overrides::set_prototype_of`,
