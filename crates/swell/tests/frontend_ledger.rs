@@ -10,8 +10,9 @@
 use crate::support;
 
 use support::host::{limits, seeds};
+use support::scripted::{Hooks, Scripted};
 use swell::{
-    Agent, CompileStrings, Completion, Cx, HookCx, Host, InterruptHandle, Job, Limits, LoadRequest,
+    Agent, CompileStrings, Completion, Cx, HookCx, InterruptHandle, Job, Limits, LoadRequest,
     ObjectRef, Outcome, Parsed, PropertyKey, Realm, Script, Source, Value,
 };
 
@@ -22,29 +23,39 @@ struct LedgerHost {
     interrupt: Option<InterruptHandle>,
 }
 
-impl Host for LedgerHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        _request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        if let Some(handle) = &cx.host_mut().interrupt {
-            handle.interrupt();
-        }
-        Ok(())
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    _request: &CompileStrings<'_>,
+) -> Completion<()> {
+    if let Some(handle) = &cx.host_mut().state_mut::<LedgerHost>().interrupt {
+        handle.interrupt();
     }
-
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
-    }
+    Ok(())
 }
+
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`LedgerHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
 
 /// The lines of the flat source: 5,000, as the gate's flat source of `src/script.rs`. The
 /// budget of [`eval_and_function_of_a_flat_source_end_in_memory_budget`] is the reading before
@@ -62,8 +73,9 @@ fn flat_source() -> String {
 }
 
 /// An agent with [`LedgerHost`] and `limits`, and a realm.
-fn agent(limits: Limits) -> (Agent<LedgerHost>, Realm) {
-    let mut agent = Agent::new(LedgerHost::default(), limits, seeds()).unwrap();
+fn agent(limits: Limits) -> (Agent<Scripted>, Realm) {
+    let mut agent =
+        Agent::new(Scripted::new(LedgerHost::default(), HOOKS), limits, seeds()).unwrap();
     let Outcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
     else {
         panic!("create_realm did not answer Normal");
@@ -72,7 +84,7 @@ fn agent(limits: Limits) -> (Agent<LedgerHost>, Realm) {
 }
 
 /// Define the global Strings `names` of `realm`.
-fn define(agent: &mut Agent<LedgerHost>, realm: &Realm, names: &[(&str, &str)]) {
+fn define(agent: &mut Agent<Scripted>, realm: &Realm, names: &[(&str, &str)]) {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -88,7 +100,7 @@ fn define(agent: &mut Agent<LedgerHost>, realm: &Realm, names: &[(&str, &str)]) 
         .unwrap();
 }
 
-fn parsed(agent: &mut Agent<LedgerHost>, realm: &Realm, source: &str) -> Script {
+fn parsed(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -109,7 +121,7 @@ fn ended(outcome: Outcome<swell::Root>) -> String {
 
 /// An agent of `limits` with the flat source as `src` and its lines as `body`, the script
 /// `call` parsed and a collection run: the agent, the script and `heap_bytes()` then.
-fn prepared(limits: Limits, call: &str) -> (Agent<LedgerHost>, Script, u64) {
+fn prepared(limits: Limits, call: &str) -> (Agent<Scripted>, Script, u64) {
     let source = flat_source();
     let body = "x = 1;\n".repeat(FLAT_LINES);
     let (mut agent, realm) = agent(limits);
@@ -159,7 +171,7 @@ fn host_168_an_interrupt_set_by_the_compile_strings_hook_ends_eval_before_its_pa
         define(&mut agent, &realm, &[("r", "<!-- x")]);
         let script = parsed(&mut agent, &realm, call);
         let handle = agent.interrupt_handle();
-        agent.host_mut().interrupt = Some(handle);
+        agent.host_mut().state_mut::<LedgerHost>().interrupt = Some(handle);
         let refusals = agent.refusals();
         assert_eq!(
             ended(agent.evaluate_script(&script).unwrap()),

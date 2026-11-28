@@ -225,9 +225,10 @@ fn a_root_is_checked_and_can_be_duplicated() {
     assert_eq!(units, "held".encode_utf16().collect::<Vec<u16>>());
 }
 
+use crate::support::scripted::{Hooks, Scripted};
 use swell::{
-    Agent, AgentState, Completion, Cx, ErrorKind, HookCx, Host, HostCall, Job, LoadRequest,
-    ObjectRef, Parsed, PropertyKey, Root, Source,
+    Agent, AgentState, Completion, Cx, ErrorKind, HookCx, HostCall, Job, LoadRequest, ObjectRef,
+    Parsed, PropertyKey, Root, Source,
 };
 
 /// A host that keeps in its own value the root `take` reads and drops, the root of `churn`,
@@ -239,15 +240,24 @@ struct Keeper {
     read: Option<ObjectRef>,
 }
 
-impl Host for Keeper {
-    fn host_enqueue_generic_job(_: &mut HookCx<'_, Self>, _: Job) {}
-    fn host_enqueue_timeout_job(_: &mut HookCx<'_, Self>, _: Job, _: f64) {}
-    fn host_enqueue_finalization_registry_cleanup_job(_: &mut HookCx<'_, Self>, _: Job) {}
-    fn host_load_imported_module(_: &mut HookCx<'_, Self>, _: LoadRequest) {}
-    fn host_system_utc_epoch_nanoseconds(_: &mut HookCx<'_, Self>, _: ObjectRef) -> i128 {
-        0
-    }
+fn host_enqueue_generic_job(_: &mut HookCx<'_, Scripted>, _: Job) {}
+fn host_enqueue_timeout_job(_: &mut HookCx<'_, Scripted>, _: Job, _: f64) {}
+fn host_enqueue_finalization_registry_cleanup_job(_: &mut HookCx<'_, Scripted>, _: Job) {}
+fn host_load_imported_module(_: &mut HookCx<'_, Scripted>, _: LoadRequest) {}
+fn host_system_utc_epoch_nanoseconds(_: &mut HookCx<'_, Scripted>, _: ObjectRef) -> i128 {
+    0
 }
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`Keeper`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
 
 /// The script that defines `churn`, whose String of `n` code units (two bytes each) starts a
 /// collection at the next safe point when `n` is at least twice `heap_bytes()` and at least
@@ -260,16 +270,16 @@ fn churn_source(n: u64) -> String {
 /// The steps of `take`: read the object the host keeps a root of with `cx.get`, drop that root,
 /// call `churn` through `cx.call`, and return the object. A step that does not answer as the
 /// test needs makes it return `undefined` or `null`, which the test refuses.
-fn take(cx: &mut Cx<'_, Keeper>, _call: HostCall<'_>) -> Completion<Value> {
-    let held = cx.host_mut().held.take();
-    let churn_root = cx.host_mut().churn.take();
+fn take(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    let held = cx.host_mut().state_mut::<Keeper>().held.take();
+    let churn_root = cx.host_mut().state_mut::<Keeper>().churn.take();
     let (Some(held), Some(churn_root)) = (held, churn_root) else {
         return Ok(Value::Undefined);
     };
     let (Ok(Value::Object(object)), Ok(churn)) = (cx.get(&held), cx.get(&churn_root)) else {
         return Ok(Value::Undefined);
     };
-    cx.host_mut().read = Some(object);
+    cx.host_mut().state_mut::<Keeper>().read = Some(object);
     drop(held);
     match cx.call(churn, Value::Undefined, &[]) {
         Ok(Ok(Value::Number(_))) => Ok(Value::Object(object)),
@@ -286,7 +296,12 @@ fn take(cx: &mut Cx<'_, Keeper>, _call: HostCall<'_>) -> Completion<Value> {
 fn host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends() {
     let mut limits = support::host::limits();
     limits.steps_per_entry = 1 << 26;
-    let mut agent = Agent::new(Keeper::default(), limits, support::host::seeds()).unwrap();
+    let mut agent = Agent::new(
+        Scripted::new(Keeper::default(), HOOKS),
+        limits,
+        support::host::seeds(),
+    )
+    .unwrap();
     let Ok(Outcome::Normal(realm)) = support::host::create_realm(&mut agent, None, None) else {
         panic!("create_realm did not answer Normal");
     };
@@ -319,7 +334,7 @@ fn host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends() {
             let object = cx.new_host_object(spec(None)).unwrap().unwrap();
             let held = cx.root(Value::Object(object)).unwrap();
             let churn = cx.root(churn).unwrap();
-            let host = cx.host_mut();
+            let host = cx.host_mut().state_mut::<Keeper>();
             host.held = Some(held);
             host.churn = Some(churn);
         })
@@ -337,7 +352,7 @@ fn host_170_a_value_read_from_a_dropped_root_lives_until_its_scope_ends() {
         );
     };
     assert_eq!(agent.state(), AgentState::Alive);
-    let read = agent.host().read.unwrap();
+    let read = agent.host().state::<Keeper>().read.unwrap();
     let answered = agent.with_cx(&realm, |cx| cx.get(&answer)).unwrap();
     assert_eq!(answered, Ok(Value::Object(read)), "n = {n}");
 
