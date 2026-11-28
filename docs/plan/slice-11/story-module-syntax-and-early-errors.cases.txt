@@ -1,0 +1,2 @@
+test/language/global-code/export.js
+test/language/global-code/import.js

@@ -1,0 +1,2 @@
+test/language/import/import-attributes/json-via-namespace.js
+test/language/module-code/top-level-await/new-await-script-code.js
