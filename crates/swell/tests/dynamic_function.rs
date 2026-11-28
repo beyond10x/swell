@@ -17,8 +17,9 @@ use crate::support;
 
 use support::host::{TestHost, agent_with, get, get_object, global, key, limits, object, realm};
 use support::script::{Outcome, eval, eval_text, parse, run};
+use support::scripted::{Hooks, Scripted};
 use swell::{
-    Abrupt, Agent, CompilationType, CompileStrings, Completion, Cx, HookCx, Host, HostCall,
+    Abrupt, Agent, CompilationType, CompileStrings, Completion, Cx, HookCx, HostCall,
     InterruptHandle, Job, LoadRequest, ObjectRef, Outcome as HostOutcome, Parsed, Source,
     StringRef, Termination, Value,
 };
@@ -45,47 +46,57 @@ struct Request {
     same_realm: bool,
 }
 
-impl Host for CompileHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        let text = |cx: &Cx<'_, Self>, s: StringRef| cx.to_rust_string_lossy(s).unwrap();
-        let value = |cx: &Cx<'_, Self>, v: Value| match v {
-            Value::String(s) => text(cx, s),
-            other => format!("{other:?}"),
-        };
-        let request = Request {
-            params: request.param_strings.iter().map(|s| text(cx, *s)).collect(),
-            body: text(cx, request.body_string),
-            code: text(cx, request.code_string),
-            kind: request.compilation_type,
-            param_args: request.param_args.iter().map(|v| value(cx, *v)).collect(),
-            body_arg: value(cx, request.body_arg),
-            same_realm: REALM.with(std::cell::Cell::get) == Some(request.callee_realm),
-        };
-        cx.host_mut().calls.push(request);
-        if let Some(handle) = &cx.host().interrupt {
-            handle.interrupt();
-        }
-        if cx.host().refuse {
-            return Err(Abrupt::Throw(Value::String(cx.new_string("refused")?)));
-        }
-        Ok(())
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    request: &CompileStrings<'_>,
+) -> Completion<()> {
+    let text = |cx: &Cx<'_, Scripted>, s: StringRef| cx.to_rust_string_lossy(s).unwrap();
+    let value = |cx: &Cx<'_, Scripted>, v: Value| match v {
+        Value::String(s) => text(cx, s),
+        other => format!("{other:?}"),
+    };
+    let request = Request {
+        params: request.param_strings.iter().map(|s| text(cx, *s)).collect(),
+        body: text(cx, request.body_string),
+        code: text(cx, request.code_string),
+        kind: request.compilation_type,
+        param_args: request.param_args.iter().map(|v| value(cx, *v)).collect(),
+        body_arg: value(cx, request.body_arg),
+        same_realm: REALM.with(std::cell::Cell::get) == Some(request.callee_realm),
+    };
+    cx.host_mut().state_mut::<CompileHost>().calls.push(request);
+    if let Some(handle) = &cx.host().state::<CompileHost>().interrupt {
+        handle.interrupt();
     }
-
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
+    if cx.host().state::<CompileHost>().refuse {
+        return Err(Abrupt::Throw(Value::String(cx.new_string("refused")?)));
     }
+    Ok(())
 }
+
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`CompileHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
 
 thread_local! {
     /// The realm of the agent of HOST-117, which the hook compares `callee_realm` with.
@@ -99,7 +110,12 @@ thread_local! {
 /// function it makes then answers its argument.
 #[test]
 fn host_117_function_asks_the_host_with_its_parts() {
-    let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
+    let mut agent = Agent::new(
+        Scripted::new(CompileHost::default(), HOOKS),
+        limits(),
+        support::host::seeds(),
+    )
+    .unwrap();
     let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
     else {
         panic!("create_realm did not answer Normal");
@@ -129,7 +145,7 @@ fn host_117_function_asks_the_host_with_its_parts() {
         .unwrap();
     assert_eq!(result, Value::Number(7.0));
     assert_eq!(
-        agent.host().calls,
+        agent.host().state::<CompileHost>().calls,
         [
             Request {
                 params: vec!["a".to_string()],
@@ -363,7 +379,8 @@ fn run_with_generator_function(source: &str) -> Outcome {
 /// The String `source` answers after [`GENERATOR_FUNCTION`], run by an agent of `host` with the
 /// test limits, and the calls of its hook; the realm the hook compares with is the agent's.
 fn run_on_compile_host(host: CompileHost, source: &str) -> (String, Vec<Request>) {
-    let mut agent = Agent::new(host, limits(), support::host::seeds()).unwrap();
+    let mut agent =
+        Agent::new(Scripted::new(host, HOOKS), limits(), support::host::seeds()).unwrap();
     let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
     else {
         panic!("create_realm did not answer Normal");
@@ -388,7 +405,10 @@ fn run_on_compile_host(host: CompileHost, source: &str) -> (String, Vec<Request>
             other => format!("{other:?}"),
         })
         .unwrap();
-    (answer, std::mem::take(&mut agent.host_mut().calls))
+    (
+        answer,
+        std::mem::take(&mut agent.host_mut().state_mut::<CompileHost>().calls),
+    )
 }
 
 /// `#sec-generatorfunction` and `#sec-createdynamicfunction` of kind generator: called or
@@ -880,7 +900,12 @@ const CHARGED_LINES: usize = 1_000;
 /// the code exists, and after a collection the heap reads as before the call.
 #[test]
 fn async_function_constructor_charges_its_parse_and_reads_the_interrupt() {
-    let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
+    let mut agent = Agent::new(
+        Scripted::new(CompileHost::default(), HOOKS),
+        limits(),
+        support::host::seeds(),
+    )
+    .unwrap();
     let HostOutcome::Normal(compile_realm) =
         support::host::create_realm(&mut agent, None, None).unwrap()
     else {
@@ -888,7 +913,7 @@ fn async_function_constructor_charges_its_parse_and_reads_the_interrupt() {
     };
     let handle = agent.interrupt_handle();
     let set_by_hook = agent.interrupt_handle();
-    agent.host_mut().interrupt = Some(set_by_hook);
+    agent.host_mut().state_mut::<CompileHost>().interrupt = Some(set_by_hook);
     let source = format!("{ASYNC_FUNCTION}try {{ AF(\"a\", \"<!-- x\"); }} catch (e) {{}}");
     let Parsed::Parsed(script) = agent
         .parse_script(&compile_realm, Source::Utf8(&source), None)
@@ -903,7 +928,7 @@ fn async_function_constructor_charges_its_parse_and_reads_the_interrupt() {
     ));
     assert!(!handle.is_set());
     assert_eq!(agent.refusals(), refusals);
-    assert_eq!(agent.host().calls.len(), 1);
+    assert_eq!(agent.host().state::<CompileHost>().calls.len(), 1);
 
     let setup = format!(
         "{ASYNC_FUNCTION}var body = \"x = 1;\\n\".repeat({CHARGED_LINES});\n\
@@ -1303,7 +1328,12 @@ fn async_generator_function_constructor_is_not_a_global_and_is_the_constructor_o
 /// `heap_bytes()` reads as before the call: nothing of the call is left, and no arena grew.
 #[test]
 fn async_generator_function_constructor_charges_its_parse_and_reads_the_interrupt() {
-    let mut agent = Agent::new(CompileHost::default(), limits(), support::host::seeds()).unwrap();
+    let mut agent = Agent::new(
+        Scripted::new(CompileHost::default(), HOOKS),
+        limits(),
+        support::host::seeds(),
+    )
+    .unwrap();
     let HostOutcome::Normal(compile_realm) =
         support::host::create_realm(&mut agent, None, None).unwrap()
     else {
@@ -1311,7 +1341,7 @@ fn async_generator_function_constructor_charges_its_parse_and_reads_the_interrup
     };
     let handle = agent.interrupt_handle();
     let set_by_hook = agent.interrupt_handle();
-    agent.host_mut().interrupt = Some(set_by_hook);
+    agent.host_mut().state_mut::<CompileHost>().interrupt = Some(set_by_hook);
     let source =
         format!("{ASYNC_GENERATOR_FUNCTION}try {{ AGF(\"a\", \"<!-- x\"); }} catch (e) {{}}");
     let Parsed::Parsed(script) = agent
@@ -1327,7 +1357,7 @@ fn async_generator_function_constructor_charges_its_parse_and_reads_the_interrup
     ));
     assert!(!handle.is_set());
     assert_eq!(agent.refusals(), refusals);
-    assert_eq!(agent.host().calls.len(), 1);
+    assert_eq!(agent.host().state::<CompileHost>().calls.len(), 1);
 
     let setup = format!(
         "{ASYNC_GENERATOR_FUNCTION}var body = \"x = 1;\\n\".repeat({CHARGED_LINES});\n\

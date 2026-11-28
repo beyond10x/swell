@@ -14,6 +14,7 @@ use crate::support;
 
 use support::host::{agent, agent_with, limits, realm, stack_with_room};
 use support::script::{Outcome, define_function, eval_text, nothing, parse, run};
+use support::scripted::{Hooks, Scripted};
 use support::stack::{BUILTINS_REENTRY, on_bounded_stack, reach_through, stack_limits, test_path};
 use swell::{
     Agent, CollectReport, HookCx, Host, Job, LoadRequest, ObjectRef, Outcome as HostOutcome,
@@ -207,28 +208,38 @@ struct SourceHost {
     asked: Vec<ObjectRef>,
 }
 
-impl Host for SourceHost {
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, func: ObjectRef) -> bool {
-        let host = cx.host_mut();
-        host.asked.push(func);
-        host.hidden != Some(func)
-    }
-
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
-    }
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, func: ObjectRef) -> bool {
+    let host = cx.host_mut().state_mut::<SourceHost>();
+    host.asked.push(func);
+    host.hidden != Some(func)
 }
 
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`SourceHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_has_source_text_available,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
+
 /// The value the script `source` answers in `realm`, which must complete normally.
-fn evaluated(agent: &mut Agent<SourceHost>, realm: &Realm, source: &str) -> Root {
+fn evaluated(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Root {
     let Parsed::Parsed(script) = agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -242,7 +253,7 @@ fn evaluated(agent: &mut Agent<SourceHost>, realm: &Realm, source: &str) -> Root
 }
 
 /// The text of the String the script `source` answers.
-fn text_of(agent: &mut Agent<SourceHost>, realm: &Realm, source: &str) -> String {
+fn text_of(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> String {
     let root = evaluated(agent, realm, source);
     agent
         .with_cx(realm, |cx| match cx.get(&root).unwrap() {
@@ -253,7 +264,7 @@ fn text_of(agent: &mut Agent<SourceHost>, realm: &Realm, source: &str) -> String
 }
 
 /// The function object the global variable `name` holds.
-fn global_function(agent: &mut Agent<SourceHost>, realm: &Realm, name: &str) -> ObjectRef {
+fn global_function(agent: &mut Agent<Scripted>, realm: &Realm, name: &str) -> ObjectRef {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -277,7 +288,7 @@ fn global_function(agent: &mut Agent<SourceHost>, realm: &Realm, name: &str) -> 
 #[test]
 fn host_120_no_source_text_gives_a_native_function_string() {
     let mut agent = Agent::new(
-        SourceHost::default(),
+        Scripted::new(SourceHost::default(), HOOKS),
         limits(),
         Seeds {
             hash_key: [7; 16],
@@ -296,19 +307,19 @@ fn host_120_no_source_text_gives_a_native_function_string() {
     );
     let shown = global_function(&mut agent, &realm, "shown");
     let hidden = global_function(&mut agent, &realm, "hidden");
-    agent.host_mut().hidden = Some(hidden);
-    assert!(agent.host().asked.is_empty());
+    agent.host_mut().state_mut::<SourceHost>().hidden = Some(hidden);
+    assert!(agent.host().state::<SourceHost>().asked.is_empty());
 
     assert_eq!(
         text_of(&mut agent, &realm, "shown.toString();"),
         "function () { return 1; }"
     );
-    assert_eq!(agent.host().asked, [shown]);
+    assert_eq!(agent.host().state::<SourceHost>().asked, [shown]);
     assert_eq!(
         text_of(&mut agent, &realm, "hidden.toString();"),
         "function () { [native code] }"
     );
-    assert_eq!(agent.host().asked, [shown, hidden]);
+    assert_eq!(agent.host().state::<SourceHost>().asked, [shown, hidden]);
     assert_eq!(
         text_of(
             &mut agent,
@@ -319,7 +330,10 @@ fn host_120_no_source_text_gives_a_native_function_string() {
         "function () { [native code] }|function () { [native code] }|\
          function call() { [native code] }"
     );
-    assert_eq!(agent.host().asked, [shown, hidden, hidden]);
+    assert_eq!(
+        agent.host().state::<SourceHost>().asked,
+        [shown, hidden, hidden]
+    );
 }
 
 /// Decision 4, "What a test reads": the source text of a script is charged when `parse_script`
