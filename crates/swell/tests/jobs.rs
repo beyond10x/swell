@@ -17,10 +17,11 @@ use std::rc::Rc;
 
 use support::host::{TestHost, limits};
 use support::script::{define_function, show, show_thrown};
+use support::scripted::{Hooks, Scripted};
 use support::stack::stack_agent;
 use swell::{
     Abrupt, Agent, AgentState, Brand, CheckpointReport, CompileStrings, Completion, Cx, Handled,
-    HookCx, Host, HostCall, HostError, HostObjectSpec, InterruptHandle, IsoDateTime, Job, Limits,
+    HookCx, HostCall, HostError, HostObjectSpec, InterruptHandle, IsoDateTime, Job, Limits,
     LoadRequest, Microtask, ModuleRef, ObjectRef, Outcome, Parsed, PropertyKey, Prototype, Realm,
     RealmRef, RejectionOperation, Root, Source, StringRef, Termination, TimeZoneIdentifier, Value,
 };
@@ -48,145 +49,193 @@ struct JobsHost {
 }
 
 /// One more hook call.
-fn hook(cx: &HookCx<'_, JobsHost>) {
-    let hooks = &cx.host().hooks;
+fn hook(cx: &HookCx<'_, Scripted>) {
+    let hooks = &cx.host().state::<JobsHost>().hooks;
     hooks.set(hooks.get() + 1);
 }
 
-impl Host for JobsHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        _request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        let hooks = &cx.host().hooks;
-        hooks.set(hooks.get() + 1);
-        Ok(())
-    }
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        hook(cx);
-        None
-    }
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        _obj: ObjectRef,
-    ) -> Completion<()> {
-        hook(cx);
-        Ok(())
-    }
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool {
-        hook(cx);
-        true
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<swell::HostDefined> {
-        hook(cx);
-        None
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        _host_defined: Option<&swell::HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        let hooks = &cx.host().hooks;
-        hooks.set(hooks.get() + 1);
-        cx.call(Value::Object(callback), this, args)
-            .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>) {
-        hook(cx);
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, _realm: RealmRef) {
-        hook(cx);
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        _result: Result<(), Value>,
-    ) {
-        hook(cx);
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        hook(cx);
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {
-        hook(cx);
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        hook(cx);
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        _promise: ObjectRef,
-        _operation: RejectionOperation,
-    ) {
-        hook(cx);
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, _request: LoadRequest) {
-        hook(cx);
-    }
-    fn host_get_import_meta_properties(
-        cx: &mut HookCx<'_, Self>,
-        _module: ModuleRef,
-    ) -> Completion<Vec<(PropertyKey, Value)>> {
-        hook(cx);
-        Ok(Vec::new())
-    }
-    fn host_finalize_import_meta(
-        cx: &mut HookCx<'_, Self>,
-        _import_meta: ObjectRef,
-        _module: ModuleRef,
-    ) {
-        hook(cx);
-    }
-    fn host_resize_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        hook(cx);
-        Ok(Handled::Unhandled)
-    }
-    fn host_grow_shared_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        hook(cx);
-        Ok(Handled::Unhandled)
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        hook(cx);
-        0
-    }
-    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
-        hook(cx);
-        "UTC".to_string()
-    }
-    fn get_named_time_zone_offset_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _epoch_ns: i128,
-    ) -> i128 {
-        hook(cx);
-        0
-    }
-    fn get_named_time_zone_epoch_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _local: IsoDateTime,
-    ) -> Vec<i128> {
-        hook(cx);
-        Vec::new()
-    }
-    fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier> {
-        hook(cx);
-        Vec::new()
-    }
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    _request: &CompileStrings<'_>,
+) -> Completion<()> {
+    let hooks = &cx.host().state::<JobsHost>().hooks;
+    hooks.set(hooks.get() + 1);
+    Ok(())
 }
+
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    hook(cx);
+    None
+}
+
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    hook(cx);
+    Ok(())
+}
+
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, _func: ObjectRef) -> bool {
+    hook(cx);
+    true
+}
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<swell::HostDefined> {
+    hook(cx);
+    None
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    _host_defined: Option<&swell::HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    let hooks = &cx.host().state::<JobsHost>().hooks;
+    hooks.set(hooks.get() + 1);
+    cx.call(Value::Object(callback), this, args)
+        .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, _realm: Option<RealmRef>) {
+    hook(cx);
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, _realm: RealmRef) {
+    hook(cx);
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    _result: Result<(), Value>,
+) {
+    hook(cx);
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    hook(cx);
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {
+    hook(cx);
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    hook(cx);
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    _promise: ObjectRef,
+    _operation: RejectionOperation,
+) {
+    hook(cx);
+}
+
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {
+    hook(cx);
+}
+
+fn host_get_import_meta_properties(
+    cx: &mut HookCx<'_, Scripted>,
+    _module: ModuleRef,
+) -> Completion<Vec<(PropertyKey, Value)>> {
+    hook(cx);
+    Ok(Vec::new())
+}
+
+fn host_finalize_import_meta(
+    cx: &mut HookCx<'_, Scripted>,
+    _import_meta: ObjectRef,
+    _module: ModuleRef,
+) {
+    hook(cx);
+}
+
+fn host_resize_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    hook(cx);
+    Ok(Handled::Unhandled)
+}
+
+fn host_grow_shared_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    hook(cx);
+    Ok(Handled::Unhandled)
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    hook(cx);
+    0
+}
+
+fn system_time_zone_identifier(cx: &mut HookCx<'_, Scripted>) -> String {
+    hook(cx);
+    "UTC".to_string()
+}
+
+fn get_named_time_zone_offset_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _epoch_ns: i128,
+) -> i128 {
+    hook(cx);
+    0
+}
+
+fn get_named_time_zone_epoch_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _local: IsoDateTime,
+) -> Vec<i128> {
+    hook(cx);
+    Vec::new()
+}
+
+fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Scripted>) -> Vec<TimeZoneIdentifier> {
+    hook(cx);
+    Vec::new()
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`JobsHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_ensure_can_add_private_element,
+    host_has_source_text_available,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_get_import_meta_properties,
+    host_finalize_import_meta,
+    host_resize_array_buffer,
+    host_grow_shared_array_buffer,
+    host_system_utc_epoch_nanoseconds,
+    system_time_zone_identifier,
+    get_named_time_zone_offset_nanoseconds,
+    get_named_time_zone_epoch_nanoseconds,
+    available_named_time_zone_identifiers,
+};
 
 /// The step budget of the tests whose microtasks call a script function that loops without
 /// end: small, so that the loop ends soon in both collection modes.
@@ -200,14 +249,19 @@ fn limits_with(steps: u64) -> Limits {
 }
 
 /// An agent of the jobs host with `limits` and a realm.
-fn new_agent(limits: Limits) -> (Agent<JobsHost>, Realm) {
-    let mut agent = Agent::new(JobsHost::default(), limits, support::host::seeds()).unwrap();
+fn new_agent(limits: Limits) -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(JobsHost::default(), HOOKS),
+        limits,
+        support::host::seeds(),
+    )
+    .unwrap();
     let realm = new_realm(&mut agent);
     (agent, realm)
 }
 
 /// A realm with no setup closure.
-fn new_realm(agent: &mut Agent<JobsHost>) -> Realm {
+fn new_realm(agent: &mut Agent<Scripted>) -> Realm {
     match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -215,7 +269,7 @@ fn new_realm(agent: &mut Agent<JobsHost>) -> Realm {
 }
 
 /// The script `source`, which must complete normally.
-fn run(agent: &mut Agent<JobsHost>, realm: &Realm, source: &str) {
+fn run(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) {
     let script = match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -231,7 +285,7 @@ fn run(agent: &mut Agent<JobsHost>, realm: &Realm, source: &str) {
 }
 
 /// A root of the global property `name` of `realm`.
-fn global(agent: &mut Agent<JobsHost>, realm: &Realm, name: &str) -> Root {
+fn global(agent: &mut Agent<Scripted>, realm: &Realm, name: &str) -> Root {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -247,11 +301,11 @@ fn global(agent: &mut Agent<JobsHost>, realm: &Realm, name: &str) -> Root {
 
 /// Define the host function `steps` as the global `name` of `realm`, made in `home`.
 fn define(
-    agent: &mut Agent<JobsHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     home: &Realm,
     name: &str,
-    steps: swell::HostFn<JobsHost>,
+    steps: swell::HostFn<Scripted>,
 ) {
     let global = agent.global_object(realm).unwrap();
     agent
@@ -273,18 +327,19 @@ fn define(
 }
 
 /// A host microtask that records `n` and makes no call.
-fn record(n: u32) -> Microtask<JobsHost> {
-    Box::new(move |cx: &mut Cx<'_, JobsHost>| cx.host_mut().records.push(n))
+fn record(n: u32) -> Microtask<Scripted> {
+    Box::new(move |cx: &mut Cx<'_, Scripted>| cx.host_mut().state_mut::<JobsHost>().records.push(n))
 }
 
 /// A host microtask that records `n`, then calls the function `function` holds with no
 /// arguments and keeps what the call answered in `seen`.
-fn record_and_call(n: u32, function: Root) -> Microtask<JobsHost> {
-    Box::new(move |cx: &mut Cx<'_, JobsHost>| {
-        cx.host_mut().records.push(n);
+fn record_and_call(n: u32, function: Root) -> Microtask<Scripted> {
+    Box::new(move |cx: &mut Cx<'_, Scripted>| {
+        cx.host_mut().state_mut::<JobsHost>().records.push(n);
         let f = cx.get(&function).unwrap();
         let answer = cx.call(f, Value::Undefined, &[]).unwrap();
         cx.host_mut()
+            .state_mut::<JobsHost>()
             .seen
             .push(format!("{n}: {:?}", answer.map(|_| ())));
     })
@@ -335,12 +390,15 @@ fn host_77_a_termination_leaves_the_jobs_behind_it_queued() {
     }
     let outcome = agent.perform_microtask_checkpoint().unwrap();
     assert_eq!(terminated(outcome), Termination::StepBudget);
-    assert_eq!(agent.host().records, [1, 2, 3]);
-    assert_eq!(agent.host().seen, ["3: Err(Terminated(StepBudget))"]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2, 3]);
+    assert_eq!(
+        agent.host().state::<JobsHost>().seen,
+        ["3: Err(Terminated(StepBudget))"]
+    );
     assert_eq!(agent.pending_microtasks(), Ok(2));
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(2));
-    assert_eq!(agent.host().records, [1, 2, 3, 4, 5]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2, 3, 4, 5]);
     assert_eq!(agent.pending_microtasks(), Ok(0));
     assert_eq!(agent.state(), AgentState::Alive);
 }
@@ -353,8 +411,8 @@ fn host_79_a_checkpoint_runs_the_microtasks_queued_while_it_runs() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(|cx: &mut Cx<'_, JobsHost>| {
-                cx.host_mut().records.push(1);
+            Box::new(|cx: &mut Cx<'_, Scripted>| {
+                cx.host_mut().state_mut::<JobsHost>().records.push(1);
                 cx.queue_microtask(record(2)).unwrap();
             }),
         )
@@ -362,7 +420,7 @@ fn host_79_a_checkpoint_runs_the_microtasks_queued_while_it_runs() {
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(2));
     assert_eq!(agent.pending_microtasks(), Ok(0));
-    assert_eq!(agent.host().records, [1, 2]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2]);
 }
 
 /// HOST-81: `cx.perform_microtask_checkpoint` called by a microtask during a checkpoint answers
@@ -374,19 +432,22 @@ fn host_81_a_checkpoint_inside_a_checkpoint_returns_at_once() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(|cx: &mut Cx<'_, JobsHost>| {
-                cx.host_mut().records.push(1);
+            Box::new(|cx: &mut Cx<'_, Scripted>| {
+                cx.host_mut().state_mut::<JobsHost>().records.push(1);
                 cx.queue_microtask(record(3)).unwrap();
                 let inner = cx.perform_microtask_checkpoint();
-                cx.host_mut().inner.push(inner);
-                cx.host_mut().records.push(2);
+                cx.host_mut().state_mut::<JobsHost>().inner.push(inner);
+                cx.host_mut().state_mut::<JobsHost>().records.push(2);
             }),
         )
         .unwrap();
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(2));
-    assert_eq!(agent.host().inner, [Ok(host_microtasks(0))]);
-    assert_eq!(agent.host().records, [1, 2, 3]);
+    assert_eq!(
+        agent.host().state::<JobsHost>().inner,
+        [Ok(host_microtasks(0))]
+    );
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2, 3]);
     assert_eq!(agent.pending_microtasks(), Ok(0));
 }
 
@@ -430,7 +491,7 @@ fn a_checkpoint_has_one_step_budget() {
     let pending = agent.pending_microtasks().unwrap();
     assert!(pending >= 10, "{pending} entries left");
     assert_eq!(
-        agent.host().records.len() + pending,
+        agent.host().state::<JobsHost>().records.len() + pending,
         20,
         "each entry ran once or is queued"
     );
@@ -438,19 +499,19 @@ fn a_checkpoint_has_one_step_budget() {
 
 /// A host function that queues three microtasks that make no call, then runs a checkpoint
 /// through `cx`, inside the running entry.
-fn queue_three(cx: &mut Cx<'_, JobsHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn queue_three(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     for n in 1..=3 {
         cx.queue_microtask(record(n)).unwrap();
     }
     let report = cx.perform_microtask_checkpoint();
-    cx.host_mut().inner.push(report);
+    cx.host_mut().state_mut::<JobsHost>().inner.push(report);
     report.map(|_| Value::Undefined)
 }
 
 /// A host function that queues nothing and runs a checkpoint through `cx`.
-fn queue_none(cx: &mut Cx<'_, JobsHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn queue_none(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     let report = cx.perform_microtask_checkpoint();
-    cx.host_mut().inner.push(report);
+    cx.host_mut().state_mut::<JobsHost>().inner.push(report);
     report.map(|_| Value::Undefined)
 }
 
@@ -482,7 +543,7 @@ fn host_193_a_checkpoint_spends_one_step_for_each_entry_it_takes_off() {
     let three = agent.last_entry_steps().unwrap();
     assert!(three >= none + 3, "{three} steps against {none}");
     assert_eq!(
-        agent.host().inner,
+        agent.host().state::<JobsHost>().inner,
         [Ok(host_microtasks(0)), Ok(host_microtasks(3))]
     );
     assert_eq!(agent.pending_microtasks(), Ok(0));
@@ -508,9 +569,9 @@ fn host_197_last_entry_steps_reads_the_whole_checkpoint() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(|cx: &mut Cx<'_, JobsHost>| {
+            Box::new(|cx: &mut Cx<'_, Scripted>| {
                 let inner = cx.perform_microtask_checkpoint();
-                cx.host_mut().inner.push(inner);
+                cx.host_mut().state_mut::<JobsHost>().inner.push(inner);
             }),
         )
         .unwrap();
@@ -518,7 +579,10 @@ fn host_197_last_entry_steps_reads_the_whole_checkpoint() {
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(2));
     assert_eq!(agent.last_entry_steps(), Ok(2));
-    assert_eq!(agent.host().inner, [Ok(host_microtasks(0))]);
+    assert_eq!(
+        agent.host().state::<JobsHost>().inner,
+        [Ok(host_microtasks(0))]
+    );
 }
 
 /// The step of taking an entry off is charged while the entry is still first: with
@@ -533,38 +597,39 @@ fn a_refused_step_of_taking_an_entry_off_leaves_it_first() {
     }
     let outcome = agent.perform_microtask_checkpoint().unwrap();
     assert_eq!(terminated(outcome), Termination::StepBudget);
-    assert_eq!(agent.host().records, [1, 2, 3]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2, 3]);
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(2));
-    assert_eq!(agent.host().records, [1, 2, 3, 4, 5]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2, 3, 4, 5]);
     assert_eq!(agent.last_entry_steps(), Ok(2));
 }
 
 /// The microtask of HOST-192: it calls a value that is not callable and records whether the
 /// `TypeError` it gets has the `%TypeError.prototype%` of the second realm (the host's second
 /// root) and not that of the first.
-fn calls_a_number(cx: &mut Cx<'_, JobsHost>) {
+fn calls_a_number(cx: &mut Cx<'_, Scripted>) {
     let answer = cx.call(Value::Number(1.0), Value::Undefined, &[]).unwrap();
     let Err(Abrupt::Throw(Value::Object(error))) = answer else {
         panic!("the call answered {answer:?}");
     };
     let prototype = cx.get_prototype_of(error).unwrap().unwrap();
-    let roots = std::mem::take(&mut cx.host_mut().roots);
+    let roots = std::mem::take(&mut cx.host_mut().state_mut::<JobsHost>().roots);
     let first = cx.get(&roots[0]).unwrap();
     let second = cx.get(&roots[1]).unwrap();
-    cx.host_mut().roots = roots;
+    cx.host_mut().state_mut::<JobsHost>().roots = roots;
     let realm = match prototype.map(Value::Object) {
         Some(found) if found == second => "second",
         Some(found) if found == first => "first",
         _ => "neither",
     };
     cx.host_mut()
+        .state_mut::<JobsHost>()
         .seen
         .push(format!("TypeError of the {realm} realm"));
 }
 
 /// A host function that queues [`calls_a_number`] through `cx.queue_microtask`.
-fn queue_call(cx: &mut Cx<'_, JobsHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn queue_call(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     cx.queue_microtask(Box::new(calls_a_number)).unwrap();
     Ok(Value::Undefined)
 }
@@ -593,7 +658,11 @@ fn host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with() {
                 cx.root(prototype).unwrap()
             })
             .unwrap();
-        agent.host_mut().roots.push(prototype);
+        agent
+            .host_mut()
+            .state_mut::<JobsHost>()
+            .roots
+            .push(prototype);
     }
 
     agent
@@ -612,7 +681,7 @@ fn host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with() {
         host_microtasks(1)
     );
     assert_eq!(
-        agent.host().seen,
+        agent.host().state::<JobsHost>().seen,
         [
             "TypeError of the second realm",
             "TypeError of the second realm"
@@ -624,7 +693,7 @@ fn host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with() {
     let flag = Rc::clone(&ran);
     let answer = agent.queue_microtask(
         &other_realm,
-        Box::new(move |_cx: &mut Cx<'_, JobsHost>| flag.set(true)),
+        Box::new(move |_cx: &mut Cx<'_, Scripted>| flag.set(true)),
     );
     assert_eq!(answer, Err(HostError::ForeignHandle));
     assert_eq!(agent.pending_microtasks(), Ok(0));
@@ -637,7 +706,7 @@ fn host_192_a_host_microtask_runs_in_the_realm_it_was_queued_with() {
 
 /// After a checkpoint the interrupt ended: the flag is clear, and the next checkpoint answers
 /// `Normal` with `host_microtasks` `left`.
-fn next_checkpoint_runs(agent: &mut Agent<JobsHost>, left: u64) {
+fn next_checkpoint_runs(agent: &mut Agent<Scripted>, left: u64) {
     assert!(!agent.interrupt_handle().is_set(), "the flag is clear");
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(left));
@@ -656,9 +725,9 @@ fn an_interrupt_set_before_the_checkpoint_ends_it_with_nothing_taken_off() {
     assert_eq!(terminated(outcome), Termination::Interrupted);
     assert_eq!(agent.last_entry_steps(), Ok(0));
     assert_eq!(agent.pending_microtasks(), Ok(2));
-    assert!(agent.host().records.is_empty());
+    assert!(agent.host().state::<JobsHost>().records.is_empty());
     next_checkpoint_runs(&mut agent, 2);
-    assert_eq!(agent.host().records, [1, 2]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2]);
 }
 
 /// The interrupt between two microtasks: the first sets the flag and returns: the checkpoint
@@ -671,8 +740,8 @@ fn an_interrupt_set_between_two_microtasks_leaves_the_next_first() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(move |cx: &mut Cx<'_, JobsHost>| {
-                cx.host_mut().records.push(1);
+            Box::new(move |cx: &mut Cx<'_, Scripted>| {
+                cx.host_mut().state_mut::<JobsHost>().records.push(1);
                 interrupt.interrupt();
             }),
         )
@@ -681,14 +750,14 @@ fn an_interrupt_set_between_two_microtasks_leaves_the_next_first() {
     let outcome = agent.perform_microtask_checkpoint().unwrap();
     assert_eq!(terminated(outcome), Termination::Interrupted);
     assert_eq!(agent.pending_microtasks(), Ok(1));
-    assert_eq!(agent.host().records, [1]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1]);
     next_checkpoint_runs(&mut agent, 1);
-    assert_eq!(agent.host().records, [1, 2]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2]);
 }
 
 /// A host function that sets the agent's interrupt flag.
-fn interrupt_now(cx: &mut Cx<'_, JobsHost>, _call: HostCall<'_>) -> Completion<Value> {
-    if let Some(interrupt) = &cx.host().interrupt {
+fn interrupt_now(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    if let Some(interrupt) = &cx.host().state::<JobsHost>().interrupt {
         interrupt.interrupt();
     }
     Ok(Value::Undefined)
@@ -701,7 +770,7 @@ fn interrupt_now(cx: &mut Cx<'_, JobsHost>, _call: HostCall<'_>) -> Completion<V
 #[test]
 fn an_interrupt_while_a_microtask_runs_ends_that_microtask() {
     let (mut agent, realm) = new_agent(limits());
-    agent.host_mut().interrupt = Some(agent.interrupt_handle());
+    agent.host_mut().state_mut::<JobsHost>().interrupt = Some(agent.interrupt_handle());
     define(&mut agent, &realm, &realm, "interruptNow", interrupt_now);
     run(
         &mut agent,
@@ -717,9 +786,12 @@ fn an_interrupt_while_a_microtask_runs_ends_that_microtask() {
     let outcome = agent.perform_microtask_checkpoint().unwrap();
     assert_eq!(terminated(outcome), Termination::Interrupted);
     assert_eq!(agent.pending_microtasks(), Ok(1));
-    assert_eq!(agent.host().seen, ["1: Err(Terminated(Interrupted))"]);
+    assert_eq!(
+        agent.host().state::<JobsHost>().seen,
+        ["1: Err(Terminated(Interrupted))"]
+    );
     next_checkpoint_runs(&mut agent, 1);
-    assert_eq!(agent.host().records, [1, 2]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2]);
 }
 
 /// The script function of the memory budget test: it allocates without end.
@@ -753,13 +825,16 @@ fn a_memory_budget_termination_ends_the_checkpoint_and_keeps_the_rest_queued() {
     agent.queue_microtask(&realm, record(3)).unwrap();
     let outcome = agent.perform_microtask_checkpoint().unwrap();
     assert_eq!(terminated(outcome), Termination::MemoryBudget);
-    assert_eq!(agent.host().records, [1, 2]);
-    assert_eq!(agent.host().seen, ["2: Err(Terminated(MemoryBudget))"]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2]);
+    assert_eq!(
+        agent.host().state::<JobsHost>().seen,
+        ["2: Err(Terminated(MemoryBudget))"]
+    );
     assert_eq!(agent.pending_microtasks(), Ok(1));
     assert_eq!(agent.state(), AgentState::Alive);
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(1));
-    assert_eq!(agent.host().records, [1, 2, 3]);
+    assert_eq!(agent.host().state::<JobsHost>().records, [1, 2, 3]);
 }
 
 /// The script function of HOST-196: a String of `n` code units, so that the bytes allocated
@@ -786,7 +861,7 @@ fn host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(|cx: &mut Cx<'_, JobsHost>| {
+            Box::new(|cx: &mut Cx<'_, Scripted>| {
                 let object = cx
                     .new_host_object(HostObjectSpec {
                         prototype: Prototype::Null,
@@ -797,37 +872,46 @@ fn host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends() {
                     })
                     .unwrap()
                     .unwrap();
-                cx.host_mut().kept = Some(object);
+                cx.host_mut().state_mut::<JobsHost>().kept = Some(object);
                 let brand = cx.brand(object);
-                cx.host_mut().seen.push(format!("1: {brand:?}"));
+                cx.host_mut()
+                    .state_mut::<JobsHost>()
+                    .seen
+                    .push(format!("1: {brand:?}"));
             }),
         )
         .unwrap();
     agent
         .queue_microtask(
             &realm,
-            Box::new(move |cx: &mut Cx<'_, JobsHost>| {
+            Box::new(move |cx: &mut Cx<'_, Scripted>| {
                 let f = cx.get(&big).unwrap();
                 let answer = cx.call(f, Value::Undefined, &[Value::Number(length as f64)]);
                 let made = answer.unwrap().unwrap() == Value::Number(length as f64);
-                cx.host_mut().seen.push(format!("2: {made}"));
+                cx.host_mut()
+                    .state_mut::<JobsHost>()
+                    .seen
+                    .push(format!("2: {made}"));
             }),
         )
         .unwrap();
     agent
         .queue_microtask(
             &realm,
-            Box::new(|cx: &mut Cx<'_, JobsHost>| {
-                let kept = cx.host().kept.unwrap();
+            Box::new(|cx: &mut Cx<'_, Scripted>| {
+                let kept = cx.host().state::<JobsHost>().kept.unwrap();
                 let brand = cx.brand(kept);
-                cx.host_mut().seen.push(format!("3: {brand:?}"));
+                cx.host_mut()
+                    .state_mut::<JobsHost>()
+                    .seen
+                    .push(format!("3: {brand:?}"));
             }),
         )
         .unwrap();
     let report = normal(agent.perform_microtask_checkpoint().unwrap());
     assert_eq!(report, host_microtasks(3));
     assert_eq!(
-        agent.host().seen,
+        agent.host().state::<JobsHost>().seen,
         ["1: Ok(Some(Brand(196)))", "2: true", "3: Err(StaleHandle)"]
     );
     assert_eq!(agent.state(), AgentState::Alive);
@@ -835,7 +919,7 @@ fn host_196_a_checkpoint_holds_what_a_job_was_handed_only_until_it_ends() {
 
 /// Three closures that hold `shared` and would set `ran`, queued in `realm`.
 fn queue_holders(
-    agent: &mut Agent<JobsHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     shared: &Rc<()>,
     ran: &Rc<Cell<bool>>,
@@ -845,7 +929,7 @@ fn queue_holders(
         agent
             .queue_microtask(
                 realm,
-                Box::new(move |_cx: &mut Cx<'_, JobsHost>| {
+                Box::new(move |_cx: &mut Cx<'_, Scripted>| {
                     let _held = &held;
                     flag.set(true);
                 }),
@@ -869,7 +953,7 @@ fn the_queue_is_dropped_with_the_agent() {
     let shared = Rc::new(());
     let ran = Rc::new(Cell::new(false));
     queue_holders(&mut agent, &realm, &shared, &ran);
-    let hooks = Rc::clone(&agent.host().hooks);
+    let hooks = Rc::clone(&agent.host().state::<JobsHost>().hooks);
     let before = hooks.get();
     drop(realm);
     drop(agent);
@@ -891,11 +975,15 @@ fn clear_microtasks_drops_every_host_microtask_unrun() {
     let shared = Rc::new(());
     let ran = Rc::new(Cell::new(false));
     queue_holders(&mut agent, &realm, &shared, &ran);
-    let before = agent.host().hooks.get();
+    let before = agent.host().state::<JobsHost>().hooks.get();
     assert_eq!(agent.clear_microtasks(), Ok(3));
     assert_eq!(Rc::strong_count(&shared), 1);
     assert!(!ran.get(), "no closure ran");
-    assert_eq!(agent.host().hooks.get(), before, "no hook was called");
+    assert_eq!(
+        agent.host().state::<JobsHost>().hooks.get(),
+        before,
+        "no hook was called"
+    );
     assert_eq!(agent.last_entry_steps(), Ok(steps));
     assert_eq!(agent.pending_microtasks(), Ok(0));
     assert_eq!(
@@ -906,8 +994,8 @@ fn clear_microtasks_drops_every_host_microtask_unrun() {
 }
 
 /// A host microtask that queues a copy of itself and calls no code.
-fn requeue(cx: &mut Cx<'_, JobsHost>) {
-    cx.host_mut().count += 1;
+fn requeue(cx: &mut Cx<'_, Scripted>) {
+    cx.host_mut().state_mut::<JobsHost>().count += 1;
     cx.queue_microtask(Box::new(requeue)).unwrap();
 }
 
@@ -923,7 +1011,11 @@ fn a_microtask_that_queues_itself_ends_the_checkpoint_at_the_step_budget() {
     assert_eq!(terminated(outcome), Termination::StepBudget);
     let steps = agent.last_entry_steps().unwrap();
     assert!(steps <= budget, "{steps} steps of {budget}");
-    assert_eq!(agent.host().count, steps, "one entry per step");
+    assert_eq!(
+        agent.host().state::<JobsHost>().count,
+        steps,
+        "one entry per step"
+    );
     assert_eq!(agent.pending_microtasks(), Ok(1));
 }
 

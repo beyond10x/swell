@@ -19,10 +19,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use support::host::limits;
+use support::scripted::{Hooks, Scripted};
 use support::stack::stack_limits;
 use swell::{
     Abrupt, Agent, AgentState, CheckpointReport, CompileStrings, Completion, Cx, Handled, HookCx,
-    Host, HostCall, HostData, HostDefined, InterruptHandle, IsoDateTime, Job, Limits, LoadRequest,
+    HostCall, HostData, HostDefined, InterruptHandle, IsoDateTime, Job, Limits, LoadRequest,
     Microtask, ModuleRef, ObjectRef, Outcome, Parsed, PropertyKey, Realm, RealmRef,
     RejectionOperation, Root, Source, StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
 };
@@ -102,169 +103,229 @@ struct PromisesHost {
 }
 
 /// One more hook call.
-fn hook(cx: &HookCx<'_, PromisesHost>) {
-    let hooks = &cx.host().hooks;
+fn hook(cx: &HookCx<'_, Scripted>) {
+    let hooks = &cx.host().state::<PromisesHost>().hooks;
     hooks.set(hooks.get() + 1);
 }
 
-impl Host for PromisesHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        _request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        let hooks = &cx.host().hooks;
-        hooks.set(hooks.get() + 1);
-        Ok(())
-    }
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        hook(cx);
-        None
-    }
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        _obj: ObjectRef,
-    ) -> Completion<()> {
-        hook(cx);
-        Ok(())
-    }
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool {
-        hook(cx);
-        true
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<HostDefined> {
-        hook(cx);
-        cx.host_mut().made += 1;
-        match cx.host().make {
-            MakeAnswer::Empty => None,
-            MakeAnswer::Marker => Some(Rc::new(Marker(cx.host().made))),
-            MakeAnswer::Holder => {
-                let string = cx.new_string("held by the host-defined").unwrap();
-                Some(Rc::new(Holder(Value::String(string))))
-            }
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    _request: &CompileStrings<'_>,
+) -> Completion<()> {
+    let hooks = &cx.host().state::<PromisesHost>().hooks;
+    hooks.set(hooks.get() + 1);
+    Ok(())
+}
+
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    hook(cx);
+    None
+}
+
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    hook(cx);
+    Ok(())
+}
+
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, _func: ObjectRef) -> bool {
+    hook(cx);
+    true
+}
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<HostDefined> {
+    hook(cx);
+    cx.host_mut().state_mut::<PromisesHost>().made += 1;
+    match cx.host().state::<PromisesHost>().make {
+        MakeAnswer::Empty => None,
+        MakeAnswer::Marker => Some(Rc::new(Marker(cx.host().state::<PromisesHost>().made))),
+        MakeAnswer::Holder => {
+            let string = cx.new_string("held by the host-defined").unwrap();
+            Some(Rc::new(Holder(Value::String(string))))
         }
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        host_defined: Option<&HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        let hooks = &cx.host().hooks;
-        hooks.set(hooks.get() + 1);
-        if let Some(host_defined) = host_defined {
-            let data: &dyn Any = &**host_defined;
-            let read = if let Some(Marker(n)) = data.downcast_ref::<Marker>() {
-                format!("marker {n}")
-            } else if let Some(Holder(Value::String(string))) = data.downcast_ref::<Holder>() {
-                format!("holder {:?}", cx.to_rust_string_lossy(*string))
-            } else {
-                "other".to_string()
-            };
-            cx.host_mut().received.push(read);
-        }
-        cx.call(Value::Object(callback), this, args)
-            .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, realm: Option<RealmRef>) {
-        hook(cx);
-        cx.host_mut().enqueued.push(realm);
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, realm: RealmRef) {
-        hook(cx);
-        let prepared = &cx.host().prepared;
-        prepared.set(prepared.get() + 1);
-        cx.host_mut().prepares.push(realm);
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        realm: Option<RealmRef>,
-        result: Result<(), Value>,
-    ) {
-        hook(cx);
-        cx.host_mut().cleanups.push((realm, result));
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        hook(cx);
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {
-        hook(cx);
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        hook(cx);
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        _promise: ObjectRef,
-        _operation: RejectionOperation,
-    ) {
-        hook(cx);
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, _request: LoadRequest) {
-        hook(cx);
-    }
-    fn host_get_import_meta_properties(
-        cx: &mut HookCx<'_, Self>,
-        _module: ModuleRef,
-    ) -> Completion<Vec<(PropertyKey, Value)>> {
-        hook(cx);
-        Ok(Vec::new())
-    }
-    fn host_finalize_import_meta(
-        cx: &mut HookCx<'_, Self>,
-        _import_meta: ObjectRef,
-        _module: ModuleRef,
-    ) {
-        hook(cx);
-    }
-    fn host_resize_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        hook(cx);
-        Ok(Handled::Unhandled)
-    }
-    fn host_grow_shared_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        hook(cx);
-        Ok(Handled::Unhandled)
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        hook(cx);
-        0
-    }
-    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
-        hook(cx);
-        "UTC".to_string()
-    }
-    fn get_named_time_zone_offset_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _epoch_ns: i128,
-    ) -> i128 {
-        hook(cx);
-        0
-    }
-    fn get_named_time_zone_epoch_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _local: IsoDateTime,
-    ) -> Vec<i128> {
-        hook(cx);
-        Vec::new()
-    }
-    fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier> {
-        hook(cx);
-        Vec::new()
     }
 }
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    host_defined: Option<&HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    let hooks = &cx.host().state::<PromisesHost>().hooks;
+    hooks.set(hooks.get() + 1);
+    if let Some(host_defined) = host_defined {
+        let data: &dyn Any = &**host_defined;
+        let read = if let Some(Marker(n)) = data.downcast_ref::<Marker>() {
+            format!("marker {n}")
+        } else if let Some(Holder(Value::String(string))) = data.downcast_ref::<Holder>() {
+            format!("holder {:?}", cx.to_rust_string_lossy(*string))
+        } else {
+            "other".to_string()
+        };
+        cx.host_mut()
+            .state_mut::<PromisesHost>()
+            .received
+            .push(read);
+    }
+    cx.call(Value::Object(callback), this, args)
+        .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, realm: Option<RealmRef>) {
+    hook(cx);
+    cx.host_mut()
+        .state_mut::<PromisesHost>()
+        .enqueued
+        .push(realm);
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, realm: RealmRef) {
+    hook(cx);
+    let prepared = &cx.host().state::<PromisesHost>().prepared;
+    prepared.set(prepared.get() + 1);
+    cx.host_mut()
+        .state_mut::<PromisesHost>()
+        .prepares
+        .push(realm);
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    realm: Option<RealmRef>,
+    result: Result<(), Value>,
+) {
+    hook(cx);
+    cx.host_mut()
+        .state_mut::<PromisesHost>()
+        .cleanups
+        .push((realm, result));
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    hook(cx);
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {
+    hook(cx);
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    hook(cx);
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    _promise: ObjectRef,
+    _operation: RejectionOperation,
+) {
+    hook(cx);
+}
+
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {
+    hook(cx);
+}
+
+fn host_get_import_meta_properties(
+    cx: &mut HookCx<'_, Scripted>,
+    _module: ModuleRef,
+) -> Completion<Vec<(PropertyKey, Value)>> {
+    hook(cx);
+    Ok(Vec::new())
+}
+
+fn host_finalize_import_meta(
+    cx: &mut HookCx<'_, Scripted>,
+    _import_meta: ObjectRef,
+    _module: ModuleRef,
+) {
+    hook(cx);
+}
+
+fn host_resize_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    hook(cx);
+    Ok(Handled::Unhandled)
+}
+
+fn host_grow_shared_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    hook(cx);
+    Ok(Handled::Unhandled)
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    hook(cx);
+    0
+}
+
+fn system_time_zone_identifier(cx: &mut HookCx<'_, Scripted>) -> String {
+    hook(cx);
+    "UTC".to_string()
+}
+
+fn get_named_time_zone_offset_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _epoch_ns: i128,
+) -> i128 {
+    hook(cx);
+    0
+}
+
+fn get_named_time_zone_epoch_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _local: IsoDateTime,
+) -> Vec<i128> {
+    hook(cx);
+    Vec::new()
+}
+
+fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Scripted>) -> Vec<TimeZoneIdentifier> {
+    hook(cx);
+    Vec::new()
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`PromisesHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_ensure_can_add_private_element,
+    host_has_source_text_available,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_get_import_meta_properties,
+    host_finalize_import_meta,
+    host_resize_array_buffer,
+    host_grow_shared_array_buffer,
+    host_system_utc_epoch_nanoseconds,
+    system_time_zone_identifier,
+    get_named_time_zone_offset_nanoseconds,
+    get_named_time_zone_epoch_nanoseconds,
+    available_named_time_zone_identifiers,
+};
 
 /// The step budget of the tests whose jobs loop without end or queue without end: small, so that
 /// they end soon in both collection modes.
@@ -278,18 +339,23 @@ fn limits_with(steps: u64) -> Limits {
 }
 
 /// The host function `note`: it records its first argument, a String as its text.
-fn note(cx: &mut Cx<'_, PromisesHost>, call: HostCall<'_>) -> Completion<Value> {
+fn note(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let line = match call.args.first().copied() {
         Some(Value::String(string)) => cx.to_rust_string_lossy(string).unwrap(),
         other => format!("{other:?}"),
     };
-    cx.host_mut().notes.push(line);
+    cx.host_mut().state_mut::<PromisesHost>().notes.push(line);
     Ok(Value::Undefined)
 }
 
 /// An agent of the promises host with `limits` and a realm whose global `note` is [`note`].
-fn new_agent(limits: Limits) -> (Agent<PromisesHost>, Realm) {
-    let mut agent = Agent::new(PromisesHost::default(), limits, support::host::seeds()).unwrap();
+fn new_agent(limits: Limits) -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(PromisesHost::default(), HOOKS),
+        limits,
+        support::host::seeds(),
+    )
+    .unwrap();
     let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -299,7 +365,7 @@ fn new_agent(limits: Limits) -> (Agent<PromisesHost>, Realm) {
 }
 
 /// The outcome of the script `source`.
-fn evaluate(agent: &mut Agent<PromisesHost>, realm: &Realm, source: &str) -> Outcome<Root> {
+fn evaluate(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Outcome<Root> {
     let script = match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -311,7 +377,7 @@ fn evaluate(agent: &mut Agent<PromisesHost>, realm: &Realm, source: &str) -> Out
 }
 
 /// The script `source`, which must complete normally: its completion value.
-fn run(agent: &mut Agent<PromisesHost>, realm: &Realm, source: &str) -> Root {
+fn run(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Root {
     match evaluate(agent, realm, source) {
         Outcome::Normal(value) => value,
         other => panic!("{source:?} answered {other:?}"),
@@ -319,7 +385,7 @@ fn run(agent: &mut Agent<PromisesHost>, realm: &Realm, source: &str) -> Root {
 }
 
 /// The text of `String(expression)`.
-fn text(agent: &mut Agent<PromisesHost>, realm: &Realm, expression: &str) -> String {
+fn text(agent: &mut Agent<Scripted>, realm: &Realm, expression: &str) -> String {
     let root = run(agent, realm, &format!("String({expression})"));
     agent
         .with_cx(realm, |cx| match cx.get(&root).unwrap() {
@@ -330,12 +396,7 @@ fn text(agent: &mut Agent<PromisesHost>, realm: &Realm, expression: &str) -> Str
 }
 
 /// Define the host function `steps` as the global `name` of `realm`.
-fn define(
-    agent: &mut Agent<PromisesHost>,
-    realm: &Realm,
-    name: &str,
-    steps: swell::HostFn<PromisesHost>,
-) {
+fn define(agent: &mut Agent<Scripted>, realm: &Realm, name: &str, steps: swell::HostFn<Scripted>) {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -356,14 +417,14 @@ fn define(
 }
 
 /// The `RealmRef` of `realm`.
-fn realm_ref(agent: &mut Agent<PromisesHost>, realm: &Realm) -> RealmRef {
+fn realm_ref(agent: &mut Agent<Scripted>, realm: &Realm) -> RealmRef {
     agent
         .with_cx(realm, |cx| cx.realm_ref(realm).unwrap())
         .unwrap()
 }
 
 /// A checkpoint.
-fn checkpoint(agent: &mut Agent<PromisesHost>) -> Outcome<CheckpointReport> {
+fn checkpoint(agent: &mut Agent<Scripted>) -> Outcome<CheckpointReport> {
     agent.perform_microtask_checkpoint().unwrap()
 }
 
@@ -392,9 +453,12 @@ fn report(promise_jobs: u64, host_microtasks: u64) -> CheckpointReport {
 }
 
 /// The host function `queueB`: it queues a host microtask that records "b".
-fn queue_b(cx: &mut Cx<'_, PromisesHost>, _call: HostCall<'_>) -> Completion<Value> {
-    cx.queue_microtask(Box::new(|cx: &mut Cx<'_, PromisesHost>| {
-        cx.host_mut().notes.push("b".to_string());
+fn queue_b(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.queue_microtask(Box::new(|cx: &mut Cx<'_, Scripted>| {
+        cx.host_mut()
+            .state_mut::<PromisesHost>()
+            .notes
+            .push("b".to_string());
     }))
     .unwrap();
     Ok(Value::Undefined)
@@ -413,9 +477,12 @@ fn host_78_promise_jobs_and_host_microtasks_run_in_one_order() {
          queueB();\n\
          Promise.resolve().then(function () { note('c'); });",
     );
-    assert!(agent.host().notes.is_empty(), "nothing ran in the script");
+    assert!(
+        agent.host().state::<PromisesHost>().notes.is_empty(),
+        "nothing ran in the script"
+    );
     assert_eq!(normal(checkpoint(&mut agent)), report(2, 1));
-    assert_eq!(agent.host().notes, ["a", "b", "c"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["a", "b", "c"]);
     assert_eq!(agent.pending_microtasks(), Ok(0));
 }
 
@@ -460,14 +527,14 @@ fn host_82_the_hooks_around_a_promise_job_get_its_realm_and_its_throw() {
     );
     let thrown = run(&mut agent, &realm, "thrown");
     assert_eq!(normal(checkpoint(&mut agent)), report(3, 0));
-    assert_eq!(agent.host().notes, ["first 1"]);
-    assert_eq!(agent.host().prepares, [here, here]);
-    let cleanups = std::mem::take(&mut agent.host_mut().cleanups);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["first 1"]);
+    assert_eq!(agent.host().state::<PromisesHost>().prepares, [here, here]);
+    let cleanups = std::mem::take(&mut agent.host_mut().state_mut::<PromisesHost>().cleanups);
     let thrown = agent
         .with_cx(&realm, |cx| cx.get(&thrown).unwrap())
         .unwrap();
     assert_eq!(cleanups, [(Some(here), Ok(())), (Some(here), Err(thrown))]);
-    assert_eq!(agent.host().prepared.get(), 2);
+    assert_eq!(agent.host().state::<PromisesHost>().prepared.get(), 2);
 }
 
 /// HOST-83: `host_enqueue_promise_job` is called once for each promise job, with its realm or
@@ -490,13 +557,19 @@ fn host_83_each_promise_job_is_announced_to_the_host_before_it_can_run() {
          });\n\
          q.then(function (v) { note('q ' + v); });",
     );
-    assert_eq!(agent.host().enqueued, [Some(here), None, Some(here)]);
-    assert_eq!(agent.pending_microtasks(), Ok(3));
-    assert!(agent.host().notes.is_empty());
-    assert_eq!(normal(checkpoint(&mut agent)), report(4, 0));
-    assert_eq!(agent.host().notes, ["handler", "then", "q 2"]);
     assert_eq!(
-        agent.host().enqueued,
+        agent.host().state::<PromisesHost>().enqueued,
+        [Some(here), None, Some(here)]
+    );
+    assert_eq!(agent.pending_microtasks(), Ok(3));
+    assert!(agent.host().state::<PromisesHost>().notes.is_empty());
+    assert_eq!(normal(checkpoint(&mut agent)), report(4, 0));
+    assert_eq!(
+        agent.host().state::<PromisesHost>().notes,
+        ["handler", "then", "q 2"]
+    );
+    assert_eq!(
+        agent.host().state::<PromisesHost>().enqueued,
         [Some(here), None, Some(here), Some(here)]
     );
 }
@@ -507,23 +580,23 @@ fn host_83_each_promise_job_is_announced_to_the_host_before_it_can_run() {
 #[test]
 fn host_84_then_makes_a_job_callback_and_the_job_calls_it_with_its_host_defined() {
     let (mut agent, realm) = new_agent(limits());
-    agent.host_mut().make = MakeAnswer::Marker;
+    agent.host_mut().state_mut::<PromisesHost>().make = MakeAnswer::Marker;
     run(
         &mut agent,
         &realm,
         "var p = Promise.resolve(1);\n\
          p.then(function (v) { note('fulfilled ' + v); }, function () { note('rejected'); });",
     );
-    assert_eq!(agent.host().made, 2);
+    assert_eq!(agent.host().state::<PromisesHost>().made, 2);
     run(&mut agent, &realm, "p.then(5, null);");
     assert_eq!(
-        agent.host().made,
+        agent.host().state::<PromisesHost>().made,
         2,
         "no job callback for a value that is not callable"
     );
     assert_eq!(normal(checkpoint(&mut agent)), report(2, 0));
-    assert_eq!(agent.host().notes, ["fulfilled 1"]);
-    assert_eq!(agent.host().received, ["marker 1"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["fulfilled 1"]);
+    assert_eq!(agent.host().state::<PromisesHost>().received, ["marker 1"]);
 }
 
 /// HOST-148: with `steps_per_entry` N, a checkpoint after a script that queued three `then`
@@ -560,7 +633,7 @@ fn a_queued_job_keeps_its_values_through_collect() {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(normal(checkpoint(&mut agent)), report(1, 0));
-    assert_eq!(agent.host().notes, ["kept 42"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["kept 42"]);
 }
 
 /// A script of `statement` written 100 times, one after another. Each instruction is a safe point
@@ -664,20 +737,21 @@ fn a_chain_of_then_longer_than_frame_depth_runs_to_its_end() {
          p.then(function (v) { note('end ' + v); });",
     );
     assert_eq!(normal(checkpoint(&mut agent)), report(101, 0));
-    assert_eq!(agent.host().notes, ["end 100"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["end 100"]);
 }
 
 /// The host function `reenter` of `support/stack.rs`, for the promises host: it calls its first
 /// argument through `cx.call`, one re-entry.
-fn reenter(cx: &mut Cx<'_, PromisesHost>, call: HostCall<'_>) -> Completion<Value> {
+fn reenter(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let function = call.args.first().copied().unwrap_or(Value::Undefined);
     cx.call(function, Value::Undefined, &[]).unwrap()
 }
 
 /// The host function `checkpointHere`: a checkpoint through `cx`, inside the running entry.
-fn checkpoint_here(cx: &mut Cx<'_, PromisesHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn checkpoint_here(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     let report = cx.perform_microtask_checkpoint()?;
     cx.host_mut()
+        .state_mut::<PromisesHost>()
         .notes
         .push(format!("checkpoint {}", report.promise_jobs));
     Ok(Value::Undefined)
@@ -702,7 +776,7 @@ fn a_then_handler_of_a_nested_checkpoint_counts_against_reentry_depth() {
         (REENTRY - 1, "true", "fulfilled 7"),
     ] {
         let mut agent = Agent::new(
-            PromisesHost::default(),
+            Scripted::new(PromisesHost::default(), HOOKS),
             stack_limits(REENTRY),
             support::host::seeds(),
         )
@@ -729,10 +803,14 @@ fn a_then_handler_of_a_nested_checkpoint_counts_against_reentry_depth() {
                  f({k});"
             ),
         );
-        assert_eq!(agent.host().notes, ["checkpoint 1"], "at level {k}");
+        assert_eq!(
+            agent.host().state::<PromisesHost>().notes,
+            ["checkpoint 1"],
+            "at level {k}"
+        );
         assert_eq!(text(&mut agent, &realm, "ran"), ran, "at level {k}");
         assert_eq!(
-            agent.host().cleanups,
+            agent.host().state::<PromisesHost>().cleanups,
             [(Some(here), Ok(()))],
             "at level {k}"
         );
@@ -748,8 +826,8 @@ fn a_then_handler_of_a_nested_checkpoint_counts_against_reentry_depth() {
 }
 
 /// The host function `interruptNow`: it sets the agent's interrupt flag.
-fn interrupt_now(cx: &mut Cx<'_, PromisesHost>, _call: HostCall<'_>) -> Completion<Value> {
-    if let Some(interrupt) = &cx.host().interrupt {
+fn interrupt_now(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    if let Some(interrupt) = &cx.host().state::<PromisesHost>().interrupt {
         interrupt.interrupt();
     }
     Ok(Value::Undefined)
@@ -802,15 +880,23 @@ fn a_termination_in_a_job_leaves_its_promise_pending_and_the_rest_queued() {
             limits.steps_per_entry = LOOP_STEPS;
         }
         let (mut agent, realm) = new_agent(limits);
-        agent.host_mut().interrupt = Some(agent.interrupt_handle());
+        agent.host_mut().state_mut::<PromisesHost>().interrupt = Some(agent.interrupt_handle());
         define(&mut agent, &realm, "interruptNow", interrupt_now);
         run(&mut agent, &realm, &setup);
         assert_eq!(terminated(checkpoint(&mut agent)), reason);
-        assert_eq!(agent.host().notes, ["a", "b"], "{reason:?}");
+        assert_eq!(
+            agent.host().state::<PromisesHost>().notes,
+            ["a", "b"],
+            "{reason:?}"
+        );
         assert_eq!(agent.pending_microtasks(), Ok(1), "{reason:?}");
         assert!(!agent.interrupt_handle().is_set());
         assert_eq!(normal(checkpoint(&mut agent)), report(1, 0), "{reason:?}");
-        assert_eq!(agent.host().notes, ["a", "b", "c"], "{reason:?}");
+        assert_eq!(
+            agent.host().state::<PromisesHost>().notes,
+            ["a", "b", "c"],
+            "{reason:?}"
+        );
         run(
             &mut agent,
             &realm,
@@ -823,13 +909,18 @@ fn a_termination_in_a_job_leaves_its_promise_pending_and_the_rest_queued() {
 }
 
 /// A host microtask that records `n`.
-fn record(n: u32) -> Microtask<PromisesHost> {
-    Box::new(move |cx: &mut Cx<'_, PromisesHost>| cx.host_mut().notes.push(n.to_string()))
+fn record(n: u32) -> Microtask<Scripted> {
+    Box::new(move |cx: &mut Cx<'_, Scripted>| {
+        cx.host_mut()
+            .state_mut::<PromisesHost>()
+            .notes
+            .push(n.to_string())
+    })
 }
 
 /// The host function `signal`: it sets the flag a thread of the test waits for.
-fn signal(cx: &mut Cx<'_, PromisesHost>, _call: HostCall<'_>) -> Completion<Value> {
-    if let Some(flag) = &cx.host().signal {
+fn signal(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    if let Some(flag) = &cx.host().state::<PromisesHost>().signal {
         flag.store(true, Ordering::SeqCst);
     }
     Ok(Value::Undefined)
@@ -855,7 +946,7 @@ fn host_198_the_interrupt_ends_a_checkpoint_at_three_places() {
     assert_eq!(agent.pending_microtasks(), Ok(2));
     assert!(!agent.interrupt_handle().is_set());
     assert_eq!(normal(checkpoint(&mut agent)), report(0, 2));
-    assert_eq!(agent.host().notes, ["1", "2"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["1", "2"]);
 
     // Between two entries.
     let (mut agent, realm) = new_agent(limits());
@@ -863,8 +954,11 @@ fn host_198_the_interrupt_ends_a_checkpoint_at_three_places() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(move |cx: &mut Cx<'_, PromisesHost>| {
-                cx.host_mut().notes.push("1".to_string());
+            Box::new(move |cx: &mut Cx<'_, Scripted>| {
+                cx.host_mut()
+                    .state_mut::<PromisesHost>()
+                    .notes
+                    .push("1".to_string());
                 interrupt.interrupt();
             }),
         )
@@ -874,13 +968,13 @@ fn host_198_the_interrupt_ends_a_checkpoint_at_three_places() {
     assert_eq!(agent.pending_microtasks(), Ok(1));
     assert!(!agent.interrupt_handle().is_set());
     assert_eq!(normal(checkpoint(&mut agent)), report(0, 1));
-    assert_eq!(agent.host().notes, ["1", "2"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["1", "2"]);
 
     // While a job runs, from another thread.
     let (mut agent, realm) = new_agent(limits_with(1 << 26));
     let flag = Arc::new(AtomicBool::new(false));
     let stop = Arc::new(AtomicBool::new(false));
-    agent.host_mut().signal = Some(Arc::clone(&flag));
+    agent.host_mut().state_mut::<PromisesHost>().signal = Some(Arc::clone(&flag));
     define(&mut agent, &realm, "signal", signal);
     run(
         &mut agent,
@@ -984,10 +1078,14 @@ fn host_200_clear_microtasks_empties_the_queue_without_running_anything() {
         .with_cx(&realm, |cx| matches!(cx.get(&p).unwrap(), Value::Object(_)))
         .unwrap();
     assert!(is_object, "the script answers the promise p");
-    let hooks = agent.host().hooks.get();
+    let hooks = agent.host().state::<PromisesHost>().hooks.get();
     let bytes = agent.heap_bytes().unwrap();
     assert_eq!(agent.clear_microtasks(), Ok(1));
-    assert_eq!(agent.host().hooks.get(), hooks, "no hook was called");
+    assert_eq!(
+        agent.host().state::<PromisesHost>().hooks.get(),
+        hooks,
+        "no hook was called"
+    );
     assert_eq!(agent.pending_microtasks(), Ok(0));
     let after = agent.heap_bytes().unwrap();
     assert!(after < bytes, "{after} against {bytes}");
@@ -1004,16 +1102,21 @@ fn host_200_clear_microtasks_empties_the_queue_without_running_anything() {
 
 /// The host function `makeCapability`: `Cx::new_promise_capability`, its resolve function rooted
 /// by the host; it answers the promise.
-fn make_capability(cx: &mut Cx<'_, PromisesHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn make_capability(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     let capability = cx.new_promise_capability()?;
     let resolve = cx.root(capability.resolve).unwrap();
-    cx.host_mut().resolve = Some(resolve);
+    cx.host_mut().state_mut::<PromisesHost>().resolve = Some(resolve);
     Ok(Value::Object(capability.promise))
 }
 
 /// The host function `settle`: it calls the resolve function the host rooted with 42.
-fn settle(cx: &mut Cx<'_, PromisesHost>, _call: HostCall<'_>) -> Completion<Value> {
-    let resolve = cx.host_mut().resolve.take().unwrap();
+fn settle(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    let resolve = cx
+        .host_mut()
+        .state_mut::<PromisesHost>()
+        .resolve
+        .take()
+        .unwrap();
     let function = cx.get(&resolve).unwrap();
     cx.call(function, Value::Undefined, &[Value::Number(42.0)])
         .unwrap()
@@ -1035,7 +1138,10 @@ fn a_reaction_settled_from_a_job_runs_behind_the_entries_already_queued() {
          Promise.resolve().then(function () { note('b'); });",
     );
     assert_eq!(normal(checkpoint(&mut agent)), report(3, 0));
-    assert_eq!(agent.host().notes, ["a", "b", "c 42"]);
+    assert_eq!(
+        agent.host().state::<PromisesHost>().notes,
+        ["a", "b", "c 42"]
+    );
 }
 
 /// "Emptying the queue is the host's call": dropping the agent with three `then` callbacks
@@ -1051,8 +1157,8 @@ fn dropping_the_agent_with_promise_jobs_queued_calls_nothing_of_the_host() {
          for (var i = 0; i < 3; i++) Promise.resolve(i).then(function () { ran = true; });",
     );
     assert_eq!(agent.pending_microtasks(), Ok(3));
-    let hooks = Rc::clone(&agent.host().hooks);
-    let prepared = Rc::clone(&agent.host().prepared);
+    let hooks = Rc::clone(&agent.host().state::<PromisesHost>().hooks);
+    let prepared = Rc::clone(&agent.host().state::<PromisesHost>().prepared);
     let before = hooks.get();
     drop(realm);
     drop(agent);
@@ -1075,7 +1181,12 @@ fn new_promise_capability_gives_the_host_a_promise_it_settles_later() {
     );
     assert_eq!(normal(checkpoint(&mut agent)), report(0, 0));
     assert_eq!(text(&mut agent, &realm, "got"), "nothing");
-    let resolve = agent.host_mut().resolve.take().unwrap();
+    let resolve = agent
+        .host_mut()
+        .state_mut::<PromisesHost>()
+        .resolve
+        .take()
+        .unwrap();
     let (this, value) = agent
         .with_cx(&realm, |cx| {
             (
@@ -1108,9 +1219,12 @@ fn a_thenable_is_resolved_in_a_job_of_its_own() {
          p.then(function (v) { note('p ' + v); });\n\
          q.then(function (v) { note('q ' + v); });",
     );
-    assert_eq!(agent.host().notes, ["sync"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["sync"]);
     assert_eq!(normal(checkpoint(&mut agent)), report(4, 0));
-    assert_eq!(agent.host().notes, ["sync", "then", "then", "p 5", "q 5"]);
+    assert_eq!(
+        agent.host().state::<PromisesHost>().notes,
+        ["sync", "then", "then", "p 5", "q 5"]
+    );
 }
 
 /// The resolving functions (`#sec-createresolvingfunctions`): the first call of either settles the
@@ -1132,7 +1246,10 @@ fn the_resolving_functions_resolve_once() {
          r.then(function (v) { note('r ' + v); }, function (e) { note('r rejected ' + e); });",
     );
     assert_eq!(normal(checkpoint(&mut agent)), report(3, 0));
-    assert_eq!(agent.host().notes, ["p 1", "q 4", "r rejected 6"]);
+    assert_eq!(
+        agent.host().state::<PromisesHost>().notes,
+        ["p 1", "q 4", "r rejected 6"]
+    );
     assert_eq!(
         text(
             &mut agent,
@@ -1182,8 +1299,11 @@ fn a_termination_in_a_job_still_calls_clean_up_with_ok() {
         "Promise.resolve().then(function () { for (;;) {} });",
     );
     assert_eq!(terminated(checkpoint(&mut agent)), Termination::StepBudget);
-    assert_eq!(agent.host().prepares, [here]);
-    assert_eq!(agent.host().cleanups, [(Some(here), Ok(()))]);
+    assert_eq!(agent.host().state::<PromisesHost>().prepares, [here]);
+    assert_eq!(
+        agent.host().state::<PromisesHost>().cleanups,
+        [(Some(here), Ok(()))]
+    );
 }
 
 /// "Queued jobs": the [[HostDefined]] of a job callback is traced while its job is queued: a
@@ -1193,7 +1313,7 @@ fn a_termination_in_a_job_still_calls_clean_up_with_ok() {
 #[test]
 fn a_job_callback_keeps_its_host_defined_through_collect() {
     let (mut agent, realm) = new_agent(limits());
-    agent.host_mut().make = MakeAnswer::Holder;
+    agent.host_mut().state_mut::<PromisesHost>().make = MakeAnswer::Holder;
     run(
         &mut agent,
         &realm,
@@ -1202,9 +1322,9 @@ fn a_job_callback_keeps_its_host_defined_through_collect() {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(normal(checkpoint(&mut agent)), report(1, 0));
-    assert_eq!(agent.host().notes, ["ran"]);
+    assert_eq!(agent.host().state::<PromisesHost>().notes, ["ran"]);
     assert_eq!(
-        agent.host().received,
+        agent.host().state::<PromisesHost>().received,
         ["holder Ok(\"held by the host-defined\")"]
     );
 }

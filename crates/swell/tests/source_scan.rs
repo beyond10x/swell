@@ -20,7 +20,7 @@ pub(crate) mod scan {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    pub(super) fn swell_dir() -> PathBuf {
+    pub(crate) fn swell_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
     }
 
@@ -88,7 +88,7 @@ pub(crate) mod scan {
         found
     }
 
-    pub(super) fn rust_files(dir: &Path, into: &mut Vec<PathBuf>) {
+    pub(crate) fn rust_files(dir: &Path, into: &mut Vec<PathBuf>) {
         let mut entries: Vec<PathBuf> = fs::read_dir(dir)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -235,7 +235,7 @@ pub(crate) mod scan {
         matches!(before(1), Some('b' | 'c')) && !ident_char(before(2))
     }
 
-    pub(super) fn ident_char(c: Option<char>) -> bool {
+    pub(crate) fn ident_char(c: Option<char>) -> bool {
         c.is_some_and(|c| c.is_alphanumeric() || c == '_')
     }
 

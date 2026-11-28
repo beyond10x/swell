@@ -14,14 +14,15 @@
 use crate::support;
 
 use support::host::{create_realm, limits, seeds};
+use support::scripted::{Hooks, Scripted};
 use swell::{
-    Abrupt, Agent, AgentState, Brand, Completion, Cx, ErrorKind, HookCx, Host, HostCall, HostError,
+    Abrupt, Agent, AgentState, Brand, Completion, Cx, ErrorKind, HookCx, HostCall, HostError,
     HostObjectSpec, InterruptHandle, Job, LoadRequest, ObjectRef, Outcome as HostOutcome,
     Overrides, Parsed, PropertyKey, Prototype, Realm, Root, Source, Value,
 };
 
 /// A hook of [`HookHost`] a test gives as [`Answer::Custom`].
-type HookAnswer = fn(&mut HookCx<'_, HookHost>, ObjectRef) -> Completion<()>;
+type HookAnswer = fn(&mut HookCx<'_, Scripted>, ObjectRef) -> Completion<()>;
 
 /// What [`HookHost`]'s `host_ensure_can_add_private_element` answers at the call it answers.
 #[derive(Clone, Copy, Debug, Default)]
@@ -60,57 +61,67 @@ struct HookHost {
     interrupt: Option<InterruptHandle>,
 }
 
-impl Host for HookHost {
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        obj: ObjectRef,
-    ) -> Completion<()> {
-        let host = cx.host_mut();
-        host.calls.push("hook".to_string());
-        host.objects.push(obj);
-        if host.at != 0 && host.objects.len() != host.at {
-            return Ok(());
-        }
-        match host.answer {
-            Answer::Allow => Ok(()),
-            Answer::AllocateThenAllow => {
-                cx.new_string("made in the hook")?;
-                cx.new_host_object(spec(Prototype::Null, None)).unwrap()?;
-                Ok(())
-            }
-            Answer::Throw(value) => Err(Abrupt::Throw(value)),
-            Answer::ThrowNew => {
-                let mut made = spec(Prototype::Object(obj), None);
-                made.error_kind = Some(ErrorKind::TypeError);
-                let made = cx.new_host_object(made).unwrap()?;
-                Err(Abrupt::Throw(Value::Object(made)))
-            }
-            Answer::Interrupt => {
-                if let Some(handle) = &host.interrupt {
-                    handle.interrupt();
-                }
-                Ok(())
-            }
-            Answer::Custom(answer) => answer(cx, obj),
-        }
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    obj: ObjectRef,
+) -> Completion<()> {
+    let host = cx.host_mut().state_mut::<HookHost>();
+    host.calls.push("hook".to_string());
+    host.objects.push(obj);
+    if host.at != 0 && host.objects.len() != host.at {
+        return Ok(());
     }
-
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
+    match host.answer {
+        Answer::Allow => Ok(()),
+        Answer::AllocateThenAllow => {
+            cx.new_string("made in the hook")?;
+            cx.new_host_object(spec(Prototype::Null, None)).unwrap()?;
+            Ok(())
+        }
+        Answer::Throw(value) => Err(Abrupt::Throw(value)),
+        Answer::ThrowNew => {
+            let mut made = spec(Prototype::Object(obj), None);
+            made.error_kind = Some(ErrorKind::TypeError);
+            let made = cx.new_host_object(made).unwrap()?;
+            Err(Abrupt::Throw(Value::Object(made)))
+        }
+        Answer::Interrupt => {
+            if let Some(handle) = &host.interrupt {
+                handle.interrupt();
+            }
+            Ok(())
+        }
+        Answer::Custom(answer) => answer(cx, obj),
     }
 }
 
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`HookHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_add_private_element,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
+
 /// The override table of the host objects of these tests: one override, `is_extensible`, which
 /// records its call and answers `true`, so a test sees that no add reads [[IsExtensible]].
-static TABLE: Overrides<HookHost> = Overrides {
+static TABLE: Overrides<Scripted> = Overrides {
     get_prototype_of: None,
     set_prototype_of: None,
     is_extensible: Some(is_extensible),
@@ -125,16 +136,19 @@ static TABLE: Overrides<HookHost> = Overrides {
 };
 
 /// The override `is_extensible` of [`TABLE`].
-fn is_extensible(cx: &mut Cx<'_, HookHost>, _object: ObjectRef) -> Completion<bool> {
-    cx.host_mut().calls.push("is_extensible".to_string());
+fn is_extensible(cx: &mut Cx<'_, Scripted>, _object: ObjectRef) -> Completion<bool> {
+    cx.host_mut()
+        .state_mut::<HookHost>()
+        .calls
+        .push("is_extensible".to_string());
     Ok(true)
 }
 
 /// A host object of brand 223 with no data and no [[ErrorData]].
 fn spec(
     prototype: Prototype,
-    overrides: Option<&'static Overrides<HookHost>>,
-) -> HostObjectSpec<HookHost> {
+    overrides: Option<&'static Overrides<Scripted>>,
+) -> HostObjectSpec<Scripted> {
     HostObjectSpec {
         prototype,
         brand: Brand(223),
@@ -145,19 +159,20 @@ fn spec(
 }
 
 /// The host function `log(s)`: records `s` and answers it.
-fn log(cx: &mut Cx<'_, HookHost>, call: HostCall<'_>) -> Completion<Value> {
+fn log(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let value = call.args.first().copied().unwrap_or(Value::Undefined);
     let Value::String(string) = value else {
         panic!("log takes a String");
     };
     let text = cx.to_rust_string_lossy(string).unwrap();
-    cx.host_mut().calls.push(text);
+    cx.host_mut().state_mut::<HookHost>().calls.push(text);
     Ok(value)
 }
 
 /// An agent with [`HookHost`] and the test limits, a realm, and the host function `log`.
-fn hook_agent() -> (Agent<HookHost>, Realm) {
-    let mut agent = Agent::new(HookHost::default(), limits(), seeds()).unwrap();
+fn hook_agent() -> (Agent<Scripted>, Realm) {
+    let mut agent =
+        Agent::new(Scripted::new(HookHost::default(), HOOKS), limits(), seeds()).unwrap();
     let HostOutcome::Normal(realm) = create_realm(&mut agent, None, None).unwrap() else {
         panic!("create_realm did not answer Normal");
     };
@@ -171,10 +186,10 @@ fn hook_agent() -> (Agent<HookHost>, Realm) {
 /// Bind the value `make` makes as the global property `name`, and answer it: it lives as long as
 /// the binding.
 fn bind(
-    agent: &mut Agent<HookHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     name: &str,
-    make: impl FnOnce(&mut Cx<'_, HookHost>, swell::RealmRef) -> Value,
+    make: impl FnOnce(&mut Cx<'_, Scripted>, swell::RealmRef) -> Value,
 ) -> Value {
     let global = agent.global_object(realm).unwrap();
     agent
@@ -194,10 +209,10 @@ fn bind(
 /// Bind a new host object of `%Object.prototype%` with the table `overrides` as the global
 /// property `name`, and answer it.
 fn bind_host(
-    agent: &mut Agent<HookHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     name: &str,
-    overrides: Option<&'static Overrides<HookHost>>,
+    overrides: Option<&'static Overrides<Scripted>>,
 ) -> ObjectRef {
     let made = bind(agent, realm, name, |cx, realm_ref| {
         let made = cx.new_host_object(spec(Prototype::ObjectPrototypeOf(realm_ref), overrides));
@@ -210,7 +225,7 @@ fn bind_host(
 }
 
 /// The script `source` parsed in `realm`.
-fn parse(agent: &mut Agent<HookHost>, realm: &Realm, source: &str) -> swell::Script {
+fn parse(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> swell::Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -222,7 +237,7 @@ fn parse(agent: &mut Agent<HookHost>, realm: &Realm, source: &str) -> swell::Scr
 
 /// The outcome of the script `source` in `realm`, as text: `normal` or `throw` with the value as
 /// ToString writes it, or the termination.
-fn outcome(agent: &mut Agent<HookHost>, realm: &Realm, source: &str) -> String {
+fn outcome(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> String {
     let script = parse(agent, realm, source);
     let (kind, root): (&str, Root) = match agent.evaluate_script(&script).unwrap() {
         HostOutcome::Normal(root) => ("normal", root),
@@ -239,7 +254,7 @@ fn outcome(agent: &mut Agent<HookHost>, realm: &Realm, source: &str) -> String {
 }
 
 /// The Number the parsed `script` answers, read with no allocation in the heap.
-fn number(agent: &mut Agent<HookHost>, realm: &Realm, script: &swell::Script) -> f64 {
+fn number(agent: &mut Agent<Scripted>, realm: &Realm, script: &swell::Script) -> f64 {
     let HostOutcome::Normal(root) = agent.evaluate_script(script).unwrap() else {
         panic!("the script did not complete normally");
     };
@@ -251,8 +266,8 @@ fn number(agent: &mut Agent<HookHost>, realm: &Realm, script: &swell::Script) ->
 
 /// The calls the host recorded since the last read, which empties both lists: the lines and the
 /// objects the hook was given.
-fn take_calls(agent: &mut Agent<HookHost>) -> (Vec<String>, Vec<ObjectRef>) {
-    let host = agent.host_mut();
+fn take_calls(agent: &mut Agent<Scripted>) -> (Vec<String>, Vec<ObjectRef>) {
+    let host = agent.host_mut().state_mut::<HookHost>();
     (
         std::mem::take(&mut host.calls),
         std::mem::take(&mut host.objects),
@@ -260,7 +275,7 @@ fn take_calls(agent: &mut Agent<HookHost>) -> (Vec<String>, Vec<ObjectRef>) {
 }
 
 /// The heap's reading after a collection.
-fn collected_bytes(agent: &mut Agent<HookHost>) -> u64 {
+fn collected_bytes(agent: &mut Agent<Scripted>) -> u64 {
     assert!(matches!(agent.collect(), Ok(HostOutcome::Normal(_))));
     agent.heap_bytes().unwrap()
 }
@@ -290,7 +305,7 @@ fn host_119_a_throw_from_the_hook_is_the_field_adds_throw() {
         Value::String(cx.new_string("refused").unwrap())
     });
     assert_eq!(outcome(&mut agent, &realm, FIELD_CLASS), "normal 0");
-    agent.host_mut().answer = Answer::Throw(thrown);
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(thrown);
     assert_eq!(
         outcome(
             &mut agent,
@@ -301,7 +316,7 @@ fn host_119_a_throw_from_the_hook_is_the_field_adds_throw() {
     );
     assert_eq!(take_calls(&mut agent), (vec!["hook".to_string()], vec![h]));
 
-    agent.host_mut().answer = Answer::ThrowNew;
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::ThrowNew;
     assert_eq!(
         outcome(
             &mut agent,
@@ -317,7 +332,7 @@ fn host_119_a_throw_from_the_hook_is_the_field_adds_throw() {
     // grows the arenas the construction uses.
     let h2 = bind_host(&mut agent, &realm, "h2", Some(&TABLE));
     let h3 = bind_host(&mut agent, &realm, "h3", Some(&TABLE));
-    agent.host_mut().answer = Answer::Throw(Value::Number(7.0));
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(Value::Number(7.0));
     let refused = parse(
         &mut agent,
         &realm,
@@ -338,7 +353,7 @@ fn host_119_a_throw_from_the_hook_is_the_field_adds_throw() {
     assert_eq!(number(&mut agent, &realm, &refused_2), 7.0);
     let after = collected_bytes(&mut agent);
     assert_eq!(after, before, "a refused add left bytes charged");
-    agent.host_mut().answer = Answer::Allow;
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Allow;
     assert_eq!(number(&mut agent, &realm, &allowed_3), 0.0);
     let added = collected_bytes(&mut agent);
     assert_eq!(added - after, 24 + 48, "the list of one field");
@@ -360,7 +375,7 @@ fn host_119_a_throw_from_the_hook_is_the_field_adds_throw() {
 fn host_119_an_ok_answer_adds_the_field() {
     let (mut agent, realm) = hook_agent();
     let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
-    agent.host_mut().answer = Answer::AllocateThenAllow;
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::AllocateThenAllow;
     assert_eq!(
         outcome(
             &mut agent,
@@ -407,7 +422,7 @@ fn host_223_a_throw_from_the_hook_is_the_method_adds_throw() {
         ),
         "normal 0"
     );
-    agent.host_mut().answer = Answer::Throw(thrown);
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(thrown);
     for class in ["M", "A"] {
         assert_eq!(
             outcome(
@@ -444,7 +459,7 @@ fn host_223_a_throw_from_the_hook_is_the_method_adds_throw() {
         "normal 0"
     );
     let all = ["hook", "hook", "x", "hook", "y", "hook"];
-    agent.host_mut().answer = Answer::Allow;
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Allow;
     let target = bind_host(&mut agent, &realm, "target", Some(&TABLE));
     assert_eq!(
         outcome(&mut agent, &realm, "new E() === target && E.probe(target);"),
@@ -461,7 +476,7 @@ fn host_223_a_throw_from_the_hook_is_the_method_adds_throw() {
         (4, "true,true,true,false", 6),
     ] {
         let target = bind_host(&mut agent, &realm, "target", Some(&TABLE));
-        let host = agent.host_mut();
+        let host = agent.host_mut().state_mut::<HookHost>();
         host.answer = Answer::Throw(Value::Number(f64::from(at)));
         host.at = usize::from(at);
         assert_eq!(
@@ -484,7 +499,7 @@ fn host_223_a_throw_from_the_hook_is_the_method_adds_throw() {
 
 /// A host object of `agent` that is stale: made in one scope, never rooted, and freed by a
 /// collection.
-fn stale_object(agent: &mut Agent<HookHost>, realm: &Realm) -> ObjectRef {
+fn stale_object(agent: &mut Agent<Scripted>, realm: &Realm) -> ObjectRef {
     let made = agent
         .with_cx(realm, |cx| {
             cx.new_host_object(spec(Prototype::Null, None))
@@ -498,7 +513,7 @@ fn stale_object(agent: &mut Agent<HookHost>, realm: &Realm) -> ObjectRef {
 
 /// Every entry point and read of a faulted agent but `state()` and `refusals()` answers
 /// `Err(HostError::Faulted)`; `script` was parsed before the fault.
-fn assert_faulted(agent: &mut Agent<HookHost>, realm: &Realm, script: &swell::Script) {
+fn assert_faulted(agent: &mut Agent<Scripted>, realm: &Realm, script: &swell::Script) {
     assert_eq!(agent.state(), AgentState::Faulted);
     let _: u64 = agent.refusals();
     assert!(matches!(
@@ -534,7 +549,7 @@ fn assert_faulted(agent: &mut Agent<HookHost>, realm: &Realm, script: &swell::Sc
 /// construction in a `try` and with it uncaught: an uncaught throw leaves the script without a
 /// handler that holds the value, so with a collection at every safe point no collection reaches
 /// the handle before the run ends, and only the check of the hook's answer faults the agent.
-fn assert_bad_throw_faults(bad: impl Fn(&mut Agent<HookHost>, &Realm) -> Value) {
+fn assert_bad_throw_faults(bad: impl Fn(&mut Agent<Scripted>, &Realm) -> Value) {
     for (class, element) in [("C", "#x = log('x');"), ("M", "#m() {}")] {
         for caught in [true, false] {
             let (mut agent, realm) = hook_agent();
@@ -554,7 +569,7 @@ fn assert_bad_throw_faults(bad: impl Fn(&mut Agent<HookHost>, &Realm) -> Value) 
             };
             let script = parse(&mut agent, &realm, &run);
             let value = bad(&mut agent, &realm);
-            agent.host_mut().answer = Answer::Throw(value);
+            agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(value);
             let answered = match agent.evaluate_script(&script) {
                 Ok(HostOutcome::Terminated(termination)) => format!("{termination:?}"),
                 Ok(HostOutcome::Normal(_)) => "Normal".to_string(),
@@ -598,7 +613,7 @@ fn host_223_a_handle_of_another_agent_in_the_throw_faults_the_agent() {
 #[test]
 fn an_ordinary_object_calls_no_hook() {
     let (mut agent, realm) = hook_agent();
-    agent.host_mut().answer = Answer::Throw(Value::Number(1.0));
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(Value::Number(1.0));
     assert_eq!(
         outcome(
             &mut agent,
@@ -627,7 +642,7 @@ fn an_ordinary_object_calls_no_hook() {
 #[test]
 fn a_proxy_calls_no_hook() {
     let (mut agent, realm) = hook_agent();
-    agent.host_mut().answer = Answer::Throw(Value::Number(1.0));
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(Value::Number(1.0));
     assert_eq!(
         outcome(
             &mut agent,
@@ -654,7 +669,7 @@ fn a_proxy_calls_no_hook() {
 fn a_host_object_without_an_override_table_calls_no_hook() {
     let (mut agent, realm) = hook_agent();
     bind_host(&mut agent, &realm, "plain", None);
-    agent.host_mut().answer = Answer::Throw(Value::Number(1.0));
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(Value::Number(1.0));
     assert_eq!(
         outcome(
             &mut agent,
@@ -702,7 +717,7 @@ fn an_interrupt_set_in_the_hook_ends_the_run() {
     let h = bind_host(&mut agent, &realm, "h", Some(&TABLE));
     assert_eq!(outcome(&mut agent, &realm, FIELD_CLASS), "normal 0");
     let handle = agent.interrupt_handle();
-    let host = agent.host_mut();
+    let host = agent.host_mut().state_mut::<HookHost>();
     host.interrupt = Some(handle);
     host.answer = Answer::Interrupt;
     assert_eq!(
@@ -714,7 +729,7 @@ fn an_interrupt_set_in_the_hook_ends_the_run() {
         "Interrupted"
     );
     assert_eq!(take_calls(&mut agent), (vec!["hook".to_string()], vec![h]));
-    agent.host_mut().answer = Answer::Allow;
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Allow;
     assert_eq!(outcome(&mut agent, &realm, "C.has(h);"), "normal false");
     assert_eq!(agent.state(), AgentState::Alive);
 }
@@ -747,7 +762,7 @@ fn a_throw_between_the_halves_of_an_accessor_keeps_the_getter_added_before_it() 
         ),
         "normal 0"
     );
-    let host = agent.host_mut();
+    let host = agent.host_mut().state_mut::<HookHost>();
     host.answer = Answer::Throw(Value::Number(2.0));
     host.at = 2;
     assert_eq!(
@@ -775,7 +790,7 @@ fn a_throw_between_the_halves_of_an_accessor_keeps_the_getter_added_before_it() 
     assert_eq!(agent.state(), AgentState::Alive);
 
     let fresh = bind_host(&mut agent, &realm, "target", Some(&TABLE));
-    let host = agent.host_mut();
+    let host = agent.host_mut().state_mut::<HookHost>();
     host.answer = Answer::Allow;
     host.at = 0;
     assert_eq!(
@@ -797,7 +812,7 @@ fn a_throw_between_the_halves_of_an_accessor_keeps_the_getter_added_before_it() 
 
 /// A hook that answers `Ok(())` after the run was terminated inside it (a `charge_host_bytes`
 /// over the budget, its `Err` dropped).
-fn swallow_memory_budget(cx: &mut HookCx<'_, HookHost>, _obj: ObjectRef) -> Completion<()> {
+fn swallow_memory_budget(cx: &mut HookCx<'_, Scripted>, _obj: ObjectRef) -> Completion<()> {
     let refused = cx.charge_host_bytes(u64::MAX);
     assert!(matches!(
         refused,
@@ -807,7 +822,7 @@ fn swallow_memory_budget(cx: &mut HookCx<'_, HookHost>, _obj: ObjectRef) -> Comp
 }
 
 /// The same, answering a `Throw` of a Number.
-fn swallow_then_throw(cx: &mut HookCx<'_, HookHost>, obj: ObjectRef) -> Completion<()> {
+fn swallow_then_throw(cx: &mut HookCx<'_, Scripted>, obj: ObjectRef) -> Completion<()> {
     swallow_memory_budget(cx, obj)?;
     Err(Abrupt::Throw(Value::Number(5.0)))
 }
@@ -822,7 +837,7 @@ fn a_termination_the_hook_swallowed_ends_the_run_and_adds_nothing() {
     assert_eq!(outcome(&mut agent, &realm, FIELD_CLASS), "normal 0");
     let answers: [HookAnswer; 2] = [swallow_memory_budget, swallow_then_throw];
     for answer in answers {
-        agent.host_mut().answer = Answer::Custom(answer);
+        agent.host_mut().state_mut::<HookHost>().answer = Answer::Custom(answer);
         assert_eq!(
             outcome(
                 &mut agent,
@@ -832,7 +847,7 @@ fn a_termination_the_hook_swallowed_ends_the_run_and_adds_nothing() {
             "MemoryBudget"
         );
         assert_eq!(take_calls(&mut agent), (vec!["hook".to_string()], vec![h]));
-        agent.host_mut().answer = Answer::Allow;
+        agent.host_mut().state_mut::<HookHost>().answer = Answer::Allow;
         assert_eq!(outcome(&mut agent, &realm, "C.has(h);"), "normal false");
     }
 }
@@ -843,10 +858,10 @@ const BIG: usize = 1 << 18;
 /// A hook that makes a String of [`BIG`] code units each call and throws it at every second
 /// call.
 fn big_string_every_second_throws(
-    cx: &mut HookCx<'_, HookHost>,
+    cx: &mut HookCx<'_, Scripted>,
     _obj: ObjectRef,
 ) -> Completion<()> {
-    let call = cx.host().objects.len();
+    let call = cx.host().state::<HookHost>().objects.len();
     let made = cx.new_string(&"x".repeat(BIG))?;
     if call.is_multiple_of(2) {
         return Err(Abrupt::Throw(Value::String(made)));
@@ -856,10 +871,10 @@ fn big_string_every_second_throws(
 
 /// A hook that makes a short String each call and throws it at every second call.
 fn small_string_every_second_throws(
-    cx: &mut HookCx<'_, HookHost>,
+    cx: &mut HookCx<'_, Scripted>,
     _obj: ObjectRef,
 ) -> Completion<()> {
-    let call = cx.host().objects.len();
+    let call = cx.host().state::<HookHost>().objects.len();
     let made = cx.new_string("made in the hook")?;
     if call.is_multiple_of(2) {
         return Err(Abrupt::Throw(Value::String(made)));
@@ -869,12 +884,12 @@ fn small_string_every_second_throws(
 
 /// An agent of [`HookHost`] with `memory_bytes`, a realm, `log`, the host object `h` with a
 /// table and the class of [`FIELD_CLASS`]; and its heap reading after a collection.
-fn growth_agent(memory_bytes: u64) -> (Agent<HookHost>, Realm, u64) {
+fn growth_agent(memory_bytes: u64) -> (Agent<Scripted>, Realm, u64) {
     let limits = swell::Limits {
         memory_bytes,
         ..limits()
     };
-    let mut agent = Agent::new(HookHost::default(), limits, seeds()).unwrap();
+    let mut agent = Agent::new(Scripted::new(HookHost::default(), HOOKS), limits, seeds()).unwrap();
     let HostOutcome::Normal(realm) = create_realm(&mut agent, None, None).unwrap() else {
         panic!("create_realm did not answer Normal");
     };
@@ -889,7 +904,7 @@ fn growth_agent(memory_bytes: u64) -> (Agent<HookHost>, Realm, u64) {
 }
 
 /// The script of `n` constructions on `h`, which answers how many Strings it caught.
-fn growth_script(agent: &mut Agent<HookHost>, realm: &Realm, n: usize) -> swell::Script {
+fn growth_script(agent: &mut Agent<Scripted>, realm: &Realm, n: usize) -> swell::Script {
     parse(
         agent,
         realm,
@@ -919,7 +934,8 @@ fn what_a_hook_makes_is_not_kept_across_many_adds() {
     if !collect {
         let unit = u64::try_from(BIG).unwrap();
         let calls = usize::try_from((reading + (4 << 20)) / unit + 2).unwrap() / 2 * 2;
-        agent.host_mut().answer = Answer::Custom(big_string_every_second_throws);
+        agent.host_mut().state_mut::<HookHost>().answer =
+            Answer::Custom(big_string_every_second_throws);
         let big = growth_script(&mut agent, &realm, calls);
         let expected = f64::from(u32::try_from(calls / 2).unwrap());
         assert_eq!(number(&mut agent, &realm, &big), expected);
@@ -928,7 +944,8 @@ fn what_a_hook_makes_is_not_kept_across_many_adds() {
     }
 
     let small_calls = if collect { 10 } else { 500 };
-    agent.host_mut().answer = Answer::Custom(small_string_every_second_throws);
+    agent.host_mut().state_mut::<HookHost>().answer =
+        Answer::Custom(small_string_every_second_throws);
     let small = growth_script(&mut agent, &realm, small_calls);
     let expected = f64::from(u32::try_from(small_calls / 2).unwrap());
     let mut readings = Vec::new();
@@ -1033,7 +1050,7 @@ fn a_second_construction_calls_the_hook_once_and_throws() {
 fn other_kinds_call_no_hook() {
     let (mut agent, realm) = hook_agent();
     bind_host(&mut agent, &realm, "h", Some(&TABLE));
-    agent.host_mut().answer = Answer::Throw(Value::Number(1.0));
+    agent.host_mut().state_mut::<HookHost>().answer = Answer::Throw(Value::Number(1.0));
     assert_eq!(
         outcome(
             &mut agent,
@@ -1067,8 +1084,9 @@ fn other_kinds_call_no_hook() {
 /// gets one hook call per element, each with the global object.
 #[test]
 fn a_host_global_with_a_table_calls_the_hook_once_per_element() {
-    let mut agent = Agent::new(HookHost::default(), limits(), seeds()).unwrap();
-    let mut setup = |cx: &mut HookCx<'_, HookHost>,
+    let mut agent =
+        Agent::new(Scripted::new(HookHost::default(), HOOKS), limits(), seeds()).unwrap();
+    let mut setup = |cx: &mut HookCx<'_, Scripted>,
                      realm: swell::RealmRef|
      -> Completion<swell::GlobalObjects> {
         let global = cx

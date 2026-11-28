@@ -13,10 +13,11 @@ use std::cell::Cell;
 
 use support::host::{agent_with, limits, realm};
 use support::script::{Outcome, define_function, eval_text, run};
+use support::scripted::{Hooks, Scripted};
 use swell::{
-    Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, HookCx, Host, HostCall,
-    HostError, HostObjectSpec, Job, LoadRequest, ObjectRef, Outcome as HostOutcome, Parsed,
-    PropertyKey, Prototype, Realm, Root, Source, StringRef, Termination, Value,
+    Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, HookCx, HostCall, HostError,
+    HostObjectSpec, Job, LoadRequest, ObjectRef, Outcome as HostOutcome, Parsed, PropertyKey,
+    Prototype, Realm, Root, Source, StringRef, Termination, Value,
 };
 
 /// What [`EvalHost`]'s `host_ensure_can_compile_strings` answers.
@@ -55,59 +56,78 @@ struct EvalHost {
     marks: u32,
 }
 
-impl Host for EvalHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        let text = |cx: &Cx<'_, Self>, s: StringRef| cx.to_rust_string_lossy(s).unwrap();
-        let params: Vec<String> = request.param_strings.iter().map(|s| text(cx, *s)).collect();
-        let line = format!(
-            "compile {:?} params {params:?} body {:?} code {:?} param args {} body arg {}",
-            request.compilation_type,
-            text(cx, request.body_string),
-            text(cx, request.code_string),
-            request.param_args.len(),
-            match request.body_arg {
-                Value::String(s) => format!("{:?}", text(cx, s)),
-                Value::Object(_) => "an object".to_string(),
-                other => format!("{other:?}"),
-            },
-        );
-        cx.host_mut().calls.push(line);
-        match cx.host().compile {
-            Compile::Allow => Ok(()),
-            Compile::Refuse => Err(Abrupt::Throw(Value::String(cx.new_string("refused")?))),
-            Compile::Throw(value) => Err(Abrupt::Throw(value)),
-        }
-    }
-
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        cx.host_mut().calls.push("code for eval".to_string());
-        match cx.host().code {
-            Code::Absent => None,
-            Code::Text(text) => cx.new_string(text).ok(),
-            Code::Handle(string) => Some(string),
-        }
-    }
-
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    request: &CompileStrings<'_>,
+) -> Completion<()> {
+    let text = |cx: &Cx<'_, Scripted>, s: StringRef| cx.to_rust_string_lossy(s).unwrap();
+    let params: Vec<String> = request.param_strings.iter().map(|s| text(cx, *s)).collect();
+    let line = format!(
+        "compile {:?} params {params:?} body {:?} code {:?} param args {} body arg {}",
+        request.compilation_type,
+        text(cx, request.body_string),
+        text(cx, request.code_string),
+        request.param_args.len(),
+        match request.body_arg {
+            Value::String(s) => format!("{:?}", text(cx, s)),
+            Value::Object(_) => "an object".to_string(),
+            other => format!("{other:?}"),
+        },
+    );
+    cx.host_mut().state_mut::<EvalHost>().calls.push(line);
+    match cx.host().state::<EvalHost>().compile {
+        Compile::Allow => Ok(()),
+        Compile::Refuse => Err(Abrupt::Throw(Value::String(cx.new_string("refused")?))),
+        Compile::Throw(value) => Err(Abrupt::Throw(value)),
     }
 }
 
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    cx.host_mut()
+        .state_mut::<EvalHost>()
+        .calls
+        .push("code for eval".to_string());
+    match cx.host().state::<EvalHost>().code {
+        Code::Absent => None,
+        Code::Text(text) => cx.new_string(text).ok(),
+        Code::Handle(string) => Some(string),
+    }
+}
+
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`EvalHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
+
 /// An agent with [`EvalHost`] and the test limits, a realm, and the host function `mark`, which
 /// counts its calls in `marks`.
-fn eval_agent() -> (Agent<EvalHost>, Realm) {
-    let mut agent = Agent::new(EvalHost::default(), limits(), support::host::seeds()).unwrap();
+fn eval_agent() -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(EvalHost::default(), HOOKS),
+        limits(),
+        support::host::seeds(),
+    )
+    .unwrap();
     let HostOutcome::Normal(realm) = support::host::create_realm(&mut agent, None, None).unwrap()
     else {
         panic!("create_realm did not answer Normal");
@@ -133,15 +153,15 @@ fn eval_agent() -> (Agent<EvalHost>, Realm) {
 }
 
 /// The host function `mark`: counts its calls.
-fn mark(cx: &mut Cx<'_, EvalHost>, _call: HostCall<'_>) -> Completion<Value> {
-    cx.host_mut().marks += 1;
+fn mark(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().state_mut::<EvalHost>().marks += 1;
     Ok(Value::Undefined)
 }
 
 /// The outcome of the script `source` in `realm` of an [`EvalHost`] agent, as text: `normal`
 /// or `throw` with the value as ToString writes it (a String as is), a termination, or
 /// `errors` of a parse.
-fn outcome(agent: &mut Agent<EvalHost>, realm: &Realm, source: &str) -> String {
+fn outcome(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> String {
     let script = match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -175,41 +195,49 @@ fn host_116_eval_asks_the_host_before_parsing() {
     let (mut agent, realm) = eval_agent();
     assert_eq!(outcome(&mut agent, &realm, "eval(\"1\");"), "normal 1");
     assert_eq!(
-        agent.host().calls,
+        agent.host().state::<EvalHost>().calls,
         [
             "compile DirectEval params [] body \"1\" code \"1\" param args 0 body arg \"1\""
                 .to_string()
         ]
     );
-    agent.host_mut().calls.clear();
+    agent.host_mut().state_mut::<EvalHost>().calls.clear();
     assert_eq!(outcome(&mut agent, &realm, "(0, eval)(\"1\");"), "normal 1");
     assert_eq!(
-        agent.host().calls,
+        agent.host().state::<EvalHost>().calls,
         [
             "compile IndirectEval params [] body \"1\" code \"1\" param args 0 body arg \"1\""
                 .to_string()
         ]
     );
-    agent.host_mut().calls.clear();
+    agent.host_mut().state_mut::<EvalHost>().calls.clear();
     assert_eq!(outcome(&mut agent, &realm, "eval(2);"), "normal 2");
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert!(
+        agent.host().state::<EvalHost>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<EvalHost>().calls
+    );
 
-    agent.host_mut().compile = Compile::Refuse;
+    agent.host_mut().state_mut::<EvalHost>().compile = Compile::Refuse;
     for source in [
         "try { eval(\"mark(); (\"); } catch (e) { e; }",
         "try { (0, eval)(\"mark(); (\"); } catch (e) { e; }",
         "try { eval(\"mark();\"); } catch (e) { e; }",
         "function f() { return eval(\"mark();\"); } try { f(); } catch (e) { e; }",
     ] {
-        agent.host_mut().calls.clear();
+        agent.host_mut().state_mut::<EvalHost>().calls.clear();
         assert_eq!(
             outcome(&mut agent, &realm, source),
             "normal refused",
             "{source}"
         );
-        assert_eq!(agent.host().calls.len(), 1, "{source}");
+        assert_eq!(agent.host().state::<EvalHost>().calls.len(), 1, "{source}");
     }
-    assert_eq!(agent.host().marks, 0, "no code of the strings ran");
+    assert_eq!(
+        agent.host().state::<EvalHost>().marks,
+        0,
+        "no code of the strings ran"
+    );
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
@@ -229,9 +257,12 @@ fn host_118_eval_of_an_object_asks_host_get_code_for_eval() {
         ),
         "normal true"
     );
-    assert_eq!(agent.host().calls, ["code for eval", "code for eval"]);
-    agent.host_mut().calls.clear();
-    agent.host_mut().code = Code::Text("var k = 20; k + 1");
+    assert_eq!(
+        agent.host().state::<EvalHost>().calls,
+        ["code for eval", "code for eval"]
+    );
+    agent.host_mut().state_mut::<EvalHost>().calls.clear();
+    agent.host_mut().state_mut::<EvalHost>().code = Code::Text("var k = 20; k + 1");
     assert_eq!(
         outcome(
             &mut agent,
@@ -241,7 +272,7 @@ fn host_118_eval_of_an_object_asks_host_get_code_for_eval() {
         "normal 41"
     );
     assert_eq!(
-        agent.host().calls,
+        agent.host().state::<EvalHost>().calls,
         [
             "code for eval".to_string(),
             "compile DirectEval params [] body \"var k = 20; k + 1\" code \"var k = 20; k + 1\" \
@@ -249,13 +280,20 @@ fn host_118_eval_of_an_object_asks_host_get_code_for_eval() {
                 .to_string()
         ]
     );
-    agent.host_mut().calls.clear();
+    agent.host_mut().state_mut::<EvalHost>().calls.clear();
     assert_eq!(outcome(&mut agent, &realm, "eval(\"3\");"), "normal 3");
-    assert!(!agent.host().calls.iter().any(|c| c == "code for eval"));
+    assert!(
+        !agent
+            .host()
+            .state::<EvalHost>()
+            .calls
+            .iter()
+            .any(|c| c == "code for eval")
+    );
 }
 
 /// A String handle that is stale: made in one scope, never rooted, and freed by a collection.
-fn stale_string(agent: &mut Agent<EvalHost>, realm: &Realm) -> StringRef {
+fn stale_string(agent: &mut Agent<Scripted>, realm: &Realm) -> StringRef {
     let string = agent
         .with_cx(realm, |cx| cx.new_string("stale code").unwrap())
         .unwrap();
@@ -264,7 +302,7 @@ fn stale_string(agent: &mut Agent<EvalHost>, realm: &Realm) -> StringRef {
 }
 
 /// A String handle of another agent, which the caller keeps alive.
-fn foreign_string(other: &mut Agent<EvalHost>, other_realm: &Realm) -> StringRef {
+fn foreign_string(other: &mut Agent<Scripted>, other_realm: &Realm) -> StringRef {
     other
         .with_cx(other_realm, |cx| cx.new_string("foreign code").unwrap())
         .unwrap()
@@ -272,7 +310,7 @@ fn foreign_string(other: &mut Agent<EvalHost>, other_realm: &Realm) -> StringRef
 
 /// Every entry point and read of a faulted agent but `state()` and `refusals()` answers
 /// `Err(HostError::Faulted)`.
-fn assert_faulted(agent: &mut Agent<EvalHost>, realm: &Realm, case: &str) {
+fn assert_faulted(agent: &mut Agent<Scripted>, realm: &Realm, case: &str) {
     assert_eq!(agent.state(), AgentState::Faulted, "{case}");
     let _: u64 = agent.refusals();
     assert!(
@@ -322,7 +360,7 @@ fn host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent() {
         } else {
             foreign_string(&mut other, &other_realm)
         };
-        agent.host_mut().code = Code::Handle(bad);
+        agent.host_mut().state_mut::<EvalHost>().code = Code::Handle(bad);
         assert_eq!(
             outcome(
                 &mut agent,
@@ -332,7 +370,7 @@ fn host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent() {
             "EngineFault",
             "code for eval, stale {stale}"
         );
-        assert_eq!(agent.host().marks, 0);
+        assert_eq!(agent.host().state::<EvalHost>().marks, 0);
         assert_faulted(&mut agent, &realm, "code for eval");
 
         // The Throw of host_ensure_can_compile_strings.
@@ -347,7 +385,7 @@ fn host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent() {
             } else {
                 foreign_string(&mut other, &other_realm)
             };
-            agent.host_mut().compile = Compile::Throw(Value::String(bad));
+            agent.host_mut().state_mut::<EvalHost>().compile = Compile::Throw(Value::String(bad));
             assert_eq!(
                 outcome(
                     &mut agent,
@@ -357,7 +395,7 @@ fn host_162_a_stale_or_foreign_handle_from_either_hook_faults_the_agent() {
                 "EngineFault",
                 "{call}, stale {stale}"
             );
-            assert_eq!(agent.host().marks, 0, "{call}");
+            assert_eq!(agent.host().state::<EvalHost>().marks, 0, "{call}");
             assert_faulted(&mut agent, &realm, call);
         }
     }

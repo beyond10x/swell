@@ -14,9 +14,10 @@
 use crate::support;
 
 use support::host::{limits, seeds};
+use support::scripted::{Hooks, Scripted};
 use support::stack::{TestPath, test_path};
 use swell::{
-    Abrupt, Agent, Brand, CompileStrings, Completion, Cx, Handled, HookCx, Host, HostCall,
+    Abrupt, Agent, Brand, CompileStrings, Completion, Cx, Handled, HookCx, HostCall,
     HostObjectSpec, IsoDateTime, Job, Limits, LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed,
     PropertyKey, Prototype, Realm, RealmRef, RejectionOperation, Root, Source, StringRef,
     Termination, TimeZoneIdentifier, Value,
@@ -35,194 +36,263 @@ impl Transcript {
     }
 }
 
-impl Host for Transcript {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        let kind = request.compilation_type;
-        Self::hook(
-            cx.host_mut(),
-            format!("host_ensure_can_compile_strings {kind:?}"),
-        );
-        Ok(())
-    }
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        Self::hook(cx.host_mut(), "host_get_code_for_eval".to_string());
-        None
-    }
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        _obj: ObjectRef,
-    ) -> Completion<()> {
-        Self::hook(
-            cx.host_mut(),
-            "host_ensure_can_add_private_element".to_string(),
-        );
-        Ok(())
-    }
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool {
-        Self::hook(cx.host_mut(), "host_has_source_text_available".to_string());
-        true
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<swell::HostDefined> {
-        Self::hook(cx.host_mut(), "host_make_job_callback".to_string());
-        None
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        _host_defined: Option<&swell::HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_call_job_callback {}", args.len()),
-        );
-        cx.call(Value::Object(callback), this, args)
-            .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, realm: Option<RealmRef>) {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_enqueue_promise_job {}", realm.is_some()),
-        );
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, _realm: RealmRef) {
-        Self::hook(cx.host_mut(), "host_prepare_to_run_job".to_string());
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        result: Result<(), Value>,
-    ) {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_clean_up_after_job {}", result.is_ok()),
-        );
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, job: Job) {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_enqueue_generic_job {:?}", job.kind()),
-        );
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, job: Job, milliseconds: f64) {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_enqueue_timeout_job {:?} {milliseconds}", job.kind()),
-        );
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, job: Job) {
-        Self::hook(
-            cx.host_mut(),
-            format!(
-                "host_enqueue_finalization_registry_cleanup_job {:?}",
-                job.kind()
-            ),
-        );
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        _promise: ObjectRef,
-        operation: RejectionOperation,
-    ) {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_promise_rejection_tracker {operation:?}"),
-        );
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, request: LoadRequest) {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_load_imported_module {:?}", request.specifier()),
-        );
-    }
-    fn host_get_import_meta_properties(
-        cx: &mut HookCx<'_, Self>,
-        _module: ModuleRef,
-    ) -> Completion<Vec<(PropertyKey, Value)>> {
-        Self::hook(cx.host_mut(), "host_get_import_meta_properties".to_string());
-        Ok(Vec::new())
-    }
-    fn host_finalize_import_meta(
-        cx: &mut HookCx<'_, Self>,
-        _import_meta: ObjectRef,
-        _module: ModuleRef,
-    ) {
-        Self::hook(cx.host_mut(), "host_finalize_import_meta".to_string());
-    }
-    fn host_resize_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        new_byte_length: u64,
-    ) -> Completion<Handled> {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_resize_array_buffer {new_byte_length}"),
-        );
-        Ok(Handled::Unhandled)
-    }
-    fn host_grow_shared_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        new_byte_length: u64,
-    ) -> Completion<Handled> {
-        Self::hook(
-            cx.host_mut(),
-            format!("host_grow_shared_array_buffer {new_byte_length}"),
-        );
-        Ok(Handled::Unhandled)
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        Self::hook(
-            cx.host_mut(),
-            "host_system_utc_epoch_nanoseconds".to_string(),
-        );
-        1_700_000_000_000_000_000
-    }
-    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
-        Self::hook(cx.host_mut(), "system_time_zone_identifier".to_string());
-        "UTC".to_string()
-    }
-    fn get_named_time_zone_offset_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        id: &str,
-        epoch_ns: i128,
-    ) -> i128 {
-        Self::hook(
-            cx.host_mut(),
-            format!("get_named_time_zone_offset_nanoseconds {id} {epoch_ns}"),
-        );
-        0
-    }
-    fn get_named_time_zone_epoch_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        id: &str,
-        local: IsoDateTime,
-    ) -> Vec<i128> {
-        Self::hook(
-            cx.host_mut(),
-            format!("get_named_time_zone_epoch_nanoseconds {id} {local:?}"),
-        );
-        Vec::new()
-    }
-    fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier> {
-        Self::hook(
-            cx.host_mut(),
-            "available_named_time_zone_identifiers".to_string(),
-        );
-        Vec::new()
-    }
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    request: &CompileStrings<'_>,
+) -> Completion<()> {
+    let kind = request.compilation_type;
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_ensure_can_compile_strings {kind:?}"),
+    );
+    Ok(())
 }
+
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_get_code_for_eval".to_string(),
+    );
+    None
+}
+
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_ensure_can_add_private_element".to_string(),
+    );
+    Ok(())
+}
+
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, _func: ObjectRef) -> bool {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_has_source_text_available".to_string(),
+    );
+    true
+}
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<swell::HostDefined> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_make_job_callback".to_string(),
+    );
+    None
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    _host_defined: Option<&swell::HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_call_job_callback {}", args.len()),
+    );
+    cx.call(Value::Object(callback), this, args)
+        .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, realm: Option<RealmRef>) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_enqueue_promise_job {}", realm.is_some()),
+    );
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, _realm: RealmRef) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_prepare_to_run_job".to_string(),
+    );
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    result: Result<(), Value>,
+) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_clean_up_after_job {}", result.is_ok()),
+    );
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, job: Job) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_enqueue_generic_job {:?}", job.kind()),
+    );
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, job: Job, milliseconds: f64) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_enqueue_timeout_job {:?} {milliseconds}", job.kind()),
+    );
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, job: Job) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!(
+            "host_enqueue_finalization_registry_cleanup_job {:?}",
+            job.kind()
+        ),
+    );
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    _promise: ObjectRef,
+    operation: RejectionOperation,
+) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_promise_rejection_tracker {operation:?}"),
+    );
+}
+
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, request: LoadRequest) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_load_imported_module {:?}", request.specifier()),
+    );
+}
+
+fn host_get_import_meta_properties(
+    cx: &mut HookCx<'_, Scripted>,
+    _module: ModuleRef,
+) -> Completion<Vec<(PropertyKey, Value)>> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_get_import_meta_properties".to_string(),
+    );
+    Ok(Vec::new())
+}
+
+fn host_finalize_import_meta(
+    cx: &mut HookCx<'_, Scripted>,
+    _import_meta: ObjectRef,
+    _module: ModuleRef,
+) {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_finalize_import_meta".to_string(),
+    );
+}
+
+fn host_resize_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    new_byte_length: u64,
+) -> Completion<Handled> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_resize_array_buffer {new_byte_length}"),
+    );
+    Ok(Handled::Unhandled)
+}
+
+fn host_grow_shared_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    new_byte_length: u64,
+) -> Completion<Handled> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("host_grow_shared_array_buffer {new_byte_length}"),
+    );
+    Ok(Handled::Unhandled)
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "host_system_utc_epoch_nanoseconds".to_string(),
+    );
+    1_700_000_000_000_000_000
+}
+
+fn system_time_zone_identifier(cx: &mut HookCx<'_, Scripted>) -> String {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "system_time_zone_identifier".to_string(),
+    );
+    "UTC".to_string()
+}
+
+fn get_named_time_zone_offset_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    id: &str,
+    epoch_ns: i128,
+) -> i128 {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("get_named_time_zone_offset_nanoseconds {id} {epoch_ns}"),
+    );
+    0
+}
+
+fn get_named_time_zone_epoch_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    id: &str,
+    local: IsoDateTime,
+) -> Vec<i128> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        format!("get_named_time_zone_epoch_nanoseconds {id} {local:?}"),
+    );
+    Vec::new()
+}
+
+fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Scripted>) -> Vec<TimeZoneIdentifier> {
+    Transcript::hook(
+        cx.host_mut().state_mut::<Transcript>(),
+        "available_named_time_zone_identifiers".to_string(),
+    );
+    Vec::new()
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`Transcript`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_ensure_can_add_private_element,
+    host_has_source_text_available,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_get_import_meta_properties,
+    host_finalize_import_meta,
+    host_resize_array_buffer,
+    host_grow_shared_array_buffer,
+    host_system_utc_epoch_nanoseconds,
+    system_time_zone_identifier,
+    get_named_time_zone_offset_nanoseconds,
+    get_named_time_zone_epoch_nanoseconds,
+    available_named_time_zone_identifiers,
+};
 
 /// A value as text, through ToString for a primitive (Number to String conversions included)
 /// and by `typeof`-like kind for an object; a String in quotes.
-fn text(cx: &mut Cx<'_, Transcript>, value: Value) -> String {
+fn text(cx: &mut Cx<'_, Scripted>, value: Value) -> String {
     match value {
         Value::Object(_) => "object".to_string(),
         Value::String(string) => format!("{:?}", cx.to_utf16(string).unwrap()),
@@ -236,7 +306,7 @@ fn text(cx: &mut Cx<'_, Transcript>, value: Value) -> String {
 
 /// The host function `print`: writes its arguments, each as ToString gives it (a throw of
 /// ToString written as such), and answers its argument count.
-fn print(cx: &mut Cx<'_, Transcript>, call: HostCall<'_>) -> Completion<Value> {
+fn print(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let mut line = String::from("print");
     for &arg in call.args {
         let string = cx.to_string(arg).unwrap()?;
@@ -244,13 +314,13 @@ fn print(cx: &mut Cx<'_, Transcript>, call: HostCall<'_>) -> Completion<Value> {
         line.push(' ');
         line.push_str(&shown);
     }
-    cx.host_mut().lines.push(line);
+    cx.host_mut().state_mut::<Transcript>().lines.push(line);
     Ok(Value::Number(call.args.len() as f64))
 }
 
 /// The host function `callBack`: calls its first argument with the rest, from Rust (a
 /// re-entry), and writes what it answered.
-fn call_back(cx: &mut Cx<'_, Transcript>, call: HostCall<'_>) -> Completion<Value> {
+fn call_back(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let (function, rest) = match call.args.split_first() {
         Some((&function, rest)) => (function, rest),
         None => (Value::Undefined, &[][..]),
@@ -261,7 +331,7 @@ fn call_back(cx: &mut Cx<'_, Transcript>, call: HostCall<'_>) -> Completion<Valu
         Err(Abrupt::Throw(value)) => format!("callBack throw {}", text(cx, value)),
         Err(Abrupt::Terminated(termination)) => format!("callBack terminated {termination:?}"),
     };
-    cx.host_mut().lines.push(shown);
+    cx.host_mut().state_mut::<Transcript>().lines.push(shown);
     answer
 }
 
@@ -481,7 +551,7 @@ struct PinRoots {
 }
 
 impl PinRoots {
-    fn new(agent: &mut Agent<Transcript>, realm: &Realm) -> PinRoots {
+    fn new(agent: &mut Agent<Scripted>, realm: &Realm) -> PinRoots {
         let global = agent.global_object(realm).unwrap();
         let (pin, next) = agent
             .with_cx(realm, |cx| {
@@ -502,7 +572,7 @@ impl PinRoots {
 /// before it. The host makes them in one call, with no safe point, so that no collection runs
 /// while they are made (with the collector at every safe point the script took a collection
 /// per instruction for each object).
-fn pin_objects(agent: &mut Agent<Transcript>, realm: &Realm, roots: &PinRoots, count: u64) {
+fn pin_objects(agent: &mut Agent<Scripted>, realm: &Realm, roots: &PinRoots, count: u64) {
     agent
         .with_cx(realm, |cx| {
             let (Value::Object(global), Value::String(pin), Value::String(next)) = (
@@ -599,7 +669,7 @@ fn keeping_loop_budget(setup: CorpusSetup) -> u64 {
 }
 
 /// `source` parsed in a corpus agent, which must parse.
-fn parse_corpus(agent: &mut Agent<Transcript>, realm: &Realm, source: &str) -> swell::Script {
+fn parse_corpus(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> swell::Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -611,7 +681,7 @@ fn parse_corpus(agent: &mut Agent<Transcript>, realm: &Realm, source: &str) -> s
 
 /// An agent of the corpus run under `setup`, its realm, its host functions defined and its
 /// objects kept.
-fn corpus_agent(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
+fn corpus_agent(setup: CorpusSetup) -> (Agent<Scripted>, Realm) {
     let (mut agent, realm) = corpus_agent_with(setup);
     let roots = PinRoots::new(&mut agent, &realm);
     pin_objects(&mut agent, &realm, &roots, setup.pins);
@@ -620,8 +690,13 @@ fn corpus_agent(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
 
 /// An agent under the limits of `setup`, its realm, the host functions of the corpus run
 /// defined and the global `pin` declared (`null`).
-fn corpus_agent_with(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
-    let mut agent = Agent::new(Transcript::default(), setup.limits, seeds()).unwrap();
+fn corpus_agent_with(setup: CorpusSetup) -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(Transcript::default(), HOOKS),
+        setup.limits,
+        seeds(),
+    )
+    .unwrap();
     let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -634,7 +709,7 @@ fn corpus_agent_with(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
             };
             let realm_ref = cx.realm_ref(&realm).unwrap();
             for (name, steps) in [
-                ("print", print as swell::HostFn<Transcript>),
+                ("print", print as swell::HostFn<Scripted>),
                 ("callBack", call_back),
             ] {
                 let f = cx
@@ -655,7 +730,7 @@ fn corpus_agent_with(setup: CorpusSetup) -> (Agent<Transcript>, Realm) {
 
 /// What a root of an outcome holds, as text: an object through ToString (an error as
 /// `Error.prototype.toString` writes it), which may run script code.
-fn root_text(agent: &mut Agent<Transcript>, realm: &Realm, root: &Root) -> String {
+fn root_text(agent: &mut Agent<Scripted>, realm: &Realm, root: &Root) -> String {
     agent
         .with_cx(realm, |cx| {
             let value = cx.get(root).unwrap();
@@ -673,7 +748,7 @@ fn root_text(agent: &mut Agent<Transcript>, realm: &Realm, root: &Root) -> Strin
 /// Run the corpus item `index` in `agent` and write what it did: the parse, the outcome, the
 /// steps and heap bytes the entry left, and a collection's report. The steps are read before
 /// the outcome is: reading it is an entry of its own.
-fn run_item(agent: &mut Agent<Transcript>, realm: &Realm, index: usize) {
+fn run_item(agent: &mut Agent<Scripted>, realm: &Realm, index: usize) {
     let source = CORPUS.get(index).copied().unwrap_or("");
     let (outcome, steps, bytes) = match agent
         .parse_script(realm, Source::Utf8(source), None)
@@ -714,9 +789,13 @@ fn run_item(agent: &mut Agent<Transcript>, realm: &Realm, index: usize) {
         }
         other => format!("{other:?}"),
     };
-    agent.host_mut().lines.push(format!(
-        "{index}: {line}; steps {steps}; heap {bytes}; collect {report}"
-    ));
+    agent
+        .host_mut()
+        .state_mut::<Transcript>()
+        .lines
+        .push(format!(
+            "{index}: {line}; steps {steps}; heap {bytes}; collect {report}"
+        ));
 }
 
 /// The transcripts of two agents with equal limits and seeds that run the corpus in one
@@ -728,7 +807,10 @@ fn two_agents_interleaved(setup: CorpusSetup) -> (String, String) {
         run_item(&mut a, &realm_a, index);
         run_item(&mut b, &realm_b, index);
     }
-    (a.host().lines.join("\n"), b.host().lines.join("\n"))
+    (
+        a.host().state::<Transcript>().lines.join("\n"),
+        b.host().state::<Transcript>().lines.join("\n"),
+    )
 }
 
 /// The variable that makes this test binary a child that prints the corpus transcript.
@@ -792,7 +874,7 @@ fn host_133_same_calls_same_hooks_same_outcomes() {
         for index in 0..CORPUS.len() {
             run_item(&mut agent, &realm, index);
         }
-        let a = agent.host().lines.join("\n");
+        let a = agent.host().state::<Transcript>().lines.join("\n");
         println!("{BEGIN}\n{a}\n{END}");
         return;
     }
@@ -891,7 +973,12 @@ fn key_order_limits() -> Limits {
 
 /// The text the script of [`key_order_script`] answers in a fresh agent of `seeds`.
 fn key_order(seeds: swell::Seeds) -> String {
-    let mut agent = Agent::new(Transcript::default(), key_order_limits(), seeds).unwrap();
+    let mut agent = Agent::new(
+        Scripted::new(Transcript::default(), HOOKS),
+        key_order_limits(),
+        seeds,
+    )
+    .unwrap();
     let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
