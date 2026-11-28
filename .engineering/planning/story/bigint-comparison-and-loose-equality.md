@@ -13,7 +13,7 @@ scope:
   path: crates/swell/src/ops/testing.rs
 - confidence: inferred
   path: crates/swell/tests/bigint_comparison.rs
-revision: 6
+revision: 7
 ---
 ## Context
 
@@ -38,7 +38,7 @@ Failing tests first: the tests below are written before the code and fail on the
 - `crates/swell/tests/main.rs` is generated and not in this story's scope: a unit that meets a conflict in it takes either side and runs `sh taskfiles/test-main.sh write`; the coordinator generates it again on the join.
 - Bounds. Steps: as above, charged before the reads. Memory: StringToBigInt's temporary is charged by `bigint_charge` and credited when the comparison returns; a comparison makes no heap record. `bigint_bits`: the temporary is limited (a String of 400,000 decimal digits compared with `1n` under a small `bigint_bits` throws the `RangeError`, which `#sec-stringtobigint` does not word; the design's limit governs, decision 6; `relational_operators_with_strings` asserts it). The limit is recorded where the gate reads it by the two `omit` lines `story:slice-12-conformance-close` writes in `conformance/test262/sections.txt`, one in the section `sec-bigint-objects` and one in the section `sec-applystringornumericbinaryoperator`, each `bigint-bits-limit decision-3` (decision 3 of `docs/design/host-interface.md`, whose table of limits holds `bigint_bits`, line 181; the `string-length-limit` lines name the same decision); this story writes neither line. Depth: ToPrimitive of an Object calls script as before; nothing new. Run loop: nothing is added to the frame of `Agent::execute` (the work is in `ops/testing.rs`).
 - Time ("Tests stay fast", the `AGENTS.md` of the folder that holds the repository, and `AGENTS.md`, "Commands and the gate"): a test is terminated at 60 s and counts as failed, and the gate fails when the wall time of its test steps passes 120 s. A test stays under 1.5 CPU seconds alone in the default mode and under 2 with a collection at every safe point, measured as `AGENTS.md` says (the test binary run with `--exact <name> --test-threads 1` in a pool job, user plus system); no loop of a test runs more than 10,000 iterations. A product several tests share is built once inside one test function or is a committed file, never in a `static`; no network request or model call; the unit runs the test binaries of its own change, never the whole gate. Builds and tests go through the pool: `cargo` is the shim of the pool, anything else that compiles or tests is prefixed `slot`; a pool job ends after 10 minutes unless it names its time (`slot --timeout 30m` or `SLOT_TIMEOUT=30m`, at most 30 minutes); a script that only measures, probes or waits runs without the prefix. One integration-test binary per crate. No `unsafe`, no third-party crate, no panic, `unwrap`, `expect` or unchecked indexing; no Python in any tool, test or command; intermediate files in the scratch directory. The unit merges the wave branch into its head and runs `slot --timeout 30m task test-stack-profiles` there before it reports.
-- Size: about 500 lines (the arms 150, tests 350): one session, the smallest story of order 3.
+- Size: about 500 lines (the arms 150, tests 350): one unit, the smallest story of order 3.
 
 ## Requirements
 

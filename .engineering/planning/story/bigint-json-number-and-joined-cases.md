@@ -19,7 +19,7 @@ scope:
   path: crates/swell/src/host/limits.rs
 - confidence: inferred
   path: crates/swell/tests/builtins_bigint_json_and_number.rs
-revision: 6
+revision: 7
 ---
 ## Context
 
@@ -47,7 +47,7 @@ Failing tests first: the tests below are written before the code and fail on the
 - `crates/swell/tests/main.rs` is generated and not in this story's scope: a unit that meets a conflict in it takes either side and runs `sh taskfiles/test-main.sh write`; the coordinator generates it again on the join.
 - Bounds. Steps: `to_f64` a step per limb read; `toJSON` and the replacer are calls as before. Memory: no new allocation but the error. `bigint_bits`: no BigInt is made here. Depth: no new re-entry; the `toJSON` re-entry of a BigInt is the one of an Object. Run loop and stack: nothing is added to the frame of `Agent::execute`; the unit reads the frame of `json_serialize_property` before and after its change in the build `task test-stack-profiles` makes, names both numbers, and, when it grew, measures `min_stack_bytes()` again as `docs/plan/slice-02-run-loop-frame.md` says, so the constant follows (`crates/swell/src/host/limits.rs`, the part of a re-entry), or moves the new step out of the frame; the stack tests pass on seven eighths of `min_stack_bytes()`. Termination: a step stop ends the conversion before the Number is made.
 - Time ("Tests stay fast", the `AGENTS.md` of the folder that holds the repository, and `AGENTS.md`, "Commands and the gate"): a test is terminated at 60 s and counts as failed, and the gate fails when the wall time of its test steps passes 120 s. A test stays under 1.5 CPU seconds alone in the default mode and under 2 with a collection at every safe point, measured as `AGENTS.md` says (the test binary run with `--exact <name> --test-threads 1` in a pool job, user plus system); the unit times each test before it adds it and names each one over 1 CPU second; no loop of a test runs more than 10,000 iterations. A product several tests share is built once inside one test function or is a committed file, never in a `static`; no network request or model call; the unit runs the test binaries of its own change, never the whole gate and never a whole-workspace test run. Builds and tests go through the pool: `cargo` is the shim of the pool, anything else that compiles or tests is prefixed `slot`; a pool job ends after 10 minutes unless it names its time (`slot --timeout 30m` or `SLOT_TIMEOUT=30m`, at most 30 minutes); a script that only measures, probes or waits runs without the prefix. One integration-test binary per crate. No `unsafe`, no third-party crate, no panic, `unwrap`, `expect` or unchecked indexing; no Python in any tool, test or command; intermediate files in the scratch directory. The unit merges the wave branch into its head and runs `slot --timeout 30m task test-stack-profiles` there before it reports.
-- Size: about 450 lines (the two builtins 80, tests 370): one session.
+- Size: about 450 lines (the two builtins 80, tests 370): one unit.
 
 ## Requirements
 
