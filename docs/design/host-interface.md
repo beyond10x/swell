@@ -974,6 +974,8 @@ never settles, which is the host's choice.
 
 **HOST-68** (ecma262:sec-meta-properties) The first evaluation of `import.meta` in a module calls `host_get_import_meta_properties` once with that module and then `host_finalize_import_meta` once, and the object has the returned properties; a second evaluation calls neither. [slice 11]
 
+**HOST-224** (swell:D6) A `host_get_import_meta_properties` whose `Ok` vector holds a key or a value with a stale handle or a handle of another agent ends the evaluation of `import.meta` with `Terminated(EngineFault)`, and `state()` then reads `Faulted`. [slice 11]
+
 ## 10. The state a Terminated run leaves
 
 **A `Terminated` run ends at once: the execution context stack is emptied, no `catch` or
