@@ -1,0 +1,4 @@
+test/language/expressions/dynamic-import/import-attributes/2nd-param-non-object.js
+test/language/expressions/dynamic-import/import-attributes/2nd-param-with-non-object.js
+test/language/expressions/dynamic-import/import-attributes/2nd-param-with-undefined.js
+test/language/expressions/dynamic-import/import-attributes/2nd-param-with-value-non-string.js
