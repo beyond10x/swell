@@ -14,16 +14,21 @@
 //!   the marker `// host-type: <reason>` on the line before it, read from the source as
 //!   written, with a reason of the closed set `scripted`, `provided-defaults`, `own-constant`;
 //! - a second `impl` marked `scripted`;
-//! - an `impl` marked `provided-defaults` for a type other than `TestHost` and `ProvidedHost`;
+//! - an `impl` marked `provided-defaults` outside `tests/support/host.rs`, for a type other
+//!   than `TestHost` and `ProvidedHost`, or a second time for one of them;
 //! - an `impl` marked `own-constant` whose body does not define `SUPPORTED_IMPORT_ATTRIBUTES`,
-//!   or defines it with the text of the value another such `impl` has: the constant is per
-//!   type, so a type of its own is one copy of the engine per value of the constant;
-//! - an `impl` of `Host` with a type parameter (one copy of the engine per argument);
+//!   or defines it as the empty list (the trait's default, the value of the three types) or
+//!   with the text of the value another such `impl` has, white space aside: the constant is
+//!   per type, so a type of its own is one copy of the engine per value of the constant;
+//! - an `impl` of `Host` with a type parameter (one copy of the engine per argument; a
+//!   lifetime is none);
 //! - `Host` renamed in a `use`;
-//! - `Host` named inside the body of a `macro_rules!`.
+//! - `Host` named inside the body of a `macro_rules!`, and an `impl` of a trait a macro
+//!   variable names (`impl $t for ...`), through which a macro writes an `impl` of `Host`
+//!   with the trait named at its call.
 //!
-//! `Host` as a bound (`impl<H: swell::Host> Trait for X<H>`, `fn f<H: Host>`) is no type of its
-//! own and passes. The guard holds no count and no list a story edits. Each refusal is proven
+//! `Host` as a bound (`impl<H: swell::Host> Trait for X<H>`, `fn f<H: Host>`, `impl Host` as
+//! the type of an argument) is no type of its own and passes. The guard holds no count and no list a story edits. Each refusal is proven
 //! on planted text below, as `source_scan.rs` proves its own scans.
 #![cfg(test)]
 
@@ -36,6 +41,12 @@ const REASONS: [&str; 3] = ["scripted", "provided-defaults", "own-constant"];
 
 /// The two types that keep the trait's provided defaults.
 const PROVIDED_DEFAULTS: [&str; 2] = ["TestHost", "ProvidedHost"];
+
+/// The file of those two types, as the guard names the files: relative to `crates/swell`.
+const PROVIDED_DEFAULTS_FILE: &str = "tests/support/host.rs";
+
+/// The trait's default of the constant, the empty list, with every blank taken out.
+const EMPTY_LIST: &str = "&[]";
 
 /// The text a marker line starts with.
 const MARKER: &str = "// host-type: ";
@@ -59,25 +70,9 @@ fn line_of(code: &str, at: usize) -> usize {
     code[..at].matches('\n').count() + 1
 }
 
-/// Whether the `impl` at `at` starts an item: the code before it ends a statement, an item, a
-/// block's opening or an attribute, or is `unsafe`. An `impl Trait` type stands after `:`, `(`,
-/// `,`, `->`, `<`, `&` or `=`, and is no item.
-fn starts_an_item(code: &str, at: usize) -> bool {
-    let before = code[..at].trim_end();
-    if before.is_empty() {
-        return true;
-    }
-    if before
-        .strip_suffix("unsafe")
-        .is_some_and(|head| !ident_char(head.chars().next_back()))
-    {
-        return true;
-    }
-    matches!(before.chars().next_back(), Some('}' | ';' | '{' | ']'))
-}
-
 /// The offset of the `{` that opens the body of the item header starting at `from`, or `None`
-/// when a bracket closes that the header did not open (an `impl Trait` type) or a `;` ends it.
+/// when a `;` ends it. An `impl Trait` type (`fn g(host: impl Host) {}`) reaches the `{` of the
+/// function with no `for` before it, so `split_header` takes it for no `impl` of a trait.
 fn body_start(code: &str, from: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut angles = 0usize;
@@ -85,7 +80,7 @@ fn body_start(code: &str, from: usize) -> Option<usize> {
     for (k, c) in code[from..].char_indices() {
         match c {
             '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.checked_sub(1)?,
+            ')' | ']' => depth = depth.saturating_sub(1),
             '<' => angles += 1,
             '>' if previous != '-' => angles = angles.saturating_sub(1),
             '{' if depth == 0 && angles == 0 => return Some(from + k),
@@ -234,19 +229,24 @@ fn scan_file(file: &str, source: &str, impls: &mut Vec<HostImpl>, faults: &mut V
     let code = code_of(source);
     let raw: Vec<&str> = source.lines().collect();
     for at in words(&code, "impl") {
-        if !starts_an_item(&code, at) {
-            continue;
-        }
         let Some(open) = body_start(&code, at + "impl".len()) else {
             continue;
         };
         let Some((generics, trait_path, self_type)) = split_header(&code[at + 4..open]) else {
             continue;
         };
+        let line = line_of(&code, at);
+        if trait_path.starts_with('$') && !trait_path.starts_with("$crate::") {
+            faults.push(format!(
+                "{file}:{line}: an impl of the trait the macro variable {trait_path} names: a \
+                 macro called with swell::Host writes an impl of Host that carries no marker; \
+                 name the trait in the macro's body"
+            ));
+            continue;
+        }
         if last_segment(trait_path) != "Host" {
             continue;
         }
-        let line = line_of(&code, at);
         let reason = line
             .checked_sub(2)
             .and_then(|k| raw.get(k))
@@ -275,7 +275,7 @@ fn scan_file(file: &str, source: &str, impls: &mut Vec<HostImpl>, faults: &mut V
         let item = &code[at..end];
         for k in words(item, "Host") {
             let after = item[k + "Host".len()..].trim_start();
-            if after.starts_with("as") && !ident_char(after[2..].chars().next()) {
+            if after.starts_with("as") {
                 faults.push(format!(
                     "{file}:{}: Host renamed in a use: name the trait Host, so the guard of \
                      host_types.rs sees each impl of it",
@@ -329,6 +329,7 @@ fn faults(files: &[(String, String)]) -> Vec<String> {
     }
     let mut scripted: Option<&HostImpl> = None;
     let mut own_constants: Vec<&HostImpl> = Vec::new();
+    let mut provided: Vec<&HostImpl> = Vec::new();
     for found in &impls {
         let place = format!("{}:{}", found.file, found.line);
         if found.type_parameter {
@@ -355,18 +356,42 @@ fn faults(files: &[(String, String)]) -> Vec<String> {
                 None => scripted = Some(found),
             },
             "provided-defaults" => {
-                if !PROVIDED_DEFAULTS.contains(&found.self_type.as_str()) {
+                if found.file != PROVIDED_DEFAULTS_FILE {
+                    faults.push(format!(
+                        "{place}: an impl of Host marked provided-defaults for {} outside \
+                         {PROVIDED_DEFAULTS_FILE}; only TestHost and ProvidedHost of that file \
+                         keep the provided defaults",
+                        found.self_type
+                    ));
+                } else if !PROVIDED_DEFAULTS.contains(&found.self_type.as_str()) {
                     faults.push(format!(
                         "{place}: an impl of Host marked provided-defaults for {}; only TestHost \
                          and ProvidedHost keep the provided defaults",
                         found.self_type
                     ));
+                } else if let Some(first) = provided
+                    .iter()
+                    .find(|first| first.self_type == found.self_type)
+                {
+                    faults.push(format!(
+                        "{place}: a second impl of Host marked provided-defaults for {}; the \
+                         first is {}:{}",
+                        found.self_type, first.file, first.line
+                    ));
+                } else {
+                    provided.push(found);
                 }
             }
             "own-constant" => match &found.constant {
                 None => faults.push(format!(
                     "{place}: an impl of Host marked own-constant for {} that does not define \
                      {CONSTANT}",
+                    found.self_type
+                )),
+                Some(value) if value == EMPTY_LIST => faults.push(format!(
+                    "{place}: an impl of Host marked own-constant for {} whose {CONSTANT} is \
+                     the empty list, the trait's default, which the scripted type, TestHost \
+                     and ProvidedHost have: one type per value",
                     found.self_type
                 )),
                 Some(value) => {
@@ -397,6 +422,11 @@ fn faults(files: &[(String, String)]) -> Vec<String> {
 /// The faults of one planted file, `tests/planted.rs`.
 fn planted(source: &str) -> Vec<String> {
     faults(&[("tests/planted.rs".to_string(), source.to_string())])
+}
+
+/// The faults of one planted file in the place of `tests/support/host.rs`.
+fn in_support(source: &str) -> Vec<String> {
+    faults(&[(PROVIDED_DEFAULTS_FILE.to_string(), source.to_string())])
 }
 
 /// The sources of `crates/swell/tests/` hold the three host types and no other: each `impl` of
@@ -541,10 +571,35 @@ fn a_third_provided_defaults_is_refused() {
                   // host-type: provided-defaults\nimpl Host for ProvidedHost {}\n\
                   // host-type: provided-defaults\nimpl Host for Third {}\n";
     assert_eq!(
+        in_support(source),
+        [
+            "tests/support/host.rs:6: an impl of Host marked provided-defaults for Third; only \
+             TestHost and ProvidedHost keep the provided defaults"
+        ]
+    );
+}
+
+/// `provided-defaults` outside `tests/support/host.rs` is refused, also for `TestHost`, and a
+/// second `TestHost` in that file is refused, naming the first; the exact messages of the case
+/// below it.
+#[test]
+fn provided_defaults_is_taken_once_each_and_only_in_the_support_file() {
+    let source = "// host-type: provided-defaults\nimpl Host for TestHost {}\n";
+    assert_eq!(
         planted(source),
         [
-            "tests/planted.rs:6: an impl of Host marked provided-defaults for Third; only TestHost \
-          and ProvidedHost keep the provided defaults"
+            "tests/planted.rs:2: an impl of Host marked provided-defaults for TestHost outside \
+             tests/support/host.rs; only TestHost and ProvidedHost of that file keep the \
+             provided defaults"
+        ]
+    );
+    let source = "// host-type: provided-defaults\nimpl Host for TestHost {}\n\
+                  // host-type: provided-defaults\nimpl Host for TestHost {}\n";
+    assert_eq!(
+        in_support(source),
+        [
+            "tests/support/host.rs:4: a second impl of Host marked provided-defaults for \
+             TestHost; the first is tests/support/host.rs:2"
         ]
     );
 }
@@ -590,8 +645,117 @@ fn host_as_a_bound_passes() {
                   fn f<H: Host>(agent: &mut swell::Agent<H>) {}\n\
                   fn g(host: impl Host) {}\n\
                   impl Scripted {\n    fn new() {}\n}\n\
-                  // host-type: scripted\nimpl Host for Scripted {}\n\
-                  // host-type: provided-defaults\nimpl swell::Host for TestHost {}\n\
-                  // host-type: provided-defaults\nimpl Host for ProvidedHost {}\n";
+                  // host-type: scripted\nimpl Host for Scripted {}\n";
+    let support = "// host-type: provided-defaults\nimpl swell::Host for TestHost {}\n\
+                   // host-type: provided-defaults\nimpl Host for ProvidedHost {}\n";
+    let found = faults(&[
+        (PROVIDED_DEFAULTS_FILE.to_string(), support.to_string()),
+        ("tests/planted.rs".to_string(), source.to_string()),
+    ]);
+    assert_eq!(found, Vec::<String>::new());
+}
+
+/// A lifetime parameter is no type parameter: the engine is compiled once for the type,
+/// whatever the lifetime.
+#[test]
+fn a_lifetime_parameter_is_no_type_parameter() {
+    let source = "// host-type: scripted\nimpl<'a> Host for Scripted {}\n";
     assert_eq!(planted(source), Vec::<String>::new());
+}
+
+/// A body that reads `SUPPORTED_IMPORT_ATTRIBUTES` without defining it does not define it.
+#[test]
+fn an_own_constant_that_only_reads_the_constant_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    fn n() -> usize {\n        Self::SUPPORTED_IMPORT_ATTRIBUTES.len()\n    }\n}\n";
+    assert_eq!(
+        planted(source),
+        [
+            "tests/planted.rs:2: an impl of Host marked own-constant for Loader that does not \
+             define SUPPORTED_IMPORT_ATTRIBUTES"
+        ]
+    );
+}
+
+/// A `where` clause after the self type is not part of its name.
+#[test]
+fn a_where_clause_is_not_part_of_the_type_name() {
+    let source = "// host-type: provided-defaults\nimpl Host for TestHost where TestHost: Sized {}\n\
+                  // host-type: provided-defaults\nimpl Host for ProvidedHost {}\n";
+    assert_eq!(in_support(source), Vec::<String>::new());
+}
+
+/// The empty list as the value of an `own-constant`, written with blanks, is refused with its
+/// message.
+#[test]
+fn an_own_constant_with_the_empty_list_written_with_blanks_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = & [\n    ];\n}\n";
+    assert_eq!(
+        planted(source),
+        [
+            "tests/planted.rs:2: an impl of Host marked own-constant for Loader whose \
+             SUPPORTED_IMPORT_ATTRIBUTES is the empty list, the trait's default, which the \
+             scripted type, TestHost and ProvidedHost have: one type per value"
+        ]
+    );
+}
+
+/// The message of an `impl` of a trait a macro variable names; `$crate::` is no variable.
+#[test]
+fn an_impl_of_a_macro_variable_names_the_variable() {
+    let source = "macro_rules! host_type {\n    ($trait:path, $t:ident) => {\n        impl $trait for $t {}\n        impl $crate::Other for $t {}\n    };\n}\n";
+    assert_eq!(
+        planted(source),
+        [
+            "tests/planted.rs:3: an impl of the trait the macro variable $trait names: a macro \
+             called with swell::Host writes an impl of Host that carries no marker; name the \
+             trait in the macro's body"
+        ]
+    );
+}
+
+/// An `impl` of `Host` that a `macro_rules!` writes for a trait it takes as an argument is an
+/// `impl` of `Host` without a marker: the trait is named at the call, not in the body.
+#[test]
+fn an_impl_a_macro_writes_for_the_trait_given_as_its_argument_is_refused() {
+    let source = "macro_rules! host_type {\n    ($trait:path, $t:ident) => {\n        impl $trait for $t {}\n    };\n}\n\nstruct Mine;\nhost_type!(swell::Host, Mine);\n";
+    let found = planted(source);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:")),
+        "the impl of Host the macro writes for Mine passes the guard: {found:?}"
+    );
+}
+
+/// `provided-defaults` on a second type named `TestHost`, in a module of its own, is a fourth
+/// type of `Host` in the test binary.
+#[test]
+fn a_second_type_named_test_host_marked_provided_defaults_is_refused() {
+    let support = "// host-type: provided-defaults\nimpl Host for TestHost {}\n\
+                   // host-type: provided-defaults\nimpl Host for ProvidedHost {}\n";
+    let other = "mod again {\n    pub struct TestHost;\n    // host-type: provided-defaults\n    impl swell::Host for TestHost {}\n}\n";
+    let found = faults(&[
+        ("tests/support/host.rs".to_string(), support.to_string()),
+        ("tests/planted.rs".to_string(), other.to_string()),
+    ]);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:4:")),
+        "a fourth type of Host passes the guard: {found:?}"
+    );
+}
+
+/// `own-constant` is for a type whose `SUPPORTED_IMPORT_ATTRIBUTES` no other type has; the
+/// trait's default `&[]` is the value of the scripted type, `TestHost` and `ProvidedHost`.
+#[test]
+fn an_own_constant_with_the_value_of_the_default_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[];\n}\n";
+    let found = planted(source);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:2:")),
+        "an own-constant type with the default value passes the guard: {found:?}"
+    );
 }

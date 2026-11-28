@@ -185,6 +185,14 @@ fn the_module_names_no_system_api() {
     assert!(named.is_empty(), "{named:?}");
 }
 
+/// The type that implements `Host` for this host is the scripted type of `support/scripted.rs`
+/// ("an adapter is whatever implements `Host`"); its source passes the same check.
+#[test]
+fn the_type_that_implements_host_for_this_host_names_no_system_api() {
+    let named = system_api(include_str!("support/scripted.rs"));
+    assert!(named.is_empty(), "{named:?}");
+}
+
 /// The check of `the_module_names_no_system_api` sees a grouped import of `std::env` and of
 /// `std::time::SystemTime` (adversary pass 1 on unit gate: a search for the text `std::time`
 /// did not), and passes text that names `core` and `alloc` only.

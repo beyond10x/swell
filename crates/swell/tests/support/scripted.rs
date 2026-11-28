@@ -7,7 +7,7 @@
 //! through [`Scripted::state`] and [`Scripted::state_mut`] (`host_types.rs` holds the rule).
 #![cfg(test)]
 
-use std::any::{Any, type_name};
+use core::any::{Any, type_name};
 
 use swell::{
     CompileStrings, Completion, Cx, Handled, HookCx, Host, HostDefined, IsoDateTime, Job,

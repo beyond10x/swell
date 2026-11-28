@@ -217,6 +217,8 @@ mod regexp_objects;
 mod regexp_refusals;
 #[cfg(any(not(test_modules), test_modules = "regexp_symbol_methods"))]
 mod regexp_symbol_methods;
+#[cfg(any(not(test_modules), test_modules = "scripted_host"))]
+mod scripted_host;
 #[cfg(any(not(test_modules), test_modules = "scripts"))]
 mod scripts;
 #[cfg(any(not(test_modules), test_modules = "source_scan"))]
