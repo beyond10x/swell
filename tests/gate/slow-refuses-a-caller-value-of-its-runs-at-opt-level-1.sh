@@ -29,8 +29,18 @@
 #    CARGO_PROFILE_COLLECT_OPT_LEVEL is set in the environment".
 # 5. A table [profile.collect] in Cargo.toml: the same with "slow: Cargo.toml:3:
 #    [profile.collect]: the profile collect is defined in .cargo/collect-profile.toml only".
+# 6. A caller's SPLIT_ value (the parameters of test-split, which only slow-tests and
+#    test-realm-sizes set, on their own call): task test SPLIT_RUN=x SPLIT_EXCLUDE=.out/skip.txt
+#    (command line) exits non-zero with "test: SPLIT_RUN=x is given by the caller" and the same
+#    for SPLIT_EXCLUDE, and the stub's log is empty: nothing built, listed or run.
+# 7. SPLIT_RUN=x in the environment of task slow-tests, a part run alone: the same with
+#    "slow-tests: SPLIT_RUN=x is given by the caller".
+# 8. SPLIT_RUN=x and SPLIT_FILTER='all()' in the environment of task test-realm-sizes
+#    REALM_SIZES=4: the same with "realm-sizes: SPLIT_RUN=x ..." and "realm-sizes:
+#    SPLIT_FILTER=all() ...".
 # Run from the repository root: sh tests/gate/slow-refuses-a-caller-value-of-its-runs-at-opt-level-1.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS SWELL_NO_GUARD SLOW_COLLECT STUB_BUILD STUB_BUILD_MATCH STUB_COMPILE STUB_COMPILE_MATCH STUB_COMPILE_LIST STUB_DROP STUB_DOUBLE STUB_FAIL
+unset SPLIT_RUN SPLIT_FILTER SPLIT_ARGS SPLIT_OPT1_TARGETS SPLIT_EXCLUDE SPLIT_FULL_COUNTS SPLIT_BUILT_BY
 for v in $(env | sed -n 's/^\(CARGO_PROFILE_[A-Z0-9_]*\)=.*/\1/p'); do unset "$v"; done
 export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=slow-refuses-a-caller-value-of-its-runs-at-opt-level-1
@@ -119,5 +129,38 @@ plant table
 printf '[workspace]\n\n[profile.collect]\nopt-level = 0\n' > "$dir/run-table/Cargo.toml"
 if go table; then fail "task slow exited 0 with a table [profile.collect] in Cargo.toml ($dir/table.out)"; fi
 refused table 'slow: Cargo.toml:3: [profile.collect]: the profile collect is defined in .cargo/collect-profile.toml only'
+
+# split <case> <step> <line>...: task <step> of <case> exited non-zero (checked by the caller),
+# printed each <line>, and the stub's log is empty: nothing was built, listed or run.
+split() {
+  case_=$1 step=$2
+  shift 2
+  for line in "$@"; do
+    grep -qF "$line" "$dir/$case_.out" || fail "task $step did not print \"$line\" ($dir/$case_.out)"
+  done
+  [ ! -s "$dir/run-$case_/stub/log" ] || fail "task $step called cargo after the refusal of a caller's SPLIT_ value ($dir/run-$case_/stub/log)"
+}
+# task_in <case> <task arguments...>: run task in the planted tree of <case>.
+task_in() {
+  case_=$1
+  shift
+  STUB_DIR="$root/$dir/run-$case_/stub" STUB_LOG="$root/$dir/run-$case_/stub/log" STUB_TESTS="$root/$dir/run-$case_/stub-tests" \
+    PATH="$root/$dir/bin:$PATH" task -d "$dir/run-$case_" "$@" > "$dir/$case_.out" 2>&1
+}
+
+# 6. SPLIT_ variables on the command line of the gate's step test.
+plant splitcli
+if task_in splitcli test SPLIT_RUN=x SPLIT_EXCLUDE=.out/skip.txt; then fail "task test exited 0 with SPLIT_RUN and SPLIT_EXCLUDE on the command line ($dir/splitcli.out)"; fi
+split splitcli test 'test: SPLIT_RUN=x is given by the caller' 'test: SPLIT_EXCLUDE=.out/skip.txt is given by the caller'
+
+# 7. SPLIT_RUN in the environment of the lane's part slow-tests run alone.
+plant splitlane
+if (export SPLIT_RUN=x; task_in splitlane slow-tests); then fail "task slow-tests exited 0 with SPLIT_RUN in its environment ($dir/splitlane.out)"; fi
+split splitlane slow-tests 'slow-tests: SPLIT_RUN=x is given by the caller'
+
+# 8. SPLIT_RUN and SPLIT_FILTER in the environment of the lane's part test-realm-sizes run alone.
+plant splitrealm
+if (export SPLIT_RUN=x SPLIT_FILTER='all()'; task_in splitrealm test-realm-sizes REALM_SIZES=4); then fail "task test-realm-sizes exited 0 with SPLIT_RUN and SPLIT_FILTER in its environment ($dir/splitrealm.out)"; fi
+split splitrealm test-realm-sizes 'realm-sizes: SPLIT_RUN=x is given by the caller' 'realm-sizes: SPLIT_FILTER=all() is given by the caller'
 
 echo "$name: ok"
