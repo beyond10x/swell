@@ -18,6 +18,14 @@ fn the_accessor_of_another_type_panics_naming_both() {
     let _ = host.state::<u16>();
 }
 
+/// The accessor to change a state of another type panics with the same message.
+#[test]
+#[should_panic(expected = "the scripted host holds a u8, not a u16")]
+fn the_mutable_accessor_of_another_type_panics_naming_both() {
+    let mut host = Scripted::new(1u8, Hooks::PROVIDED);
+    let _ = host.state_mut::<u16>();
+}
+
 /// A script that reads the clock of a scripted host whose table leaves the required clock hook
 /// to `Hooks::PROVIDED` stops with the panic that names the hook.
 #[test]

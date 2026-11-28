@@ -17,19 +17,26 @@
 //! - an `impl` marked `provided-defaults` outside `tests/support/host.rs`, for a type other
 //!   than `TestHost` and `ProvidedHost`, or a second time for one of them;
 //! - an `impl` marked `own-constant` whose body does not define `SUPPORTED_IMPORT_ATTRIBUTES`,
-//!   or defines it as the empty list (the trait's default, the value of the three types) or
-//!   with the text of the value another such `impl` has, white space aside: the constant is
-//!   per type, so a type of its own is one copy of the engine per value of the constant;
+//!   or defines it with a value that is not a list literal of its own with one element or
+//!   more (read with comments removed: the empty list in any spelling, the trait's default
+//!   and the value of the three types; a cast; a name or a path), or with the text of the
+//!   value another such `impl` has, white space aside: the constant is per type, so a type of
+//!   its own is one copy of the engine per value of the constant;
 //! - an `impl` of `Host` with a type parameter (one copy of the engine per argument; a
 //!   lifetime is none);
 //! - `Host` renamed in a `use`;
-//! - `Host` named inside the body of a `macro_rules!`, and an `impl` of a trait a macro
-//!   variable names (`impl $t for ...`), through which a macro writes an `impl` of `Host`
-//!   with the trait named at its call.
+//! - `Host` named inside the body of a `macro_rules!`; an `impl` whose trait path has a macro
+//!   variable as any segment (`impl $t for`, `impl swell::$t for`; `$crate` is none); and an
+//!   `impl` whose header holds a repetition (`$(`) and no `for`: through each a macro writes
+//!   an `impl` of `Host` with the trait named at its call. A macro that writes `impl $t` as the
+//!   type of an argument before a higher-ranked `for<'a>` is refused too (the guard takes the
+//!   `for` for that of an `impl`), and the message tells its author to name the trait in the
+//!   macro's body.
 //!
 //! `Host` as a bound (`impl<H: swell::Host> Trait for X<H>`, `fn f<H: Host>`, `impl Host` as
-//! the type of an argument) is no type of its own and passes. The guard holds no count and no list a story edits. Each refusal is proven
-//! on planted text below, as `source_scan.rs` proves its own scans.
+//! the type of an argument) is no type of its own and passes. The guard holds no count and no
+//! list a story edits. Each refusal is proven on planted text below, as `source_scan.rs`
+//! proves its own scans.
 #![cfg(test)]
 
 use std::fs;
@@ -44,9 +51,6 @@ const PROVIDED_DEFAULTS: [&str; 2] = ["TestHost", "ProvidedHost"];
 
 /// The file of those two types, as the guard names the files: relative to `crates/swell`.
 const PROVIDED_DEFAULTS_FILE: &str = "tests/support/host.rs";
-
-/// The trait's default of the constant, the empty list, with every blank taken out.
-const EMPTY_LIST: &str = "&[]";
 
 /// The text a marker line starts with.
 const MARKER: &str = "// host-type: ";
@@ -215,13 +219,101 @@ fn constant_value(code: &str, source: &str, at: usize) -> String {
         .skip(first - 1)
         .take(last + 1 - first)
         .collect();
-    let text = lines.join("\n");
+    let text = without_comments(&lines.join("\n"));
     let after_name = text
         .find(CONSTANT)
         .map_or("", |k| &text[k + CONSTANT.len()..]);
     let value = after_name.split_once('=').map_or("", |(_, value)| value);
     let value = value.rfind(';').map_or(value, |k| &value[..k]);
     value.chars().filter(|c| !c.is_whitespace()).collect()
+}
+
+/// `text` without its comments (`// ...` to the end of the line, `/* ... */` nested), the
+/// contents of its string literals kept: the value of the constant as the compiler reads it.
+fn without_comments(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    let mut in_string = false;
+    while i < chars.len() {
+        let c = chars[i];
+        let next = chars.get(i + 1).copied();
+        if in_string {
+            out.push(c);
+            if c == '\\' {
+                if let Some(escaped) = next {
+                    out.push(escaped);
+                }
+                i += 2;
+                continue;
+            }
+            in_string = c != '"';
+            i += 1;
+        } else if c == '/' && next == Some('/') {
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+        } else if c == '/' && next == Some('*') {
+            let mut depth = 0usize;
+            while i < chars.len() {
+                if chars[i] == '/' && chars.get(i + 1) == Some(&'*') {
+                    depth += 1;
+                    i += 2;
+                } else if chars[i] == '*' && chars.get(i + 1) == Some(&'/') {
+                    depth = depth.saturating_sub(1);
+                    i += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    i += 1;
+                }
+            }
+            out.push(' ');
+        } else {
+            in_string = c == '"';
+            out.push(c);
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Whether `value` (blanks taken out) is a list literal of its own with one element or more:
+/// `&[`, then text, then the `]` that closes that `[` as the last character, brackets inside
+/// string literals not counted. The empty list in any spelling, a cast, a name and a path are
+/// not: their value is not the text the guard compares.
+fn is_list_literal(value: &str) -> bool {
+    let Some(inner) = value.strip_prefix("&[") else {
+        return false;
+    };
+    let mut depth = 1usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (k, c) in inner.char_indices() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match c {
+            '"' => in_string = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return k > 0 && k + 1 == inner.len();
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 /// The `impl`s of `Host` of one file, and the faults of its `use` items and macro bodies.
@@ -232,13 +324,28 @@ fn scan_file(file: &str, source: &str, impls: &mut Vec<HostImpl>, faults: &mut V
         let Some(open) = body_start(&code, at + "impl".len()) else {
             continue;
         };
-        let Some((generics, trait_path, self_type)) = split_header(&code[at + 4..open]) else {
+        let header = &code[at + 4..open];
+        let line = line_of(&code, at);
+        let Some((generics, trait_path, self_type)) = split_header(header) else {
+            if header.contains("$(") {
+                faults.push(format!(
+                    "{file}:{line}: an impl whose header is a macro repetition with no for in the \
+                     macro's body: a macro called with swell::Host for a type writes an impl of \
+                     Host that carries no marker; write the trait and for in the macro's body"
+                ));
+            }
             continue;
         };
-        let line = line_of(&code, at);
-        if trait_path.starts_with('$') && !trait_path.starts_with("$crate::") {
+        let variable = trait_path
+            .split('<')
+            .next()
+            .unwrap_or("")
+            .split("::")
+            .map(str::trim)
+            .find(|segment| segment.starts_with('$') && *segment != "$crate");
+        if let Some(variable) = variable {
             faults.push(format!(
-                "{file}:{line}: an impl of the trait the macro variable {trait_path} names: a \
+                "{file}:{line}: an impl of the trait the macro variable {variable} names: a \
                  macro called with swell::Host writes an impl of Host that carries no marker; \
                  name the trait in the macro's body"
             ));
@@ -388,10 +495,12 @@ fn faults(files: &[(String, String)]) -> Vec<String> {
                      {CONSTANT}",
                     found.self_type
                 )),
-                Some(value) if value == EMPTY_LIST => faults.push(format!(
+                Some(value) if !is_list_literal(value) => faults.push(format!(
                     "{place}: an impl of Host marked own-constant for {} whose {CONSTANT} is \
-                     the empty list, the trait's default, which the scripted type, TestHost \
-                     and ProvidedHost have: one type per value",
+                     not a list of its own with one element or more: the value must be written \
+                     as a list of its own (&[\"<key>\", ...]); the empty list is the trait's \
+                     default, which the scripted type, TestHost and ProvidedHost have, and a \
+                     cast, a name or a path hides the value the guard compares",
                     found.self_type
                 )),
                 Some(value) => {
@@ -691,12 +800,74 @@ fn an_own_constant_with_the_empty_list_written_with_blanks_is_refused() {
     let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = & [\n    ];\n}\n";
     assert_eq!(
         planted(source),
+        [not_a_list("tests/planted.rs:2", "Loader")]
+    );
+}
+
+/// The message of an `own-constant` whose value is not a list literal of its own.
+fn not_a_list(place: &str, self_type: &str) -> String {
+    format!(
+        "{place}: an impl of Host marked own-constant for {self_type} whose \
+         SUPPORTED_IMPORT_ATTRIBUTES is not a list of its own with one element or more: the \
+         value must be written as a list of its own (&[\"<key>\", ...]); the empty list is the \
+         trait's default, which the scripted type, TestHost and ProvidedHost have, and a cast, a \
+         name or a path hides the value the guard compares"
+    )
+}
+
+/// A named constant in place of the list literal is refused: the guard cannot follow the name
+/// to its value.
+#[test]
+fn an_own_constant_given_by_a_named_constant_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = NONE;\n}\n";
+    assert_eq!(
+        planted(source),
+        [not_a_list("tests/planted.rs:2", "Loader")]
+    );
+}
+
+/// A list literal with more text after its closing bracket (here a cast) is refused: the value is
+/// the list alone.
+#[test]
+fn an_own_constant_with_a_list_behind_more_text_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[\"type\"] as &[&str];\n}\n";
+    assert_eq!(
+        planted(source),
+        [not_a_list("tests/planted.rs:2", "Loader")]
+    );
+}
+
+/// A comment inside a list literal is no part of its value: the list passes, and it has the
+/// value of the same list without the comment.
+#[test]
+fn a_comment_inside_a_list_is_no_part_of_its_value() {
+    let first = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[\"type\" /* the one key */];\n}\n";
+    assert_eq!(planted(first), Vec::<String>::new());
+    let second = "// host-type: own-constant\nimpl Host for Again {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[\"type\"]; // the same\n}\n";
+    assert_eq!(
+        planted(&format!("{first}{second}")),
         [
-            "tests/planted.rs:2: an impl of Host marked own-constant for Loader whose \
-             SUPPORTED_IMPORT_ATTRIBUTES is the empty list, the trait's default, which the \
-             scripted type, TestHost and ProvidedHost have: one type per value"
+            "tests/planted.rs:6: an impl of Host marked own-constant for Again with the value of \
+             SUPPORTED_IMPORT_ATTRIBUTES of Loader at tests/planted.rs:2: one type per value"
         ]
     );
+}
+
+/// Brackets and comment marks inside the strings of a list are text of its keys, not
+/// brackets or comments.
+#[test]
+fn a_list_whose_strings_hold_brackets_and_comment_marks_passes() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[\"a]\", \"b//c\", \"d/*e\"];\n}\n";
+    assert_eq!(planted(source), Vec::<String>::new());
+}
+
+/// The forms of a macro body that name no trait by a variable pass: `$crate::` in the trait's
+/// path, a variable as the self type of another trait, an inherent `impl` of one variable, and
+/// a repetition in a header that has its `for`.
+#[test]
+fn the_macro_forms_that_name_no_trait_by_a_variable_pass() {
+    let source = "macro_rules! forms {\n    ($name:ident, $t:ty, $($g:ident),*) => {\n        impl $crate::Trait for $t {}\n        impl Trait for $t {}\n        impl $name {\n            fn f() {}\n        }\n        impl<$($g: Copy),*> Trait for ($($g,)*) {}\n    };\n}\n";
+    assert_eq!(planted(source), Vec::<String>::new());
 }
 
 /// The message of an `impl` of a trait a macro variable names; `$crate::` is no variable.
@@ -757,5 +928,59 @@ fn an_own_constant_with_the_value_of_the_default_is_refused() {
             .iter()
             .any(|fault| fault.starts_with("tests/planted.rs:2:")),
         "an own-constant type with the default value passes the guard: {found:?}"
+    );
+}
+
+/// A macro variable as the last segment of the trait's path (`impl swell::$t for`, called
+/// with `Host`) writes an `impl` of `Host` without a marker, as `impl $t for` does.
+#[test]
+fn an_impl_of_a_path_that_ends_in_a_macro_variable_is_refused() {
+    let source = "macro_rules! host_type {\n    ($t:ident, $ty:ident) => {\n        impl swell::$t for $ty {}\n    };\n}\n\nstruct Mine;\nhost_type!(Host, Mine);\n";
+    let found = planted(source);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:")),
+        "the impl of Host the macro writes for Mine passes the guard: {found:?}"
+    );
+}
+
+/// A macro that takes the whole header of the `impl` as tokens writes an `impl` of `Host`
+/// without a marker when it is called with `swell::Host for Mine`.
+#[test]
+fn an_impl_whose_header_is_a_macro_repetition_is_refused() {
+    let source = "macro_rules! item {\n    ($($header:tt)*) => {\n        impl $($header)* {}\n    };\n}\n\nstruct Mine;\nitem!(swell::Host for Mine);\n";
+    let found = planted(source);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:")),
+        "the impl of Host the macro writes for Mine passes the guard: {found:?}"
+    );
+}
+
+/// The empty list with a comment inside it is the empty list.
+#[test]
+fn an_own_constant_with_the_empty_list_holding_a_comment_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[ /* none yet */ ];\n}\n";
+    let found = planted(source);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:2:")),
+        "an own-constant type with the empty list passes the guard: {found:?}"
+    );
+}
+
+/// The empty list behind a cast to the constant's type is the empty list.
+#[test]
+fn an_own_constant_with_the_empty_list_behind_a_cast_is_refused() {
+    let source = "// host-type: own-constant\nimpl Host for Loader {\n    const SUPPORTED_IMPORT_ATTRIBUTES: &'static [&'static str] = &[] as &[&str];\n}\n";
+    let found = planted(source);
+    assert!(
+        found
+            .iter()
+            .any(|fault| fault.starts_with("tests/planted.rs:2:")),
+        "an own-constant type with the empty list passes the guard: {found:?}"
     );
 }
