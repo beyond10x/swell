@@ -18,7 +18,7 @@ scope:
   path: conformance/ess/tests/planted_defect.rs
 - confidence: cited
   path: taskfiles/conform-engine.yml
-revision: 5
+revision: 6
 ---
 ## Context
 
@@ -48,9 +48,9 @@ Failing tests first: the planted-defect test below is written before the code an
 - Report: the sum of the CPU seconds of the story's new tests in the default mode and in the mode `collect-every-safe-point` (each test run alone, user plus system), and the wall seconds of its part run when it has one; no story bounds the CPU seconds of a whole gate.
 - Generated files: the generated `tests/main.rs` of every crate and `website/data/status.json` are in no story's scope. A unit that adds a test module writes `tests/main.rs` again with `sh taskfiles/test-main.sh write`; a unit that meets a conflict in a generated file takes either side and writes it again; the coordinator writes both again on the join (`sh taskfiles/test-main.sh write`, `slot --local task site-data`).
 - Line numbers are those of `f962c324`; anchors are found by name.
-- Size: about 600 lines (the target 450, the test 60, the task 20): one session.
+- Size: about 600 lines (the target 450, the test 60, the task 20): one unit.
 
-Shared with the other stories of order 6 (`story:dynamic-import`, `story:module-determinism-and-emulated-loading`, `story:cli-module-loader`): no file.
+Shared with the other stories of order 6 (`story:dynamic-import`, `story:module-determinism-and-emulated-loading`): no file.
 
 ## Requirements
 
@@ -58,11 +58,11 @@ None of `conformance/host/requirements.txt` moves.
 
 Writes: `conformance/ess/src/target.rs`, `conformance/ess/tests/planted_defect.rs` (one test), `taskfiles/conform-engine.yml` (the floor, the maximum, the grep). Not written: `spec/` (the model holds the commands; a declaration found wrong is reported, not changed), `crates/` (every engine file), `conformance/host/`, `docs/design/`.
 
-Order 6, beside `story:dynamic-import`, `story:module-determinism-and-emulated-loading` and `story:cli-module-loader`; it depends on `story:top-level-await` (the last part `AsyncModuleExecutionSettled` needs), `story:module-namespace-objects`, `story:import-meta` and `story:json-modules` (a scenario's module source may hold a namespace import, `import.meta` or a JSON request; with every engine part of the modules but `import()` landed, the floor and the maximum the unit measures do not move again by a later story of the slice, and `import()` from a script is not stated by the model), and through them on the records and linking stories.
+Order 6, beside `story:dynamic-import` and `story:module-determinism-and-emulated-loading`; it depends on `story:top-level-await` (the last part `AsyncModuleExecutionSettled` needs), `story:module-namespace-objects`, `story:import-meta` and `story:json-modules` (a scenario's module source may hold a namespace import, `import.meta` or a JSON request; with every engine part of the modules but `import()` landed, the floor and the maximum the unit measures do not move again by a later story of the slice, and `import()` from a script is not stated by the model), and through them on the records and linking stories.
 
 ## Acceptance
 
-`slot task suite` exits 0, then `slot task conform-engine` exits 0 and prints `conform-engine: planted defect refused: test a_target_whose_link_does_nothing_fails_a_scenario ... ok`; its summary line has more passed and fewer unsupported scenarios than on the base (`60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported`), and the report quotes both lines. The floor and the maximum equal the measured counts: with `last=$(tail -n 1 .out/conform-engine.log)`, `grep -c "passed < $(printf '%s\n' "$last" | awk '{ print $3 }'))" taskfiles/conform-engine.yml` prints `1` and `grep -c "default $(printf '%s\n' "$last" | awk '{ print $9 }')}}" taskfiles/conform-engine.yml` prints `1`. Each of the seven commands is executed by at least one passed scenario, and each of the four events of the model (`ModuleParsed`, `ModuleLoadRequested`, `ModuleLoadEnded`, `ModuleStatusChanged`) is emitted by at least one passed scenario: the report names, per command and per event, one passed scenario from `.out/conform-engine.json`; `module-with-top-level-await` is among the passed. `grep -c '#\[test\]' conformance/ess/tests/planted_defect.rs` prints `3` (`2` on the base). `grep -rn 'slice 11 (modules)' conformance spec taskfiles` prints nothing (line 390 of `target.rs` on the base). `git log --no-merges --first-parent --format= --name-only "$BASE"..HEAD -- crates spec` prints nothing (`BASE` the join the unit starts from: the unit's own commits write no engine file and no specification, whatever a merge of the wave branch brings). `slot task clippy` exits 0. Time: the new test stays under 1.5 CPU seconds alone, and the step `conform-engine` is timed before and after (both times reported; a rise over 5 s is fixed in this change).
+`slot --timeout 30m task suite` exits 0, then `slot --timeout 30m task conform-engine` exits 0 and prints `conform-engine: planted defect refused: test a_target_whose_link_does_nothing_fails_a_scenario ... ok`; its summary line has more passed and fewer unsupported scenarios than on the base (`60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported`), and the report quotes both lines. The floor and the maximum equal the measured counts: with `last=$(tail -n 1 .out/conform-engine.log)`, `grep -c "passed < $(printf '%s\n' "$last" | awk '{ print $3 }'))" taskfiles/conform-engine.yml` prints `1` and `grep -c "default $(printf '%s\n' "$last" | awk '{ print $9 }')}}" taskfiles/conform-engine.yml` prints `1`. Each of the seven commands is executed by at least one passed scenario, and each of the four events of the model (`ModuleParsed`, `ModuleLoadRequested`, `ModuleLoadEnded`, `ModuleStatusChanged`) is emitted by at least one passed scenario: the report names, per command and per event, one passed scenario from `.out/conform-engine.json`; `module-with-top-level-await` is among the passed. `grep -c '#\[test\]' conformance/ess/tests/planted_defect.rs` prints `3` (`2` on the base). `grep -rn 'slice 11 (modules)' conformance spec taskfiles` prints nothing (line 390 of `target.rs` on the base). `git log --no-merges --first-parent --format= --name-only "$BASE"..HEAD -- crates spec` prints nothing (`BASE` the join the unit starts from: the unit's own commits write no engine file and no specification, whatever a merge of the wave branch brings). `slot task clippy` exits 0. Time: the new test stays under 1.5 CPU seconds alone, and the step `conform-engine` is timed before and after (both times reported; a rise over 5 s is fixed in this change).
 
 test262: no case moves; the story writes no file the runner reads.
 

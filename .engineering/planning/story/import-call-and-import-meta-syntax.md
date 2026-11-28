@@ -47,7 +47,7 @@ scope:
   path: crates/syntax/tests/sources/refused/dynamic-import.js
 - confidence: cited
   path: crates/syntax/tests/sources/refused/import-meta.js
-revision: 7
+revision: 8
 ---
 ## Context
 
@@ -79,7 +79,7 @@ Failing tests first: the tests and sources below are written before the code and
 - Report: the sum of the CPU seconds of the story's new tests in the default mode and in the mode `collect-every-safe-point` (each test run alone, user plus system), and the wall seconds of its part run when it has one; no story bounds the CPU seconds of a whole gate.
 - Generated files: the generated `tests/main.rs` of every crate and `website/data/status.json` are in no story's scope. A unit that adds a test module writes `tests/main.rs` again with `sh taskfiles/test-main.sh write`; a unit that meets a conflict in a generated file takes either side and writes it again; the coordinator writes both again on the join (`sh taskfiles/test-main.sh write`, `slot --local task site-data`).
 - Line numbers are those of `f962c324`; anchors are found by name.
-- Size: about 600 lines (the grammar 150, the early errors 100, the tests and sources 350): one session.
+- Size: about 600 lines (the grammar 150, the early errors 100, the tests and sources 350): one unit.
 
 Shared with `story:module-code-compiles`, the other story of order 2, each in its own hunks: `crates/compiler/src/expression.rs` (this story: two arms beside `Expr::NewTarget`, line 342; that story: none in that match) and `crates/compiler/src/resolve.rs` (this story: two arms beside `Expr::NewTarget`, line 1746; that story: the module scope, new functions after the script's scope, and no arm of that match). That story writes no file of `crates/syntax/`. Later in the slice: `story:import-meta` and `story:dynamic-import` each replace one of this story's compiler arms and delete one hold call and one line of `HOLDS` (lines 4 and 3, in orders 5 and 6).
 
