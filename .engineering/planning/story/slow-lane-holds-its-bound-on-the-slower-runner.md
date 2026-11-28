@@ -5,7 +5,7 @@ kind: story
 status: active
 title: The lane slow holds its bound on the forge's slower runner
 summary: 'The forge ran the lane slow on one head in 1,123.4 s on an AMD EPYC 7763 and 843.8 s on an AMD EPYC 9V74, of its 900. The test binary of swell compiles the engine once per test host type, 19 times, and the lane''s longest part does not end before that build. Step 1: three host types in the test binary, held by a guard. Step 2: the lane''s runs that can move run at opt-level 1. The lane then holds 900 s and 600 s per part on the 7763 with the bounds unchanged. Lane unit 8 of wave big-2.'
-revision: 8
+revision: 9
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-28T04:08:07Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-28T04:08:07Z", actor: "human:operator", revision: 8, executor: "agent:coordinator"}
@@ -300,6 +300,72 @@ The forge, on the head of the pull request that carries both steps:
 - The job `check` is green; the pull request names its `gate-runner` line and its line of
   the test steps, read against the bound of 120 s.
 
+## As delivered
+
+Both steps are built on the unit's branch and read by the adversary (two passes for each
+step) and the coordinator. Where the delivery differs from the text above, the delivery
+stands:
+
+Step 1.
+
+- The guard is the module `host_types` of `swell::main`: one test over the tree and one
+  test for each text case, where the text above writes "one test".
+- The marker `provided-defaults` is accepted only in `crates/swell/tests/support/host.rs`,
+  for `TestHost` and `ProvidedHost`, once each: "three types" is read strictly.
+- The value of an `own-constant` is read with comments removed and must be written as a
+  list literal with one element or more; the empty list (the trait's default), a cast, a
+  name or a path in its place are refused.
+- Inside a `macro_rules!` body, an `impl` whose trait path holds a macro variable other
+  than `$crate`, and an `impl` whose header is a repetition with no `for`, are refused: a
+  macro called with the trait would write a type without a marker.
+- Each of the five required hooks is, in the table of the provided entries, a panic that
+  names the hook; a test gives all five.
+- Further files: the helpers of `source_scan.rs` the guard reads are `pub(crate)`,
+  `support/mod.rs` names the new module, and `scripted_host.rs` holds three tests of the
+  scripted type's own panics.
+- Read on the build node, each build cold: the unit `main` takes 54.91 s in the collect
+  build and 72.17 s in the build with `TEST_OPT1_ARGS`, against 311 to 358 s and 328.7 s.
+  The 19 host types are three; `swell::main` has 1,805 tests, the 1,770 of the base and
+  35 of the guard and the scripted type.
+
+Step 2.
+
+- Each moved run of `swell::main` gains the profile test, so the set of test names of the
+  default runs of `slow-tests` and `test-realm-sizes` is the base's and that one test; the
+  other runs' sets are equal.
+- On the unit's head the counts are: `slow-tests` 977 tests at opt-level 1 and 116 at
+  opt-level 0 (45 stack tests of `swell::main`, which is the probe's 44 stopped by the
+  guard and one that passes under it, and the 71 of `swell-syntax`); the library part of
+  the collect mode 287 and 0; `test-realm-sizes` 314 and 50 at each size (8 tests that
+  read the realm's room were added after the probe's base).
+- The three builds run in the order the runs read them: the build with `TEST_OPT1_ARGS`,
+  the library with the feature, the collect build. `slow-tests` waits for the three at
+  most 400 s in sum, under the part's 600.
+- `test-split` takes a run of the lane through seven variables `SPLIT_*`. A caller's value
+  of one of them, on the command line or in the environment, is refused by
+  `test-opt1-vars-check` for the gate's steps, the lane and a part run alone; the gate's
+  call passes each one empty, and `GATE_VARIABLES` lists them. For this the tasks `test`
+  (its call of `test-split`) and `gate-vars` (the list) changed too, beyond the nine
+  tasks of the scope below.
+- The lane calls the two checks in `slow` before its clock; `slow-tests` and
+  `test-realm-sizes` call `test-opt1-vars-check` first when run alone.
+- New under `tests/gate/`: two fixtures the lane's scripts share (a stub of cargo and the
+  filter it reads), three scripts of the unit and two cases of the adversary. The refusal
+  of a caller's `SPLIT_*` value is held by three cases of
+  `slow-refuses-a-caller-value-of-its-runs-at-opt-level-1.sh`.
+- Found while building: under the task runner's shell a `continue` inside an `if`, a
+  `case` clause or a brace group does not skip the rest of that block. One such place
+  was in `test-realm-sizes` and is gone; no other shell `continue` of the task files is
+  followed by a command in its block.
+- Read on the build node (32 cores), one run of the lane before and one after: the lane
+  383.8 s and 312.5 s; `slow-tests` 63.4 and 20.8; `test-realm-sizes` 49.1 and 32.1;
+  `slow-test262` 245.8 and 258.9, with three builds beside it in place of one (71.1 s,
+  34.0 s and 1.0 s against 57.1 s). The node's seconds are not the forge's.
+
+Open until the forge's run on the pull request that carries the unit: the lines under
+"The forge" of the acceptance. The seconds of test262 itself on the slower runner are
+read there for the first time, since the part `slow-test262` no longer ends with a build.
+
 ## Out of scope
 
 - The engine's time on the property-escape cases, three quarters of the test262 run.
@@ -317,11 +383,14 @@ The forge, on the head of the pull request that carries both steps:
 ## Scope
 
 Step 1: `crates/swell/tests/`: the 18 files that hold a host type, the new file of the
-scripted type under `support/`, the guard's module, and the generated `main.rs`. Step 2:
+scripted type under `support/`, `support/mod.rs`, the guard's module, `source_scan.rs`,
+`scripted_host.rs`, and the generated `main.rs`. Step 2:
 the tasks `slow`, `slow-collect-start`, `slow-collect-stop`, `slow-tests`,
 `build-realm-sizes`, `test-realm-sizes`, `test-split`, `test-opt1-vars-check` and
-`test-opt1-profile-check` of `Taskfile.yml`; `tests/gate/` (the cases `slow-collect-*.sh`,
-`slow-tests-runs-the-stack-tests-at-opt-level-0.sh`,
-`test-realm-sizes-hands-nextest-a-long-list-of-tests.sh` and the new ones);
+`test-opt1-profile-check` of `Taskfile.yml`, and, added by a ruling on the adversary's
+first finding, the tasks `test` (its call of `test-split`) and `gate-vars`; `tests/gate/`
+(the cases `slow-collect-*.sh`, `slow-tests-runs-the-stack-tests-at-opt-level-0.sh`,
+`test-realm-sizes-hands-nextest-a-long-list-of-tests.sh`, the new ones and the two
+fixtures under `tests/gate/fixtures/`);
 `AGENTS.md` (the lane's paragraphs, the coordinator's). `taskfiles/gate-time.yml` is not
 written. No file of `crates/*/src/`, `conformance/` or `docs/design/`.
