@@ -19,12 +19,18 @@
 #    test and the test of swell-syntax at opt-level 0); task test-realm-sizes REALM_SIZES=4
 #    exits 0 and prints "realm-sizes: 2 tests at opt-level 1, 1 at opt-level 0" (the profile
 #    test and the room test, and the room test on a bounded stack) and "realm-sizes 4 default:
-#    2 tests at opt-level 1, 1 at opt-level 0".
+#    2 tests at opt-level 1, 1 at opt-level 0". Every list of slow-tests ran with
+#    SWELL_FULL_COUNTS=1, and the part at opt-level 1 of test-realm-sizes with the guard
+#    SWELL_NO_STACK_TESTS=1.
 # 1. A test in neither part: the list of slow-tests at opt-level 1 drops deep::runs_on_any_stack.
 #    task slow-tests fails, naming it "in neither run", and the stub ran no test.
 # 2. A test in both parts: the list of test-realm-sizes at opt-level 1 adds the room test on a
 #    bounded stack. task test-realm-sizes fails, naming it "in both runs", and the stub ran no
 #    test.
+# 3. (run after 0) An exclusion list with no test of kind "other": task test-realm-sizes
+#    REALM_SIZES=4 exits 0, runs 2 tests at opt-level 1 and 1 at opt-level 0, and
+#    .out/realm-sizes-all-nextest.toml holds "default-filter = 'all()'", not a filter with an
+#    empty term.
 # Run from the repository root: sh tests/gate/slow-split-refuses-a-test-in-neither-part-or-in-both.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS SLOW_COLLECT REALM_SIZES REALM_COLLECT STUB_BUILD STUB_BUILD_MATCH STUB_COMPILE STUB_DROP STUB_DOUBLE STUB_FAIL
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -113,10 +119,50 @@ go ok slow-tests || fail "task slow-tests exited non-zero on a split that runs e
 for line in 'slow-tests: swell::main 2 at opt-level 1, 1 at opt-level 0' 'slow-tests: 3 tests at opt-level 1, 2 at opt-level 0'; do
   grep -qxF "$line" "$dir/ok.out" || fail "task slow-tests did not print \"$line\" ($dir/ok.out)"
 done
+# Every list of slow-tests runs with SWELL_FULL_COUNTS=1 (SPLIT_FULL_COUNTS=1 on its call of
+# test-split): the library's unit tests read it when they are compiled, so a list without it
+# would not find the build and compile.
+[ "$(grep -c '^list ' "$dir/stub-ok.log")" -ge 3 ] || fail "the stub saw fewer than three lists of slow-tests ($dir/stub-ok.log)"
+! grep '^list ' "$dir/stub-ok.log" | grep -vq ' full=\[1\] ' || fail "a list of slow-tests ran without SWELL_FULL_COUNTS=1 ($dir/stub-ok.log)"
 go ok test-realm-sizes REALM_SIZES=4 || fail "task test-realm-sizes exited non-zero on a split that runs each test once ($dir/ok.out)"
 for line in 'realm-sizes: swell::main 2 at opt-level 1, 1 at opt-level 0' 'realm-sizes: 2 tests at opt-level 1, 1 at opt-level 0' 'realm-sizes 4 default: 2 tests at opt-level 1, 1 at opt-level 0'; do
   grep -qxF "$line" "$dir/ok.out" || fail "task test-realm-sizes did not print \"$line\" ($dir/ok.out)"
 done
+# The part at opt-level 1 of test-realm-sizes runs with the guard NO_STACK_TESTS.
+grep -q '^run profile=collect .* guard=\[1\] .* config=realm-sizes-opt1-nextest\.toml ' "$dir/stub-ok.log" ||
+  fail "task test-realm-sizes ran its part at opt-level 1 without the guard SWELL_NO_STACK_TESTS=1 ($dir/stub-ok.log)"
+
+# 3. An exclusion list with no test of kind "other": every test of swell::main reads the
+#    realm's room but the profile test, so .out/realm-sizes-default-other.txt names none, and
+#    test-split adds no term: .out/realm-sizes-all-nextest.toml reads all().
+plant noother
+printf '%s\n' \
+  '#[test]' \
+  'fn the_profile_keeps_debug_assertions_and_overflow_checks_on() {' \
+  '    assert!(cfg!(debug_assertions));' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn reads_the_room() {' \
+  '    let _ = agent.heap_bytes();' \
+  '}' \
+  '' \
+  '#[test]' \
+  'fn reads_the_room_on_a_bounded_stack() {' \
+  '    let _ = stack_with_room(1 << 20);' \
+  '    let _ = agent.heap_bytes();' \
+  '}' > "$dir/run-noother/crates/swell/tests/realm_padding.rs"
+printf 'mod realm_padding;\nmod support;\n' > "$dir/run-noother/crates/swell/tests/main.rs"
+rm -f "$dir/run-noother/crates/swell/tests/deep.rs"
+printf '%s\n' \
+  'swell::main realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on' \
+  'swell::main realm_padding::reads_the_room' \
+  'swell::main realm_padding::reads_the_room_on_a_bounded_stack' > "$dir/run-noother/stub-tests"
+go noother test-realm-sizes REALM_SIZES=4 || fail "task test-realm-sizes exited non-zero with no test outside the room set but the profile test ($dir/noother.out)"
+grep -qxF 'realm-sizes 4 default: 2 tests at opt-level 1, 1 at opt-level 0' "$dir/noother.out" ||
+  fail "task test-realm-sizes did not run 2 tests at opt-level 1 and 1 at opt-level 0 with an empty exclusion ($dir/noother.out)"
+grep -qxF "default-filter = 'all()'" "$dir/run-noother/.out/realm-sizes-all-nextest.toml" ||
+  fail "test-split did not write the filter all() for an exclusion list with no test of kind other ($dir/run-noother/.out/realm-sizes-all-nextest.toml)"
 
 # 1. A test in neither part of slow-tests's default mode.
 plant neither

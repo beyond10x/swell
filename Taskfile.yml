@@ -503,16 +503,22 @@ tasks:
       collect mode's tests printed "other" builds its own, as before). In the lane
       (SLOW_COLLECT=lane) the three builds were started beside slow-test262, one after the
       other; the task waits for each where it first needs it, for .out/slow-collect/<build>.status,
-      at most SLOW_COLLECT_WAIT seconds each (400, under the part's 600), then prints
+      at most SLOW_COLLECT_WAIT seconds for the three in sum (400, under the part's 600; the sum
+      in .out/slow-tests-waited, which the task removes at its start), then prints
       "slow-build <build> <seconds> s, exit <status>, waited <s> s: ..." (the build's own wall
       time, a line of its own, not a slow-time line: its seconds lie inside those of
       slow-test262 and slow-tests). It fails with "slow-tests: the build <build> that the lane
       started failed, exit <n> (.out/slow-collect/<build>.log)" after the log, with "... wrote
-      no status within <bound> s of waiting ..." when the bound passes, and with "... no build
+      no status within <bound> s of waiting for the lane's builds in sum, <w> s waited, <s> s of
+      them for the build <build> ..." when the bound passes, and with "... no build
       at opt-level 1 was started ..." when there is no .out/slow-collect/pid.
       tests/gate/slow-tests-runs-the-stack-tests-at-opt-level-0.sh,
       tests/gate/slow-split-refuses-a-test-in-neither-part-or-in-both.sh and
-      tests/gate/slow-refuses-a-moved-run-that-compiles.sh hold the parts.
+      tests/gate/slow-refuses-a-moved-run-that-compiles.sh hold the parts. It runs
+      test-opt1-vars-check first (STEP slow-tests), so a caller's value of TEST_OPT1_ARGS,
+      NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST, TEST_OPT0_TESTS or a SPLIT_ variable fails it
+      run alone too; its call of test-split passes every SPLIT_ variable, SPLIT_OPT1_TARGETS
+      and SPLIT_EXCLUDE empty.
     silent: true
     vars:
       SLOW_COLLECT: '{{.SLOW_COLLECT | default ""}}'
@@ -521,12 +527,17 @@ tasks:
           dir=.out/slow-collect
           bound='{{.SLOW_COLLECT_WAIT}}'
           [ -s "$dir/pid" ] || { echo "slow-tests: SLOW_COLLECT=lane, but no build at opt-level 1 was started (no $dir/pid; slow-collect-start starts them)"; exit 1; }
+          used=$(cat .out/slow-tests-waited 2>/dev/null) || used=0
+          case "$used" in ''|*[!0-9]*) used=0 ;; esac
+          left=$((bound - used))
           began=$(date +%s)
-          while [ ! -f "$dir/$1.status" ] && [ $(( $(date +%s) - began )) -lt "$bound" ]; do sleep 1; done
-          [ -f "$dir/$1.status" ] || { echo "slow-tests: the build $1 that the lane started wrote no status within $bound s of waiting ($dir/$1.log)"; exit 1; }
+          while [ ! -f "$dir/$1.status" ] && [ $(( $(date +%s) - began )) -lt "$left" ]; do sleep 1; done
+          waited=$(( $(date +%s) - began ))
+          echo $((used + waited)) > .out/slow-tests-waited
+          [ -f "$dir/$1.status" ] || { echo "slow-tests: the build $1 that the lane started wrote no status within $bound s of waiting for the lane's builds in sum, $((used + waited)) s waited, $waited s of them for the build $1 ($dir/$1.log)"; exit 1; }
           st=$(cat "$dir/$1.status")
           secs=$(awk -v a="$(cat "$dir/$1.start" 2>/dev/null)" -v b="$(cat "$dir/$1.end" 2>/dev/null)" 'BEGIN { printf "%.1f", b - a }')
-          echo "slow-build $1 $secs s, exit $st, waited $(( $(date +%s) - began )) s: SWELL_FULL_COUNTS=1 cargo nextest run --no-run $2, in the background from the lane's start (slow-collect-start), inside the slow-time lines of slow-test262 and slow-tests"
+          echo "slow-build $1 $secs s, exit $st, waited $waited s: SWELL_FULL_COUNTS=1 cargo nextest run --no-run $2, in the background from the lane's start (slow-collect-start), inside the slow-time lines of slow-test262 and slow-tests"
           if [ "$st" != 0 ]; then
             cat "$dir/$1.log"
             echo "slow-tests: the build $1 that the lane started failed, exit $st ($dir/$1.log)"
@@ -549,7 +560,10 @@ tasks:
     env:
       RUSTFLAGS: '{{.COLLECT_RUSTFLAGS}}'
     cmds:
+      - task: test-opt1-vars-check
+        vars: {STEP: slow-tests}
       - mkdir -p .out
+      - rm -f .out/slow-tests-waited
       - |
         all=""
         swell=""
@@ -582,7 +596,7 @@ tasks:
         built opt0 '--workspace --locked --profile default'
         exe={{shellQuote .TASK_EXE}}
         case $exe in /*) ;; */*) exe={{shellQuote .USER_WORKING_DIR}}/$exe ;; esac
-        "$exe" test-split SPLIT_RUN=slow-tests SPLIT_FILTER="$(cat .out/slow-tests.filter)" SPLIT_ARGS='--workspace --locked --profile default' SPLIT_FULL_COUNTS=1 SPLIT_BUILT_BY='the background build opt1 of slow-collect-start or this task, and its build opt0,' || exit 1
+        "$exe" test-split SPLIT_RUN=slow-tests SPLIT_FILTER="$(cat .out/slow-tests.filter)" SPLIT_ARGS='--workspace --locked --profile default' SPLIT_OPT1_TARGETS= SPLIT_EXCLUDE= SPLIT_FULL_COUNTS=1 SPLIT_BUILT_BY='the background build opt1 of slow-collect-start or this task, and its build opt0,' || exit 1
         filter=$(cat .out/slow-tests.filter)
         rm -f .out/slow-tests-opt1-junit.xml target/nextest/default/junit.xml
         if [ -s .out/slow-tests-list-opt1.txt ]; then
@@ -797,7 +811,10 @@ tasks:
       "collect"; skipped: the tests not selected, and the ignored ones), then each failed test
       as "realm-sizes <k> <mode>: failed <binary> <test>"; after the two parts of the default
       mode "realm-sizes <k> default: <n> tests at opt-level 1, <m> at opt-level 0", from their
-      Summary lines. A part whose list is empty does not run. A red run does not stop the loop.
+      Summary lines. A part whose list is empty does not run, and the count files of every
+      mode of a k (.out/realm-sizes-<k>-<mode>.log.count) are removed before that k runs, so
+      a part that does not run counts 0, never what an earlier run left
+      (tests/gate/test-realm-sizes-counts-only-the-parts-it-ran.sh). A red run does not stop the loop.
       A run red without a Summary line says so; a run whose log holds a cargo Compiling line
       counts red, naming build-realm-sizes. Last it prints "realm-sizes: <n> run(s) red" and
       fails when n is not 0. A k that is not a whole number, and a REALM_COLLECT other than ends
@@ -820,6 +837,11 @@ tasks:
       .out/realm-sizes-nextest.toml or that file does not hold one default-filter line naming
       every test printed "other", each with a line that names the file.
       tests/gate/test-realm-sizes-hands-nextest-a-long-list-of-tests.sh holds this.
+
+      It runs test-opt1-vars-check first (STEP realm-sizes), so a caller's value of
+      TEST_OPT1_ARGS, NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST, TEST_OPT0_TESTS or a SPLIT_
+      variable fails it run alone too; its call of test-split passes every SPLIT_ variable,
+      SPLIT_FULL_COUNTS empty.
     vars:
       REALM_SIZES: '{{.REALM_SIZES | default "4 11 17 38 64 128 200"}}'
       REALM_COLLECT: '{{.REALM_COLLECT | default "all"}}'
@@ -827,6 +849,8 @@ tasks:
       RUSTFLAGS: '{{.COLLECT_RUSTFLAGS}}'
     silent: true
     cmds:
+      - task: test-opt1-vars-check
+        vars: {STEP: realm-sizes}
       - task: build-realm-sizes
       - |
         sizes={{shellQuote .REALM_SIZES}}
@@ -890,7 +914,7 @@ tasks:
         awk -v keep="$keep" '!($1 == "other" && $2 == keep)' "$list" > .out/realm-sizes-default-other.txt || { echo "realm-sizes: cannot write .out/realm-sizes-default-other.txt"; exit 1; }
         exe={{shellQuote .TASK_EXE}}
         case $exe in /*) ;; */*) exe={{shellQuote .USER_WORKING_DIR}}/$exe ;; esac
-        "$exe" test-split SPLIT_RUN=realm-sizes SPLIT_FILTER="$filter" SPLIT_ARGS="--locked -p swell --profile default $targets" SPLIT_OPT1_TARGETS="$targets" SPLIT_EXCLUDE=.out/realm-sizes-default-other.txt SPLIT_BUILT_BY='the task build-realm-sizes' || exit 1
+        "$exe" test-split SPLIT_RUN=realm-sizes SPLIT_FILTER="$filter" SPLIT_ARGS="--locked -p swell --profile default $targets" SPLIT_OPT1_TARGETS="$targets" SPLIT_EXCLUDE=.out/realm-sizes-default-other.txt SPLIT_FULL_COUNTS= SPLIT_BUILT_BY='the task build-realm-sizes' || exit 1
         n1=$(awk 'END { print NR }' .out/realm-sizes-list-opt1.txt)
         n0=$(awk 'END { print NR }' .out/realm-sizes-list-opt0.txt)
         c1="$(pwd)/.out/realm-sizes-opt1-nextest.toml"
@@ -899,6 +923,7 @@ tasks:
         esc=$(printf '\033')
         red=0
         for k in $sizes; do
+          rm -f ".out/realm-sizes-$k-default-opt1.log.count" ".out/realm-sizes-$k-default-opt0.log.count" ".out/realm-sizes-$k-collect.log.count"
           modes=
           [ "$n1" -eq 0 ] || modes="default-opt1"
           [ "$n0" -eq 0 ] || modes="$modes default-opt0"
@@ -978,7 +1003,11 @@ tasks:
       TEST_OPT1_ARGS, TEST_OPT1_PROFILE_TEST and TEST_OPT0_TESTS (the top of this file; the
       steps test and build-tests refuse a value of those three and of NO_STACK_TESTS that is
       not the file's, task test-opt1-vars-check) always show, with their defaults; any other name on the line was
-      set by the caller. A new gate
+      set by the caller. The SPLIT_ ones (SPLIT_RUN, SPLIT_FILTER, SPLIT_ARGS,
+      SPLIT_OPT1_TARGETS, SPLIT_EXCLUDE, SPLIT_FULL_COUNTS, SPLIT_BUILT_BY: the parameters of
+      task test-split, which only slow-tests and test-realm-sizes pass, on their own call)
+      have no default and show only when a caller set them, which task test-opt1-vars-check
+      then refuses for the steps test and build-tests and for the lane. A new gate
       variable is added to GATE_VARIABLES in the change that adds it.
 
       It fails in one case, after that line: a flag variable of cargo in the environment
@@ -1014,6 +1043,7 @@ tasks:
         TEST_OPT1_ARGS
         TEST_OPT1_PROFILE_TEST
         TEST_OPT0_TESTS
+        SPLIT_RUN SPLIT_FILTER SPLIT_ARGS SPLIT_OPT1_TARGETS SPLIT_EXCLUDE SPLIT_FULL_COUNTS SPLIT_BUILT_BY
         REALM_SIZES REALM_COLLECT SLOW_LANE_BUDGET SLOW_PART_BUDGET STACK_MODULES STACK_TESTS STACK_TESTS_DIR
         SITE_DATA_FILE SITE_DATA_OUT SITE_DATA_EXPECTED SITE_DATA_DELIVERED SITE_DATA_REQUIREMENTS SITE_DATA_MOVES SITE_DATA_DESIGN SITE_DATA_MANIFEST SITE_DATA_LOCK SITE_DATA_CRATES SITE_DATA_ENGINES SITE_DATA_CATALOG SITE_DATA_PUBLISHED SITE_DATA_RESULTS SITE_DATA_PIN SITE_DATA_LIMITS SITE_DATA_INTERRUPT
     silent: true
@@ -1181,7 +1211,7 @@ tasks:
         fi
 
   test-opt1-vars-check:
-    desc: Internal. Fail a step when TEST_OPT1_ARGS, NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST or TEST_OPT0_TESTS is empty or is not the value its line at the top of Taskfile.yml defines.
+    desc: Internal. Fail a step when TEST_OPT1_ARGS, NO_STACK_TESTS, TEST_OPT1_PROFILE_TEST or TEST_OPT0_TESTS is empty or is not the value its line at the top of Taskfile.yml defines, or when a caller gives a SPLIT_ variable.
     summary: |
       Internal, a command of the steps test and build-tests, after test-vars-check (story
       gate-test-steps-hold-the-budget-on-the-slower-runner, items 3 and 5), and of the lane
@@ -1202,6 +1232,17 @@ tasks:
       value. The planted scripts
       tests/gate/test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh and
       tests/gate/slow-refuses-a-caller-value-of-its-runs-at-opt-level-1.sh hold it.
+
+      It refuses, too, every SPLIT_ variable a caller gives (SPLIT_RUN, SPLIT_FILTER,
+      SPLIT_ARGS, SPLIT_OPT1_TARGETS, SPLIT_EXCLUDE, SPLIT_FULL_COUNTS, SPLIT_BUILT_BY: the
+      parameters of task test-split), with "<step>: <name>=<value> is given by the caller ...":
+      such a value, from the command line or the environment, would make test-split write a
+      split of another run, or leave a test out of both parts while the check of "every test
+      once" reads a list that leaves it out too. The gate's call of test-split passes them
+      empty; slow-tests and test-realm-sizes, which call this task first with STEP slow-tests
+      and realm-sizes (a part run alone included), pass each on their own call, the ones
+      they do not use empty. tests/gate/test-split-takes-no-caller-value-of-a-split.sh holds
+      it.
     silent: true
     cmds:
       - |
@@ -1218,6 +1259,21 @@ tasks:
         held NO_STACK_TESTS {{shellQuote .NO_STACK_TESTS}}
         held TEST_OPT1_PROFILE_TEST {{shellQuote .TEST_OPT1_PROFILE_TEST}}
         held TEST_OPT0_TESTS {{shellQuote .TEST_OPT0_TESTS}}
+        given() {
+          v=$2
+          [ -n "$v" ] || v=$3
+          if [ -n "$v" ]; then
+            echo "{{.STEP}}: $1=$v is given by the caller (the command line or the environment); only slow-tests and test-realm-sizes set the SPLIT_ variables, on their own call of test-split, and the gate's call passes them empty"
+            bad=1
+          fi
+        }
+        given SPLIT_RUN {{shellQuote (.SPLIT_RUN | default "")}} "${SPLIT_RUN:-}"
+        given SPLIT_FILTER {{shellQuote (.SPLIT_FILTER | default "")}} "${SPLIT_FILTER:-}"
+        given SPLIT_ARGS {{shellQuote (.SPLIT_ARGS | default "")}} "${SPLIT_ARGS:-}"
+        given SPLIT_OPT1_TARGETS {{shellQuote (.SPLIT_OPT1_TARGETS | default "")}} "${SPLIT_OPT1_TARGETS:-}"
+        given SPLIT_EXCLUDE {{shellQuote (.SPLIT_EXCLUDE | default "")}} "${SPLIT_EXCLUDE:-}"
+        given SPLIT_FULL_COUNTS {{shellQuote (.SPLIT_FULL_COUNTS | default "")}} "${SPLIT_FULL_COUNTS:-}"
+        given SPLIT_BUILT_BY {{shellQuote (.SPLIT_BUILT_BY | default "")}} "${SPLIT_BUILT_BY:-}"
         exit "$bad"
 
   test-opt1-profile-check:
@@ -1511,6 +1567,7 @@ tasks:
         vars: {STEP: test}
       - mkdir -p .out
       - task: test-split
+        vars: {SPLIT_RUN: '', SPLIT_FILTER: '', SPLIT_ARGS: '', SPLIT_OPT1_TARGETS: '', SPLIT_EXCLUDE: '', SPLIT_FULL_COUNTS: '', SPLIT_BUILT_BY: ''}
       - |
         rm -f .out/test-opt1-junit.xml target/nextest/default/junit.xml
         status=0
@@ -1578,8 +1635,10 @@ tasks:
       The runs of the lane slow (story slow-lane-holds-its-bound-on-the-slower-runner, step 2):
       slow-tests and test-realm-sizes call it for each run they split, through the task
       executable they run in (TASK_EXE, as test-sum starts nextest-report), with SPLIT_RUN, the
-      run's name; the step test passes no SPLIT_ variable, and without SPLIT_RUN every other
-      SPLIT_ variable is not read. With it:
+      run's name, and every other SPLIT_ variable, empty where the run does not use it; the step
+      test passes every SPLIT_ variable empty, and task test-opt1-vars-check refuses a value a
+      caller gives (tests/gate/test-split-takes-no-caller-value-of-a-split.sh). Without SPLIT_RUN
+      every other SPLIT_ variable is not read. With it:
         - the lines start with "<SPLIT_RUN>: " in place of "test: ", and the files with
           .out/<SPLIT_RUN>- in place of .out/test- (.out/slow-tests-opt1-nextest.toml,
           .out/realm-sizes-list-opt0.txt, ...);
@@ -1593,6 +1652,8 @@ tasks:
           configurations then end in "& not (binary_id(=swell::main) & (test(=<name>) |
           ...))", and the run's own list reads .out/<SPLIT_RUN>-all-nextest.toml, a copy of
           .config/nextest.toml whose default-filter line is "not (...)" of those tests alone;
+          a file with no line of kind "other" adds no term, and that line is then "all()"
+          (tests/gate/slow-split-refuses-a-test-in-neither-part-or-in-both.sh);
         - SPLIT_FULL_COUNTS=1 runs the lists with SWELL_FULL_COUNTS=1, which the library's unit
           tests read when they are compiled, so that a list finds the lane's build;
         - SPLIT_BUILT_BY names the task that builds what the lists read: a list whose log has a
@@ -1661,7 +1722,7 @@ tasks:
               printf ")"
             }
             function put(i, np, p, nk, k) {
-              if (form == "all") { printf "default-filter = '\''not ("; excluded(); printf ")'\''\n"; return }
+              if (form == "all") { if (!nx) printf "default-filter = '\''all()'\''\n"; else { printf "default-filter = '\''not ("; excluded(); printf ")'\''\n" }; return }
               printf "default-filter = '\''%s%s(binary_id(swell::main) & (", (nx ? "(" : ""), (form == "opt0" ? "not (" : "")
               for (i = 1; i <= n; i++) printf "%s%s", (i > 1 ? " | " : ""), "test(=" name[i] ")"
               printf ")) | (("

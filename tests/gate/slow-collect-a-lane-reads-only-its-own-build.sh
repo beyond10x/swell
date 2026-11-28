@@ -24,8 +24,12 @@
 #    otherwise cargo builds again in the foreground and the build beside slow-test262 is lost,
 #    with every run green. SWELL_FULL_COUNTS counts: the library's unit tests read it when they
 #    are compiled.
+# 4. sum: SLOW_COLLECT_WAIT=4, a build opt1 of 3 s and a build lib that hangs. slow-tests
+#    fails naming the build lib, "within 4 s of waiting for the lane's builds in sum, <t> s
+#    waited, <l> s of them for the build lib", with t the wait for opt1 plus l, t at most 5 and l
+#    at most 2: the three waits share one bound, under the part's, not one each.
 # Run from the repository root: sh tests/gate/slow-collect-a-lane-reads-only-its-own-build.sh
-unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SLOW_COLLECT SLOW_COLLECT_WAIT STUB_BUILD STUB_BUILD_MATCH STUB_COMPILE STUB_DROP STUB_DOUBLE STUB_FAIL
+unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SLOW_COLLECT SLOW_COLLECT_WAIT STUB_BUILD STUB_BUILD_MATCH STUB_BUILD_SECS STUB_COMPILE STUB_DROP STUB_DOUBLE STUB_FAIL
 export NO_COLOR=1 CARGO_TERM_COLOR=never
 name=slow-collect-a-lane-reads-only-its-own-build
 dir=.out/gate-tests/$name
@@ -102,6 +106,12 @@ go bound hang slow-collect-start slow-tests SLOW_COLLECT=lane SLOW_COLLECT_WAIT=
 tp=$!
 bound_began=$(date +%s.%N)
 
+# 4 starts beside 2: one bound for the three waits; opt1 takes 3 s, lib hangs.
+plant sum || { echo "$name: FAIL cannot plant run-sum"; exit 1; }
+(export STUB_BUILD_SECS=3 STUB_BUILD_MATCH=--lib; go sum hang slow-collect-start slow-tests SLOW_COLLECT=lane SLOW_COLLECT_WAIT=4) &
+sp=$!
+sum_began=$(date +%s.%N)
+
 # 1. An earlier lane's status 0 is left; this lane's builds fail.
 plant stale || { echo "$name: FAIL cannot plant run-stale"; exit 1; }
 mkdir -p "$dir/run-stale/.out/slow-collect"
@@ -164,6 +174,27 @@ else
     fail "the builds (process group $pg) still ran 3 s after the lane ended on the wait's bound ($dir/bound.out)"
   fi
 fi
+
+# 4, read: the wait for lib had what the wait for opt1 left of the 4 s, not 4 s of its own.
+while kill -0 "$sp" 2>/dev/null &&
+  [ "$(awk -v a="$sum_began" -v b="$(date +%s.%N)" 'BEGIN { print (b - a < 20) }')" = 1 ]; do sleep 0.1; done
+spg=$(cat "$dir/run-sum/.out/slow-collect/pid" 2>/dev/null)
+if kill -0 "$sp" 2>/dev/null; then
+  kill -KILL "$sp" 2>/dev/null
+  fail "slow-tests still waited 20 s after its start with SLOW_COLLECT_WAIT=4, a build opt1 of 3 s and a build lib that hangs ($dir/sum.out)"
+else
+  if wait "$sp"; then fail "the lane exited 0 when the build lib wrote no status within SLOW_COLLECT_WAIT ($dir/sum.out)"; fi
+  w1=$(sed -n 's/^slow-build opt1 .* waited \([0-9]*\) s: .*/\1/p' "$dir/sum.out")
+  line=$(grep -F 'slow-tests: the build lib that the lane started wrote no status within 4 s of waiting for the lane'"'"'s builds in sum, ' "$dir/sum.out")
+  total=$(printf '%s\n' "$line" | sed -n 's/.* in sum, \([0-9]*\) s waited, \([0-9]*\) s of them for the build lib .*/\1/p')
+  wl=$(printf '%s\n' "$line" | sed -n 's/.* in sum, \([0-9]*\) s waited, \([0-9]*\) s of them for the build lib .*/\2/p')
+  if [ -z "$w1" ] || [ -z "$total" ] || [ -z "$wl" ]; then
+    fail "slow-tests did not print the wait for opt1 and a line naming the build lib, the 4 s in sum, the seconds waited in sum and those for lib ($dir/sum.out)"
+  elif [ "$w1" -lt 2 ] || [ "$total" -gt 5 ] || [ "$total" -ne $((w1 + wl)) ] || [ "$wl" -gt 2 ]; then
+    fail "the waits did not share one bound of 4 s: opt1 waited $w1 s, lib $wl s, $total s in sum ($dir/sum.out)"
+  fi
+fi
+[ -n "$spg" ] && kill -KILL "-$spg" 2>/dev/null
 
 secs=$(awk -v a="$began" -v b="$(date +%s.%N)" 'BEGIN { printf "%.1f", b - a }')
 echo "$name: $secs s"

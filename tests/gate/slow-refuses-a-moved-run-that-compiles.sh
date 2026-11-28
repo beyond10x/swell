@@ -27,6 +27,10 @@
 # 5. The list of slow-tests' part at opt-level 1 compiles (STUB_COMPILE_LIST=collect): task
 #    slow-tests fails with "slow-tests: the list compiled 1 crate(s), which ... builds before
 #    it: swell (.out/slow-tests-list-opt1.txt.log)" and runs no test.
+# 6. The list of test-realm-sizes' part at opt-level 1 compiles: task test-realm-sizes
+#    REALM_SIZES=4 fails with "realm-sizes: the list compiled 1 crate(s), which the task
+#    build-realm-sizes builds before it: swell (.out/realm-sizes-list-opt1.txt.log)" and runs
+#    no test.
 # Run from the repository root: sh tests/gate/slow-refuses-a-moved-run-that-compiles.sh
 unset CI GITHUB_ACTIONS FORCE_COLOR CLICOLOR_FORCE CARGO_TARGET_DIR SWELL_FULL_COUNTS SWELL_NO_STACK_TESTS SLOW_COLLECT REALM_SIZES REALM_COLLECT STUB_BUILD STUB_BUILD_MATCH STUB_COMPILE STUB_COMPILE_MATCH STUB_COMPILE_LIST STUB_DROP STUB_DOUBLE STUB_FAIL
 export NO_COLOR=1 CARGO_TERM_COLOR=never
@@ -133,5 +137,11 @@ if STUB_COMPILE_LIST=collect go list '' '' slow-tests; then fail "task slow-test
 grep -q '^slow-tests: the list compiled 1 crate(s), which .* builds before it: swell (\.out/slow-tests-list-opt1\.txt\.log)$' "$dir/list.out" ||
   fail "task slow-tests did not name the Compiling line of .out/slow-tests-list-opt1.txt.log ($dir/list.out)"
 ! grep -q '^run ' "$dir/stub-list.log" || fail "task slow-tests ran tests after a list that compiled ($dir/stub-list.log)"
+
+# 6. The list of test-realm-sizes' part at opt-level 1 compiles: the same, naming build-realm-sizes.
+if STUB_COMPILE_LIST=collect go realmlist '' '' test-realm-sizes REALM_SIZES=4; then fail "task test-realm-sizes exited 0 with a Compiling line in the list of its part at opt-level 1 ($dir/realmlist.out)"; fi
+grep -qxF 'realm-sizes: the list compiled 1 crate(s), which the task build-realm-sizes builds before it: swell (.out/realm-sizes-list-opt1.txt.log)' "$dir/realmlist.out" ||
+  fail "task test-realm-sizes did not name the Compiling line of .out/realm-sizes-list-opt1.txt.log ($dir/realmlist.out)"
+! grep -q '^run ' "$dir/stub-realmlist.log" || fail "task test-realm-sizes ran tests after a list that compiled ($dir/stub-realmlist.log)"
 
 echo "$name: ok"
