@@ -15,6 +15,7 @@ relations:
 - depends_on: story:bigint-constructor-and-prototype
 - depends_on: story:bigint-json-number-and-joined-cases
 - depends_on: story:slice-08-conformance-close
+- depends_on: story:slice-11-conformance-close
 scope:
 - confidence: cited
   path: conformance/test262/expected.digest

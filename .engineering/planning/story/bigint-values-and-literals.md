@@ -8,6 +8,7 @@ summary: Lexer and compiler constants, BigIntRecord arena and collector, ops/big
 relations:
 - decomposes: epic:slice-12-bigint
 - depends_on: story:swell-num-bigint-core
+- depends_on: story:dynamic-import
 scope:
 - confidence: cited
   path: conformance/host/requirements.txt

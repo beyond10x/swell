@@ -7,6 +7,7 @@ title: 'swell-num BigInt: the signed type, Karatsuba, Knuth division, text, Numb
 summary: crates/num/src/bigint.rs on Nat with fallible reservations, cost and bit bounds per operation, limb-op counter; decision 6 settled; order 1; no case.
 relations:
 - decomposes: epic:slice-12-bigint
+- depends_on: story:modules-design-text
 scope:
 - confidence: inferred
   path: crates/num/src/bigint.rs
