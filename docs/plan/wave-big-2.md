@@ -785,3 +785,61 @@ takes the reading with the next commit after it.
 
 Not in this pull request: `story:bench-image-and-first-measurements`, which has a draft
 pull request of its own. Ten of nineteen slices are delivered, as after the third part.
+
+### The forge
+
+The forge's runs of the head of the pull request (`f962c324`), 2026-11-28. The pull request
+was merged into `main` on that head.
+
+The first attempt of `check` (run 46091909500) is green and prints:
+
+```
+gate-runner: 4 cores, INTEL(R) XEON(R) PLATINUM 8573C, 16365612 kB, sh is dash
+test: swell::main 1664 at opt-level 1, 106 at opt-level 0
+test: 2187 tests at opt-level 1, 345 at opt-level 0
+gate-time test 26.1
+gate-time test-collect 25.4
+gate-time gate-selftest 25.0
+gate-time test-steps 84.8 of 120, cpu 284.1, load 4.62 on 4 cores
+gate-time yardstick 3.2 s: conform-engine 1.5 and test262-moves-check 1.7
+```
+
+The test steps took 26.5 yardsticks against the bound of 29.5 of
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner` (30.2 on the second pull
+request, 38.8 on the first), and 84.8 s of the 120. The step `test` took 26.1 s (46.6 s on
+the second pull request, on another runner model). The run was not on the model that read
+117.6 s: at that model's yardstick of 3.9 s, 26.5 yardsticks are 103 s, a product and not a
+reading. The job `check` took 17 min 1 s of its 30 minutes; the build of the run at
+opt-level 1 took 5 min 51 s of it and the build of the collect mode 5 min 37 s. The story is
+implemented with the commit that adds this subsection.
+
+The lane `slow` (run 46091909506) failed its first attempt and passed its second, on two
+runner models:
+
+```
+slow-runner: 4 cores, AMD EPYC 7763 64-Core Processor, 16366632 kB, sh is dash
+slow-time slow-test262 604.9
+slow-time slow-tests 231.2
+slow-time test-realm-sizes 260.0
+slow-time stack-profiles 27.3
+slow-time lane 1123.4 of 900, longest part slow-test262 604.9 of 600
+```
+
+```
+slow-runner: 4 cores, AMD EPYC 9V74 80-Core Processor, 16366632 kB, sh is dash
+slow-time slow-test262 468.2
+slow-time slow-tests 171.0
+slow-time test-realm-sizes 183.2
+slow-time stack-profiles 21.4
+slow-time lane 843.8 of 900, longest part slow-test262 468.2 of 600
+```
+
+The seventh unit changes no task of the lane. The lane of `main` on the head of the second
+pull request (`4bb28e6f`, run 46077580621) failed on the first of the two models too, with
+`slow-time lane 1124.2 of 900` and `slow-time slow-tests 228.1`. The story's guard, the
+lane's `slow-time slow-tests` at 175 s or less, was set from readings on the second model
+(168.8 s and 167.6 s) and holds there with 171.0 s; on the first model it read 231.2 s
+against 228.1 s before the unit. The lane's bound on the first model is
+`story:slow-lane-holds-its-bound-on-the-slower-runner`, taken into the wave as the lane's
+eighth unit (`approval-record:wave-big-2-lane-unit-8`) and built before any feature unit of
+the next slices.

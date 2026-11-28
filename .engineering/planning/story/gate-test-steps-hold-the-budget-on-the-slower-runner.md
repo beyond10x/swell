@@ -2,16 +2,17 @@
 format: aep.planning-md/3
 id: story:gate-test-steps-hold-the-budget-on-the-slower-runner
 kind: story
-status: active
+status: implemented
 title: The gate's test steps hold 120 s on the forge's slower runner
 summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in 147.6 s of their 120: one runner took 1.94 times the CPU seconds. The steps end within 120 s and within 29.5 yardsticks on that runner with the budget unchanged, the log of check names the runner''s CPU. Lane unit 6 of wave big-2 took the tests of swell::main to opt-level 1 (117.6 s, 30.2 yardsticks on the forge); lane unit 7 took swell''s library, swell-num and swell-test262 there (the moved tests 6.01 CPU seconds against 37.16); the forge reads it on the wave''s third pull request.'
 relations:
 - informed_by: story:realm-size-lane-within-its-share
 - informed_by: story:slow-lane-holds-its-bound-on-the-slower-runner
-revision: 12
+revision: 14
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T10:38:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T10:38:24Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-28T02:38:39Z", actor: "human:operator", revision: 14, decided_on: {"recorded":{"test_result":1,"review_outcome":6,"verification":2}}, executor: "agent:coordinator"}
 ---
 ## Context
 
@@ -585,3 +586,20 @@ above, and what was measured:
 - The acceptance on the forge (the test steps of the first attempt of `check` against its
   yardstick and the budget, the duration of the job, the lane's `slow-time slow-tests`) is
   read on the wave's third pull request.
+
+- Read on the wave's third pull request, on its head `f962c324` (2026-11-28), with the
+  seventh unit. The first attempt of `check` on the forge (run 46091909500) is green and
+  prints `gate-runner: 4 cores, INTEL(R) XEON(R) PLATINUM 8573C, 16365612 kB, sh is dash`,
+  `gate-time test-steps 84.8 of 120, cpu 284.1, load 4.62 on 4 cores` and `gate-time
+  yardstick 3.2 s: conform-engine 1.5 and test262-moves-check 1.7`. The bound of 29.5
+  yardsticks is 94.4 s on that runner; the run read 84.8 s, 26.5 yardsticks. The first line
+  of the acceptance holds. The runner is not the model that read 117.6 s on the second pull
+  request: at that model's yardstick of 3.9 s, 26.5 yardsticks are 103 s, a product and not
+  a reading. The job `check` took 17 min 1 s of its 30 minutes (6 min 49 s in run
+  45972624878); the build of the run at opt-level 1 took 5 min 51 s of it. The guard: the
+  lane's `slow-time slow-tests` (run 46091909506) read 171.0 s in the second attempt, on an
+  AMD EPYC 9V74, the model of the guard's two readings (168.8 s and 167.6 s), and 231.2 s in
+  the first attempt, on an AMD EPYC 7763, where the lane of `main` before the unit read
+  228.1 s (run 46077580621). The guard holds on the model it was set on; on the other model
+  the 175 s did not hold before the unit either, and the lane's time there is
+  `story:slow-lane-holds-its-bound-on-the-slower-runner`. The story is implemented.

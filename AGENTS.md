@@ -692,7 +692,12 @@ the clock of the test steps (the line `build-tests opt-level 1`). On the forge's
 4 cores (`gate-runner: 4 cores, AMD EPYC 7763 64-Core Processor`) the first attempt of
 `check` on `5ab9f8e5`, before item 5, took 117.6 s of the 120 (407.6 CPU seconds, yardstick
 3.9 s; run 46069632845); a runner of the same yardstick took 147.6 s on the head of the
-wave's first pull request. The forge reads item 5 on the wave's third pull request. On
+wave's first pull request. With item 5 the first attempt of `check` on `f962c324` took
+84.8 s (284.1 CPU seconds, yardstick 3.2 s, 26.5 yardsticks against the bound of 29.5; run
+46091909500, `gate-runner: 4 cores, INTEL(R) XEON(R) PLATINUM 8573C`). The lane `slow` on
+that head read 1123.4 s of its 900 on an AMD EPYC 7763 and 843.8 s on an AMD EPYC 9V74 (run
+46091909506, attempts 1 and 2): `story:slow-lane-holds-its-bound-on-the-slower-runner` comes
+before any further feature unit (`docs/plan/wave-big-2.md`, the fourth part, "The forge"). On
 `wave/big-2` at `5aaeb6e8`, the head with slice 8 delivered, the node took 46.9 s at load
 22 (360.5 CPU seconds, of them `test` 164.8). On
 `impl/lanefix` at `e3c97c4`, the head of the wave's first pull request but for the planning
