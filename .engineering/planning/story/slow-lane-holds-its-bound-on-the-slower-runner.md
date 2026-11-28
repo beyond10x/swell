@@ -5,17 +5,17 @@ kind: story
 status: draft
 title: The lane slow holds its bound on the forge's slower runner
 summary: 'The forge ran the lane slow on one head in 1,123.4 s on an AMD EPYC 7763 and 843.8 s on an AMD EPYC 9V74, of its 900. The test binary of swell compiles the engine once per test host type, 19 times, and the lane''s longest part does not end before that build. Step 1: three host types in the test binary, held by a guard. Step 2: the lane''s runs that can move run at opt-level 1. The lane then holds 900 s and 600 s per part on the 7763 with the bounds unchanged. Lane unit 8 of wave big-2.'
-revision: 5
+revision: 6
 ---
 ## Context
 
 The lane `slow` is bounded on the forge at 900 s, with 600 s for each part
 (`story:realm-size-lane-within-its-share`). Filed from the first pull request of wave
 big-2, where the forge ran the lane in 882.6 s and 876.4 s on two heads that differ in no
-file the lane builds or runs (`b9adbe35`, `8d6cfebc`); taken into the wave as its lane unit
-8 on 2026-11-28 (`approval-record:wave-big-2-lane-unit-8`) after the lane failed on the
-third pull request. This body is the third revision of the story: it rests on the forge's
-runs and on two probes of 2026-11-28, and on the first round of the plan critics.
+crate source (`b9adbe35`, `8d6cfebc`); taken into the wave as its lane unit 8 on 2026-11-28
+(`approval-record:wave-big-2-lane-unit-8`) after the lane failed on the third pull request.
+This body rests on the forge's runs, on two probes of 2026-11-28 and on two rounds of the
+plan critics.
 
 ### The lane by runner model
 
@@ -131,7 +131,11 @@ The 19 host types of `crates/swell/tests/` become three:
   trait, the table's entry is a copy of the provided default, written once beside the type.
   The copy of `host_call_job_callback` calls `cx.call` as the default does; its `Err` arm,
   which the default answers with the agent's fault (not reachable from a test crate),
-  panics with a message that names the broken invariant.
+  panics with a message that names the broken invariant. Nine of the 17 leave that hook to
+  the trait, and none of their tests reaches that arm. Accepted and said in the type's doc
+  comment: nothing ties a copy to the trait's default but this sentence, so a change of a
+  provided default changes its copy in the same change; the defaults themselves stay tested
+  on `TestHost`.
 - `TestHost` (`support/host.rs`) stays as it is: it overrides the required hooks and the
   three time-zone hooks only, so the 84 files that use it run the provided defaults of the
   trait, and the tests of `crates/swell/tests/hooks.rs` that call a default on it
@@ -150,20 +154,29 @@ and line, on:
 
 - an `impl` of `Host` (any path to the trait, any generics, the `impl`, the trait and `for`
   on one line or wrapped over several) that does not carry, on the line before it, the
-  marker comment `// host-type: <reason>` (read from the source as written) with a reason of the closed set `scripted`,
-  `provided-defaults`, `own-constant`;
+  marker comment `// host-type: <reason>` (read from the source as written) with a reason
+  of the closed set `scripted`, `provided-defaults`, `own-constant`;
 - a second `impl` marked `scripted`;
+- an `impl` marked `provided-defaults` for a type other than `TestHost` and `ProvidedHost`;
+- an `impl` marked `own-constant` whose body does not define `SUPPORTED_IMPORT_ATTRIBUTES`,
+  or defines it with the text of the value another such `impl` has;
 - an `impl` of `Host` with a type parameter (one engine copy per argument);
 - `Host` renamed in a `use`;
 - `Host` named inside the body of a `macro_rules!`.
 
+It does not refuse `Host` as a bound (`impl<H: swell::Host> Trait for X<H>`, `fn f<H:
+Host>`).
+
 `own-constant` is for a type whose `SUPPORTED_IMPORT_ATTRIBUTES` no other type has: the
 constant is per type, and the stories of slice 11 that test a load with an attribute need
-one. No such type exists at the end of this unit. The guard holds no count and no list of
-names, so two stories built at the same time write no common file for it. Its refusals are
-proven by text cases inside the test, as `source_scan.rs` proves its own (a plain `impl`
-without the marker, a generic one, a path `::swell::Host`, a wrapped one, a renamed `use`,
-a `macro_rules!` body, an unknown reason, two `scripted`).
+one. No such type exists at the end of this unit; each one a later story adds is one more
+copy of the engine in `main`, at most one per value of the constant. The guard holds no
+count and no list a story edits, so two stories built at the same time write no common
+file for it. Its refusals are proven by text cases inside the test, as `source_scan.rs`
+proves its own: a plain `impl` without the marker, a generic one, a path `::swell::Host`,
+a wrapped one, a renamed `use`, a `macro_rules!` body, an unknown reason, two `scripted`,
+a third `provided-defaults`, an `own-constant` without the constant, and two `own-constant`
+with one value; and a bound, which passes.
 
 ### Step 2, the lane's opt-level-0 runs that can move
 
@@ -185,20 +198,32 @@ How:
   and the default mode of `test-realm-sizes`, whose list is the tests that read the realm's
   room without the stack tests). It is a check of every run of the lane, not a report made
   once.
-- Each opt-level-1 run of the lane holds
+- Each opt-level-1 run of `swell::main` in the lane holds
   `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on` in its list.
+  The library run has no such test: its build takes the profile and the flags from
+  `COLLECT_MAIN` and `COLLECT_RUSTFLAGS`, the single definitions from which the collect
+  run of `swell::main`, which holds the test, is built.
 - The lane calls `test-opt1-vars-check` and `test-opt1-profile-check`, which hold
   `TEST_OPT1_ARGS`, `NO_STACK_TESTS`, `TEST_OPT1_PROFILE_TEST` and `TEST_OPT0_TESTS`
   against a value given on the command line; the sentence of `test-opt1-vars-check` that
   the lane's tasks do not call it goes.
-- The builds: `slow-collect-start` and `slow-collect-stop` carry, after the collect build,
-  the build with `TEST_OPT1_ARGS` and the library-test build of the collect mode at
-  opt-level 1 with the full counts, each with its own status file and its own
-  `slow-build` line, all with `COLLECT_RUSTFLAGS` so that no crate is compiled twice for a
-  flag. `build-realm-sizes` builds what `test-realm-sizes` runs, since that task counts a
-  `Compiling` line in a run as a failure.
-- Each run of the lane that is split prints, as the gate's step `test` does, a line with
-  its counts: `<run>: <n> tests at opt-level 1, <m> at opt-level 0`.
+- The builds. The library reads the full counts when it is compiled
+  (`crates/swell/src/heap/collect.rs`, `option_env!`), so the gate's build at opt-level 1
+  is not the lane's: a test built without `SWELL_FULL_COUNTS=1` would run at the gate's
+  counts and pass. The lane makes three builds at opt-level 1, one after the other in the
+  background, each with `SWELL_FULL_COUNTS=1` and `COLLECT_RUSTFLAGS` (so that no crate is
+  compiled twice for a flag), each with its own status file and its own `slow-build` line:
+  the collect build of `main` (today's), the build with `TEST_OPT1_ARGS` for the default
+  modes, and the library tests with the feature for the collect mode. `slow-collect-start`
+  and `slow-collect-stop` carry the three. `build-realm-sizes` builds what
+  `test-realm-sizes` runs, since that task counts a `Compiling` line in a run as a failure.
+- Each run of the lane that moved prints, as the gate's step `test` does, a line with its
+  counts: `<run>: <n> tests at opt-level 1, <m> at opt-level 0`; the library part of the
+  collect mode prints it with 0 at opt-level 0.
+- A run cannot use a build made without the variable: each run sets `SWELL_FULL_COUNTS=1`
+  as today, cargo compiles the library again when the build it finds was made without it,
+  and each moved run counts a `Compiling` line in its output as a failure, as
+  `test-realm-sizes` does today.
 
 Accepted and said here: a library test that bounds its own stack without the helpers of
 `crates/swell/tests/support/` would not be stopped by the guard in the library run at
@@ -212,8 +237,9 @@ Step 2 is built on step 1's head.
 
 Step 1:
 
-- The guard's test passes on the unit's head, and each of its text cases named above is
-  refused with the file and the line in the message.
+- The guard's test passes on the sources of the unit's head.
+- Each text case of a refusal named above is refused with its file and line in the
+  message, and the text case of a bound passes.
 - `crates/swell/tests/` holds three types that implement `Host`: the scripted type,
   `TestHost` and `ProvidedHost`, each with its marker.
 - The unit `main` of the collect build (`cargo nextest run --no-run` with `COLLECT_MAIN`,
@@ -224,17 +250,20 @@ Step 1:
   150 s, against 328.7 s.
 - The test names of `swell::main` printed by `cargo nextest list` are the same before and
   after, but for the guard's tests.
-- `task check` passes with `conformance/test262/expected.txt` unchanged, and its line
-  `test: swell::main <a> at opt-level 1, <b> at opt-level 0` reads a sum that is higher
-  than on the base by the number of the guard's tests.
+- `task check` passes.
+- `conformance/test262/expected.txt` is unchanged.
+- The line `test: swell::main <a> at opt-level 1, <b> at opt-level 0` of `task check`
+  reads a sum that is higher than on the base by the number of the guard's tests.
 - `git diff --stat` of the step names no file under `crates/*/src/`.
 
 Step 2:
 
-- Each split run of the lane prints its line of counts; on the unit's head the opt-level-0
-  counts are the stack tests of the run (50 in `test-realm-sizes`, 44 in `slow-tests`, as
-  the lists read then) and the 71 tests of `swell-syntax`, and every other test of the
-  run is at opt-level 1.
+- Each moved run of the lane prints its line of counts. On the unit's head the counts at
+  opt-level 0 are: in each default run of `test-realm-sizes` its stack tests (50 on the
+  base); in the default mode of `slow-tests` its stack tests (44 on the base) and the 71
+  tests of `swell-syntax`; in the library part of the collect mode 0. Every other test of
+  a run is at opt-level 1.
+- A moved run whose output holds a `Compiling` line fails (a case in `tests/gate/`).
 - With a test planted that is in neither list of a split run, and with one planted in
   both, the lane's call of `test-split` fails and names the test (two cases in
   `tests/gate/`).
@@ -242,13 +271,16 @@ Step 2:
   runs after, the two opt-levels taken together; the lists are those of `cargo nextest
   list` with the run's filter on the base and on the head, and the comparison is in the
   unit's report.
-- `task test-opt1-vars-check` and `task test-opt1-profile-check` pass, and the lane fails
-  when `TEST_OPT1_ARGS` is given another value on the command line (a case in
-  `tests/gate/`).
-- The bounds in `taskfiles/gate-time.yml` are unchanged, and
-  `tests/gate/slow-time-refuses-a-part-over-its-bound.sh` and
-  `tests/gate/slow-time-refuses-the-lane-over-its-bound.sh` pass unchanged.
-- The gate's test steps stay within 120 s and no test runs over 60 s.
+- `task test-opt1-vars-check` passes.
+- `task test-opt1-profile-check` passes.
+- The lane fails when `TEST_OPT1_ARGS` is given another value on the command line (a case
+  in `tests/gate/`).
+- `taskfiles/gate-time.yml`, `tests/gate/slow-time-refuses-a-part-over-its-bound.sh` and
+  `tests/gate/slow-time-refuses-the-lane-over-its-bound.sh` are unchanged (`git diff
+  --stat` of the step names none of them).
+- The two scripts `slow-time-refuses-*` named above pass.
+- The gate's test steps stay within 120 s (the line of the test steps of `task check`).
+- No test of the gate runs over 60 s.
 
 The forge, on the head of the pull request that carries both steps:
 
