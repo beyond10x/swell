@@ -73,6 +73,7 @@ pub const ZONE_OFFSET: &str = "get_named_time_zone_offset_nanoseconds";
 /// followed by the identifier and the local time it was given.
 pub const ZONE_EPOCHS: &str = "get_named_time_zone_epoch_nanoseconds";
 
+// host-type: provided-defaults
 impl Host for TestHost {
     fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, job: Job) {
         let host = cx.host_mut();
@@ -167,6 +168,7 @@ impl Host for TestHost {
 /// defaults, `tests/date_zone.rs` runs `Date` over them).
 pub struct ProvidedHost;
 
+// host-type: provided-defaults
 impl Host for ProvidedHost {
     fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
     fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
