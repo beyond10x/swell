@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-28T02:38:39Z",
+  "actor": "human:operator",
+  "artifact": "story:gate-test-steps-hold-the-budget-on-the-slower-runner",
+  "kind": "story",
+  "revision": 13,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "the forge's run 46091909500 of check, first attempt, on wave/big-2 at f962c324 (the head of the wave's third pull request), green, on a runner of 4 cores (INTEL(R) XEON(R) PLATINUM 8573C); the forge's run 46091909506 of the lane slow on that head (attempt 1 red on an AMD EPYC 7763, attempt 2 green on an AMD EPYC 9V74); the seventh unit was merged by commit 4b1ec2a4, an ancestor of that head",
+    "reference": "gate-time test-steps 84.8 of 120, cpu 284.1, load 4.62 on 4 cores; gate-time yardstick 3.2 s (26.5 yardsticks, the bound is 29.5); the job check took 17 min 1 s of 30; slow-time slow-tests 171.0 on the AMD EPYC 9V74 (the guard of 175 was set there) and 231.2 on the AMD EPYC 7763 (228.1 on main before the unit, run 46077580621); gate-selftest: 114 passed, 0 failed"
+  }
+}

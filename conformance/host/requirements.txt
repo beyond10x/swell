@@ -221,3 +221,4 @@ HOST-220 test swell::values::host_220_to_utf16_len_counts_code_units
 HOST-221 test swell::interrupt::host_221_an_interrupt_set_in_a_host_function_reached_from_rust_ends_the_run
 HOST-222 test swell::host_overrides::host_222_an_override_result_with_a_stale_handle_faults_the_agent
 HOST-223 test swell::private_element_hook::host_223_a_stale_handle_in_the_throw_faults_the_agent
+HOST-224 pending slice 11

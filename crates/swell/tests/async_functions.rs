@@ -21,9 +21,10 @@ use std::rc::Rc;
 
 use support::host::{TestHost, limits, seeds, stack_with_room};
 use support::script::{Outcome as ScriptOutcome, define_function, eval, eval_text};
+use support::scripted::{Hooks, Scripted};
 use support::stack::{BUILTINS_REENTRY, on_bounded_stack, stack_agent, stack_limits, test_path};
 use swell::{
-    Agent, Brand, CheckpointReport, Completion, Cx, HookCx, Host, HostCall, HostData, HostDefined,
+    Agent, Brand, CheckpointReport, Completion, Cx, HookCx, HostCall, HostData, HostDefined,
     HostObjectSpec, InterruptHandle, Job, Limits, LoadRequest, ObjectRef, Outcome, Parsed,
     PropertyKey, Prototype, Realm, RealmRef, Root, Script, Source, Termination, Tracer, Value,
 };
@@ -62,121 +63,152 @@ struct AsyncHost {
     interrupt: Option<InterruptHandle>,
 }
 
-impl Host for AsyncHost {
-    fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-    fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {}
-    fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Self>, _job: Job) {}
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-    fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        0
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        callback: ObjectRef,
-    ) -> Option<HostDefined> {
-        cx.host_mut().made += 1;
-        if cx.host().keep {
-            let root = cx.root(Value::Object(callback)).unwrap();
-            cx.host_mut().kept.push(root);
-        }
-        Some(Rc::new(Marker(cx.host().made)))
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        host_defined: Option<&HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        let marker = host_defined
-            .and_then(|data| (&**data as &dyn Any).downcast_ref::<Marker>())
-            .map_or(0, |Marker(n)| *n);
-        let kept = std::mem::take(&mut cx.host_mut().kept);
-        let which = kept
-            .iter()
-            .position(|root| cx.get(root).unwrap() == Value::Object(callback))
-            .map_or(0, |k| k + 1);
-        cx.host_mut().kept = kept;
-        cx.host_mut()
-            .events
-            .push(format!("call {which} marker {marker}"));
-        cx.call(Value::Object(callback), this, args).unwrap()
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, realm: RealmRef) {
-        cx.host_mut().events.push("prepare".to_string());
-        cx.host_mut().prepares.push(realm);
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        result: Result<(), Value>,
-    ) {
-        let event = match result {
-            Ok(()) => "clean-up ok".to_string(),
-            Err(value) => match cx.error_summary(value).unwrap() {
-                Some(summary) => format!(
-                    "clean-up {} {}",
-                    summary.kind.name(),
-                    String::from_utf16_lossy(&summary.message.unwrap_or_default())
-                ),
-                None => "clean-up other".to_string(),
-            },
-        };
-        cx.host_mut().events.push(event);
-    }
+fn host_enqueue_generic_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+fn host_enqueue_timeout_job(_cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {}
+fn host_enqueue_finalization_registry_cleanup_job(_cx: &mut HookCx<'_, Scripted>, _job: Job) {}
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+fn host_system_utc_epoch_nanoseconds(_cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    0
 }
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    callback: ObjectRef,
+) -> Option<HostDefined> {
+    cx.host_mut().state_mut::<AsyncHost>().made += 1;
+    if cx.host().state::<AsyncHost>().keep {
+        let root = cx.root(Value::Object(callback)).unwrap();
+        cx.host_mut().state_mut::<AsyncHost>().kept.push(root);
+    }
+    Some(Rc::new(Marker(cx.host().state::<AsyncHost>().made)))
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    host_defined: Option<&HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    let marker = host_defined
+        .and_then(|data| (&**data as &dyn Any).downcast_ref::<Marker>())
+        .map_or(0, |Marker(n)| *n);
+    let kept = std::mem::take(&mut cx.host_mut().state_mut::<AsyncHost>().kept);
+    let which = kept
+        .iter()
+        .position(|root| cx.get(root).unwrap() == Value::Object(callback))
+        .map_or(0, |k| k + 1);
+    cx.host_mut().state_mut::<AsyncHost>().kept = kept;
+    cx.host_mut()
+        .state_mut::<AsyncHost>()
+        .events
+        .push(format!("call {which} marker {marker}"));
+    cx.call(Value::Object(callback), this, args).unwrap()
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, realm: RealmRef) {
+    cx.host_mut()
+        .state_mut::<AsyncHost>()
+        .events
+        .push("prepare".to_string());
+    cx.host_mut().state_mut::<AsyncHost>().prepares.push(realm);
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    result: Result<(), Value>,
+) {
+    let event = match result {
+        Ok(()) => "clean-up ok".to_string(),
+        Err(value) => match cx.error_summary(value).unwrap() {
+            Some(summary) => format!(
+                "clean-up {} {}",
+                summary.kind.name(),
+                String::from_utf16_lossy(&summary.message.unwrap_or_default())
+            ),
+            None => "clean-up other".to_string(),
+        },
+    };
+    cx.host_mut().state_mut::<AsyncHost>().events.push(event);
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`AsyncHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    ..Hooks::PROVIDED
+};
 
 /// A capability of `Cx::new_promise_capability`, its resolve function rooted by the host (and
 /// its promise, when the host roots promises): the promise.
-fn host_promise(cx: &mut Cx<'_, AsyncHost>) -> Completion<Value> {
+fn host_promise(cx: &mut Cx<'_, Scripted>) -> Completion<Value> {
     let capability = cx.new_promise_capability()?;
     let resolve = cx.root(capability.resolve).unwrap();
-    cx.host_mut().resolves.push(resolve);
-    if cx.host().root_promises {
+    cx.host_mut()
+        .state_mut::<AsyncHost>()
+        .resolves
+        .push(resolve);
+    if cx.host().state::<AsyncHost>().root_promises {
         let promise = cx.root(Value::Object(capability.promise)).unwrap();
-        cx.host_mut().promises.push(promise);
+        cx.host_mut()
+            .state_mut::<AsyncHost>()
+            .promises
+            .push(promise);
     }
     Ok(Value::Object(capability.promise))
 }
 
 /// The host function `fetch` of the consumer: a promise the host resolves later.
-fn fetch(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn fetch(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     host_promise(cx)
 }
 
 /// The method `json` of the consumer's response object: a promise the host resolves later.
-fn json(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn json(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     host_promise(cx)
 }
 
 /// The host function `note`: it records its first argument, a String as its text.
-fn note(cx: &mut Cx<'_, AsyncHost>, call: HostCall<'_>) -> Completion<Value> {
+fn note(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let line = match call.args.first().copied() {
         Some(Value::String(string)) => cx.to_rust_string_lossy(string).unwrap(),
         other => format!("{other:?}"),
     };
-    cx.host_mut().notes.push(line);
+    cx.host_mut().state_mut::<AsyncHost>().notes.push(line);
     Ok(Value::Undefined)
 }
 
 /// The host function `probe`: it records that it ran.
-fn probe(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<Value> {
-    cx.host_mut().notes.push("probe".to_string());
+fn probe(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut()
+        .state_mut::<AsyncHost>()
+        .notes
+        .push("probe".to_string());
     Ok(Value::Undefined)
 }
 
 /// The host function `checkpointHere`: a checkpoint through `cx`, inside the running entry.
-fn checkpoint_here(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<Value> {
+fn checkpoint_here(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
     let report = cx.perform_microtask_checkpoint()?;
     cx.host_mut()
+        .state_mut::<AsyncHost>()
         .notes
         .push(format!("checkpoint {}", report.promise_jobs));
     Ok(Value::Undefined)
 }
 
 /// The host function `interruptNow`: it sets the agent's interrupt flag.
-fn interrupt_now(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<Value> {
-    if let Some(interrupt) = &cx.host().interrupt {
+fn interrupt_now(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    if let Some(interrupt) = &cx.host().state::<AsyncHost>().interrupt {
         interrupt.interrupt();
     }
     Ok(Value::Undefined)
@@ -184,9 +216,10 @@ fn interrupt_now(cx: &mut Cx<'_, AsyncHost>, _call: HostCall<'_>) -> Completion<
 
 /// An agent of the host of these tests with `limits`, and a realm whose globals `fetch`,
 /// `note`, `probe`, `checkpointHere` and `interruptNow` are the host functions of this file.
-fn new_agent(limits: Limits) -> (Agent<AsyncHost>, Realm) {
-    let mut agent = Agent::new(AsyncHost::default(), limits, seeds()).unwrap();
-    agent.host_mut().interrupt = Some(agent.interrupt_handle());
+fn new_agent(limits: Limits) -> (Agent<Scripted>, Realm) {
+    let mut agent =
+        Agent::new(Scripted::new(AsyncHost::default(), HOOKS), limits, seeds()).unwrap();
+    agent.host_mut().state_mut::<AsyncHost>().interrupt = Some(agent.interrupt_handle());
     let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -207,12 +240,7 @@ fn limits_with(steps: u64) -> Limits {
 }
 
 /// Define the host function `steps` as the global `name` of `realm`.
-fn define(
-    agent: &mut Agent<AsyncHost>,
-    realm: &Realm,
-    name: &str,
-    steps: swell::HostFn<AsyncHost>,
-) {
+fn define(agent: &mut Agent<Scripted>, realm: &Realm, name: &str, steps: swell::HostFn<Scripted>) {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -233,7 +261,7 @@ fn define(
 }
 
 /// The script `source` parsed, which must parse.
-fn parse(agent: &mut Agent<AsyncHost>, realm: &Realm, source: &str) -> Script {
+fn parse(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -264,13 +292,13 @@ fn parse(agent: &mut Agent<AsyncHost>, realm: &Realm, source: &str) -> Script {
 }
 
 /// The outcome of the script `source`, which must parse.
-fn evaluate(agent: &mut Agent<AsyncHost>, realm: &Realm, source: &str) -> Outcome<Root> {
+fn evaluate(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Outcome<Root> {
     let script = parse(agent, realm, source);
     agent.evaluate_script(&script).unwrap()
 }
 
 /// The script `source`, which must complete normally: its completion value.
-fn run(agent: &mut Agent<AsyncHost>, realm: &Realm, source: &str) -> Root {
+fn run(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Root {
     match evaluate(agent, realm, source) {
         Outcome::Normal(value) => value,
         other => panic!("{source:?} answered {other:?}"),
@@ -278,7 +306,7 @@ fn run(agent: &mut Agent<AsyncHost>, realm: &Realm, source: &str) -> Root {
 }
 
 /// The parsed script `script`, which must complete normally.
-fn run_parsed(agent: &mut Agent<AsyncHost>, script: &Script) {
+fn run_parsed(agent: &mut Agent<Scripted>, script: &Script) {
     match agent.evaluate_script(script).unwrap() {
         Outcome::Normal(_) => {}
         other => panic!("the script answered {other:?}"),
@@ -286,7 +314,7 @@ fn run_parsed(agent: &mut Agent<AsyncHost>, script: &Script) {
 }
 
 /// The text of `String(expression)`.
-fn text(agent: &mut Agent<AsyncHost>, realm: &Realm, expression: &str) -> String {
+fn text(agent: &mut Agent<Scripted>, realm: &Realm, expression: &str) -> String {
     let root = run(agent, realm, &format!("String({expression})"));
     agent
         .with_cx(realm, |cx| match cx.get(&root).unwrap() {
@@ -297,7 +325,7 @@ fn text(agent: &mut Agent<AsyncHost>, realm: &Realm, expression: &str) -> String
 }
 
 /// A checkpoint that must answer `Normal`: its report.
-fn normal(agent: &mut Agent<AsyncHost>) -> CheckpointReport {
+fn normal(agent: &mut Agent<Scripted>) -> CheckpointReport {
     match agent.perform_microtask_checkpoint().unwrap() {
         Outcome::Normal(report) => report,
         other => panic!("the checkpoint answered {other:?}"),
@@ -305,7 +333,7 @@ fn normal(agent: &mut Agent<AsyncHost>) -> CheckpointReport {
 }
 
 /// A checkpoint that must answer `Terminated`: its reason.
-fn terminated(agent: &mut Agent<AsyncHost>) -> Termination {
+fn terminated(agent: &mut Agent<Scripted>) -> Termination {
     match agent.perform_microtask_checkpoint().unwrap() {
         Outcome::Terminated(termination) => termination,
         other => panic!("the checkpoint answered {other:?}"),
@@ -323,7 +351,7 @@ fn report(promise_jobs: u64, host_microtasks: u64) -> CheckpointReport {
 /// The state of the promise `expression` as a later script reads it: a `then` of it, then a
 /// checkpoint. `pending` (the checkpoint ran no job), `fulfilled <value>` or `rejected <name or
 /// value>` (it ran the one job of that `then`).
-fn state_of(agent: &mut Agent<AsyncHost>, realm: &Realm, expression: &str) -> String {
+fn state_of(agent: &mut Agent<Scripted>, realm: &Realm, expression: &str) -> String {
     run(
         agent,
         realm,
@@ -349,7 +377,7 @@ fn state_of(agent: &mut Agent<AsyncHost>, realm: &Realm, expression: &str) -> St
 
 /// `Agent::call` of `function` with `undefined` as `this` and the one argument `value`.
 fn call(
-    agent: &mut Agent<AsyncHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     function: &Root,
     value: Value,
@@ -365,7 +393,7 @@ fn call(
 }
 
 /// Whether `outcome` is `Normal(undefined)`.
-fn answers_undefined(agent: &mut Agent<AsyncHost>, realm: &Realm, outcome: Outcome<Root>) -> bool {
+fn answers_undefined(agent: &mut Agent<Scripted>, realm: &Realm, outcome: Outcome<Root>) -> bool {
     match outcome {
         Outcome::Normal(value) => agent
             .with_cx(realm, |cx| cx.get(&value).unwrap() == Value::Undefined)
@@ -375,19 +403,31 @@ fn answers_undefined(agent: &mut Agent<AsyncHost>, realm: &Realm, outcome: Outco
 }
 
 /// The function `host_make_job_callback` kept `index`-th (from 0), duplicated.
-fn kept(agent: &mut Agent<AsyncHost>, index: usize) -> Root {
-    let root = agent.host_mut().kept.remove(index);
+fn kept(agent: &mut Agent<Scripted>, index: usize) -> Root {
+    let root = agent.host_mut().state_mut::<AsyncHost>().kept.remove(index);
     let function = agent.duplicate(&root).unwrap();
-    agent.host_mut().kept.insert(index, root);
+    agent
+        .host_mut()
+        .state_mut::<AsyncHost>()
+        .kept
+        .insert(index, root);
     function
 }
 
 /// `Agent::call` of the resolve function the host rooted `index`-th, with `value`, which must
 /// answer `Normal`.
-fn resolve(agent: &mut Agent<AsyncHost>, realm: &Realm, index: usize, value: &Root) {
-    let root = agent.host_mut().resolves.remove(index);
+fn resolve(agent: &mut Agent<Scripted>, realm: &Realm, index: usize, value: &Root) {
+    let root = agent
+        .host_mut()
+        .state_mut::<AsyncHost>()
+        .resolves
+        .remove(index);
     let function = agent.duplicate(&root).unwrap();
-    agent.host_mut().resolves.insert(index, root);
+    agent
+        .host_mut()
+        .state_mut::<AsyncHost>()
+        .resolves
+        .insert(index, root);
     let undefined = agent
         .with_cx(realm, |cx| cx.root(Value::Undefined).unwrap())
         .unwrap();
@@ -398,7 +438,7 @@ fn resolve(agent: &mut Agent<AsyncHost>, realm: &Realm, index: usize, value: &Ro
 }
 
 /// `heap_bytes()` after a `collect()`.
-fn collected(agent: &mut Agent<AsyncHost>) -> u64 {
+fn collected(agent: &mut Agent<Scripted>) -> u64 {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     agent.heap_bytes().unwrap()
 }
@@ -461,11 +501,19 @@ fn the_consumer_shape_runs_to_its_end() {
          }\n\
          fetch_json(\"a\").then(function (v) { result = v; });",
     );
-    assert_eq!(agent.host().resolves.len(), 1, "fetch was called once");
+    assert_eq!(
+        agent.host().state::<AsyncHost>().resolves.len(),
+        1,
+        "fetch was called once"
+    );
     assert_eq!(agent.pending_microtasks(), Ok(0));
     resolve(&mut agent, &realm, 0, &response);
     assert_eq!(normal(&mut agent), report(1, 0));
-    assert_eq!(agent.host().resolves.len(), 2, "json was called once");
+    assert_eq!(
+        agent.host().state::<AsyncHost>().resolves.len(),
+        2,
+        "json was called once"
+    );
     let answer = agent
         .with_cx(&realm, |cx| cx.root(Value::Number(42.0)).unwrap())
         .unwrap();
@@ -771,7 +819,7 @@ fn a_frame_suspended_at_an_await_is_charged_until_its_activation_is_freed() {
 #[test]
 fn a_frame_waiting_on_a_promise_the_host_roots_stays_charged() {
     let (mut agent, realm) = new_agent(limits());
-    agent.host_mut().root_promises = true;
+    agent.host_mut().state_mut::<AsyncHost>().root_promises = true;
     run(
         &mut agent,
         &realm,
@@ -787,8 +835,8 @@ fn a_frame_waiting_on_a_promise_the_host_roots_stays_charged() {
     run_parsed(&mut agent, &drop_it);
     let held = collected(&mut agent);
     let again = collected(&mut agent);
-    agent.host_mut().promises.clear();
-    agent.host_mut().resolves.clear();
+    agent.host_mut().state_mut::<AsyncHost>().promises.clear();
+    agent.host_mut().state_mut::<AsyncHost>().resolves.clear();
     let freed = collected(&mut agent);
     println!(
         "heap_bytes: {before} before the call, {held} after it with the root (+{}), {again} \
@@ -933,7 +981,7 @@ fn a_resumption_at_frame_depth_throws_a_range_error_and_leaves_the_activation_su
     let mut limits = limits();
     limits.frame_depth = FRAME_DEPTH;
     let (mut agent, realm) = new_agent(limits);
-    agent.host_mut().keep = true;
+    agent.host_mut().state_mut::<AsyncHost>().keep = true;
     run(&mut agent, &realm, &depth_setup());
     // The script's frame and `down`'s k + 1 frames: frame_depth frames at k = FRAME_DEPTH - 2.
     let deepest = FRAME_DEPTH - 2;
@@ -944,9 +992,9 @@ fn a_resumption_at_frame_depth_throws_a_range_error_and_leaves_the_activation_su
     );
     let suspended = collected(&mut agent);
     run_parsed(&mut agent, &resume_a);
-    assert_eq!(agent.host().notes, ["checkpoint 1"]);
+    assert_eq!(agent.host().state::<AsyncHost>().notes, ["checkpoint 1"]);
     assert_eq!(
-        agent.host().events,
+        agent.host().state::<AsyncHost>().events,
         [
             "prepare",
             "call 1 marker 1",
@@ -956,7 +1004,12 @@ fn a_resumption_at_frame_depth_throws_a_range_error_and_leaves_the_activation_su
     let after = collected(&mut agent);
     assert_eq!(normal(&mut agent), report(0, 0));
     assert_eq!(text(&mut agent, &realm, "ranA"), "false");
-    let kept_a: Vec<Root> = agent.host_mut().kept.drain(..2).collect();
+    let kept_a: Vec<Root> = agent
+        .host_mut()
+        .state_mut::<AsyncHost>()
+        .kept
+        .drain(..2)
+        .collect();
     drop(kept_a);
     let freed = collected(&mut agent);
     assert_eq!(state_of(&mut agent, &realm, "callA"), "pending");
@@ -973,16 +1026,16 @@ fn a_resumption_at_frame_depth_throws_a_range_error_and_leaves_the_activation_su
         "{after} -> {freed}"
     );
 
-    agent.host_mut().events.clear();
-    agent.host_mut().notes.clear();
+    agent.host_mut().state_mut::<AsyncHost>().events.clear();
+    agent.host_mut().state_mut::<AsyncHost>().notes.clear();
     run(
         &mut agent,
         &realm,
         &format!("down({}, resolveB); 0;", deepest - 1),
     );
-    assert_eq!(agent.host().notes, ["checkpoint 1"]);
+    assert_eq!(agent.host().state::<AsyncHost>().notes, ["checkpoint 1"]);
     assert_eq!(
-        agent.host().events,
+        agent.host().state::<AsyncHost>().events,
         ["prepare", "call 1 marker 3", "clean-up ok"]
     );
     assert_eq!(text(&mut agent, &realm, "ranB"), "true");
@@ -1097,9 +1150,9 @@ fn a_resumption_re_enters_on_the_promised_stack() {
 #[test]
 fn host_194_an_await_makes_two_job_callbacks_and_its_job_calls_one() {
     let (mut agent, realm) = new_agent(limits());
-    agent.host_mut().keep = true;
+    agent.host_mut().state_mut::<AsyncHost>().keep = true;
     run(&mut agent, &realm, "(async function () { await 1; })();");
-    assert_eq!(agent.host().made, 2);
+    assert_eq!(agent.host().state::<AsyncHost>().made, 2);
     let first = kept(&mut agent, 0);
     let second = kept(&mut agent, 1);
     let distinct = agent
@@ -1108,16 +1161,16 @@ fn host_194_an_await_makes_two_job_callbacks_and_its_job_calls_one() {
         })
         .unwrap();
     assert!(distinct, "the two functions of the await are one");
-    assert!(agent.host().events.is_empty());
+    assert!(agent.host().state::<AsyncHost>().events.is_empty());
     assert_eq!(normal(&mut agent), report(1, 0));
     assert_eq!(
-        agent.host().events,
+        agent.host().state::<AsyncHost>().events,
         ["prepare", "call 1 marker 1", "clean-up ok"]
     );
     let here = agent
         .with_cx(&realm, |cx| cx.realm_ref(&realm).unwrap())
         .unwrap();
-    assert_eq!(agent.host().prepares, [here]);
+    assert_eq!(agent.host().state::<AsyncHost>().prepares, [here]);
 }
 
 /// The step budget of the termination tests: room for their other scripts, and few enough
@@ -1171,7 +1224,7 @@ const FILL: &str = "var a = []; for (var n = 1024; ; n = n * 2) a.push(\"x\".rep
 
 /// An agent of this file's host whose memory budget is the reading of `heap_bytes()` of a fresh
 /// realm, measured in an agent of its own, plus [`FILL_ROOM`].
-fn memory_agent() -> (Agent<AsyncHost>, Realm) {
+fn memory_agent() -> (Agent<Scripted>, Realm) {
     let realm_bytes = {
         let (agent, _realm) = new_agent(limits());
         agent.heap_bytes().unwrap()
@@ -1187,12 +1240,12 @@ fn memory_agent() -> (Agent<AsyncHost>, Realm) {
 /// the `await` the host kept from `host_make_job_callback`, called afterwards, returns
 /// `undefined` and runs nothing.
 fn pending_for_good(
-    agent: &mut Agent<AsyncHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     ending: &str,
     termination: Termination,
 ) {
-    agent.host_mut().keep = true;
+    agent.host_mut().state_mut::<AsyncHost>().keep = true;
     run(
         agent,
         realm,
@@ -1267,13 +1320,17 @@ fn a_resumed_await_has_spent_three_steps_when_its_next_instruction_runs() {
     let (mut agent, realm) = new_agent(limits_with(burn + 3));
     run(&mut agent, &realm, &format!("{F}\n{BURN}\nf();"));
     assert_eq!(terminated(&mut agent), Termination::StepBudget);
-    assert!(agent.host().notes.is_empty(), "{:?}", agent.host().notes);
+    assert!(
+        agent.host().state::<AsyncHost>().notes.is_empty(),
+        "{:?}",
+        agent.host().state::<AsyncHost>().notes
+    );
     assert_eq!(agent.last_entry_steps(), Ok(burn + 3));
 
     let (mut agent, realm) = new_agent(limits());
     run(&mut agent, &realm, &format!("{F}\nf();"));
     assert_eq!(normal(&mut agent), report(1, 0));
-    assert_eq!(agent.host().notes, ["probe"]);
+    assert_eq!(agent.host().state::<AsyncHost>().notes, ["probe"]);
     println!(
         "last_entry_steps: {} (3 + {AFTER_THE_AWAIT}); the job before it {burn}",
         agent.last_entry_steps().unwrap()
@@ -1291,7 +1348,7 @@ fn a_resumed_await_has_spent_three_steps_when_its_next_instruction_runs() {
 #[test]
 fn a_function_of_an_await_called_at_another_time_does_nothing() {
     let (mut agent, realm) = new_agent(limits());
-    agent.host_mut().keep = true;
+    agent.host_mut().state_mut::<AsyncHost>().keep = true;
     run(
         &mut agent,
         &realm,
@@ -1301,7 +1358,7 @@ fn a_function_of_an_await_called_at_another_time_does_nothing() {
          var p = f();",
     );
     assert_eq!(normal(&mut agent), report(1, 0));
-    assert_eq!(agent.host().made, 4);
+    assert_eq!(agent.host().state::<AsyncHost>().made, 4);
     assert_eq!(text(&mut agent, &realm, "log.join()"), "first null");
     let on_fulfilled = kept(&mut agent, 0);
     let on_rejected = kept(&mut agent, 1);
@@ -1334,7 +1391,7 @@ fn a_function_of_an_await_called_at_another_time_does_nothing() {
 /// its job stays queued, and the next checkpoint resumes it and settles the promise of the
 /// call.
 fn resumes_at_a_later_checkpoint(
-    agent: &mut Agent<AsyncHost>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     ends: &str,
     termination: Termination,

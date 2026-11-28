@@ -1,0 +1,6 @@
+test/language/expressions/import.meta/distinct-for-each-module.js
+test/language/expressions/import.meta/import-meta-is-an-ordinary-object.js
+test/language/expressions/import.meta/not-accessible-from-direct-eval.js
+test/language/expressions/import.meta/same-object-returned.js
+test/language/expressions/import.meta/syntax/goal-module-nested-function.js
+test/language/expressions/import.meta/syntax/goal-module.js

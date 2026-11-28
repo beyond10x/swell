@@ -4,16 +4,19 @@
 //! `swell`, which links `std` and its system allocator; it calls no system API. It answers the
 //! clock from a fixed value, gives the agent fixed seeds and keeps the jobs it is handed in
 //! memory. Its source names no `std` path and no output macro of the `std` prelude, which
-//! `the_module_names_no_system_api` reads with the scanners of HOST-2.
+//! `the_module_names_no_system_api` reads with the scanners of HOST-2. Its hooks are given as
+//! values to the scripted host of `support/scripted.rs`, so that the test binary compiles the
+//! engine for no host type of its own (`host_types.rs`).
 //!
 //! Module loading from memory, the third part of such a host, is slice 11 and not delivered: the
 //! load hook keeps nothing.
 #![cfg(test)]
 
 use crate::source_scan::scan::{ambient_authority, code_of, has_word, std_paths};
+use crate::support::scripted::{Hooks, Scripted};
 use swell::{
-    Agent, HookCx, Host, Job, Limits, LoadRequest, ObjectRef, Outcome, Parsed, Realm, Seeds,
-    Source, Value,
+    Agent, HookCx, Job, Limits, LoadRequest, ObjectRef, Outcome, Parsed, Realm, Seeds, Source,
+    Value,
 };
 
 /// The clock's one answer, nanoseconds since the epoch: 2026-11-18T11:06:40.123456789Z.
@@ -32,28 +35,37 @@ struct EmulatedHost {
     clock_reads: u32,
 }
 
-impl Host for EmulatedHost {
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, job: Job) {
-        cx.host_mut().jobs.push(job);
-    }
-
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, job: Job, _milliseconds: f64) {
-        cx.host_mut().jobs.push(job);
-    }
-
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, job: Job) {
-        cx.host_mut().jobs.push(job);
-    }
-
-    /// Slice 11 delivers module loading; until then this host keeps no request.
-    fn host_load_imported_module(_cx: &mut HookCx<'_, Self>, _request: LoadRequest) {}
-
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        let host = cx.host_mut();
-        host.clock_reads += 1;
-        FIXED_NS
-    }
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, job: Job) {
+    cx.host_mut().state_mut::<EmulatedHost>().jobs.push(job);
 }
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, job: Job, _milliseconds: f64) {
+    cx.host_mut().state_mut::<EmulatedHost>().jobs.push(job);
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, job: Job) {
+    cx.host_mut().state_mut::<EmulatedHost>().jobs.push(job);
+}
+
+/// Slice 11 delivers module loading; until then this host keeps no request.
+fn host_load_imported_module(_cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    let host = cx.host_mut().state_mut::<EmulatedHost>();
+    host.clock_reads += 1;
+    FIXED_NS
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`EmulatedHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
 
 /// Fixed seeds: every agent of this host hashes and draws the same.
 fn seeds() -> Seeds {
@@ -77,8 +89,13 @@ fn limits() -> Limits {
 }
 
 /// An agent of the emulated host with `seeds`, and a realm of it.
-fn agent_and_realm(seeds: Seeds) -> (Agent<EmulatedHost>, Realm) {
-    let mut agent = Agent::new(EmulatedHost::default(), limits(), seeds).unwrap();
+fn agent_and_realm(seeds: Seeds) -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(EmulatedHost::default(), HOOKS),
+        limits(),
+        seeds,
+    )
+    .unwrap();
     let realm = match agent.create_realm(None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -87,7 +104,7 @@ fn agent_and_realm(seeds: Seeds) -> (Agent<EmulatedHost>, Realm) {
 }
 
 /// The Number a script completes with.
-fn number(agent: &mut Agent<EmulatedHost>, realm: &Realm, source: &str) -> f64 {
+fn number(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> f64 {
     let script = match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -128,12 +145,12 @@ fn date_now_reads_the_fixed_clock_twice_with_the_same_answer() {
     let source = "var first = Date.now(); var second = Date.now(); first === second ? first : -1;";
     let (mut agent, realm) = agent_and_realm(seeds());
     assert_eq!(number(&mut agent, &realm, source), FIXED_MS);
-    assert_eq!(agent.host().clock_reads, 2);
-    assert!(agent.host().jobs.is_empty());
+    assert_eq!(agent.host().state::<EmulatedHost>().clock_reads, 2);
+    assert!(agent.host().state::<EmulatedHost>().jobs.is_empty());
 
     let (mut again, realm) = agent_and_realm(seeds());
     assert_eq!(number(&mut again, &realm, source), FIXED_MS);
-    assert_eq!(again.host().clock_reads, 2);
+    assert_eq!(again.host().state::<EmulatedHost>().clock_reads, 2);
 }
 
 /// The seeds are the host's too: two agents of the host with its fixed seeds draw the same
@@ -144,7 +161,7 @@ fn math_random_draws_the_same_from_the_fixed_seeds() {
     let draws = |seeds: Seeds| -> [u64; 3] {
         let (mut agent, realm) = agent_and_realm(seeds);
         let values = [0, 1, 2].map(|_| number(&mut agent, &realm, "Math.random();"));
-        assert_eq!(agent.host().clock_reads, 0);
+        assert_eq!(agent.host().state::<EmulatedHost>().clock_reads, 0);
         values.map(f64::to_bits)
     };
     let first = draws(seeds());
@@ -165,6 +182,14 @@ fn math_random_draws_the_same_from_the_fixed_seeds() {
 #[test]
 fn the_module_names_no_system_api() {
     let named = system_api(include_str!("emulated_host.rs"));
+    assert!(named.is_empty(), "{named:?}");
+}
+
+/// The type that implements `Host` for this host is the scripted type of `support/scripted.rs`
+/// ("an adapter is whatever implements `Host`"); its source passes the same check.
+#[test]
+fn the_type_that_implements_host_for_this_host_names_no_system_api() {
+    let named = system_api(include_str!("support/scripted.rs"));
     assert!(named.is_empty(), "{named:?}");
 }
 

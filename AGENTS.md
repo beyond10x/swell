@@ -214,8 +214,9 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   depends on: it has its own `Cargo.lock`, and it may take the `ess-conformance` crates by
   `git = "https://github.com/beyond10x/ess"` with a pinned tag. A read of a public dependency
   by cargo for such a workspace is allowed (ruled on 2026-11-21 by the session that decides
-  for the operator). The coordinating session and its units make no call to a forge: no push,
-  no remote, nothing created or written there ("Publishing").
+  for the operator). A unit makes no call to a forge: no push, no remote, nothing created or
+  written there; what the coordinating session pushes and opens is under "Publishing", "Who
+  does what".
 - A deliberate omission is recorded where the gate reads it (`conformance/test262/features.txt`
   for a test262 feature, the section's omission list for a requirement), never left implicit. A
   test262 feature the list does not name fails the gate.
@@ -442,15 +443,36 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   245.6 and from 476.5 to 348.7.
   `gate-selftest` runs the planted scripts as a rolling pool (`xargs -P`), with `GOGC=off`
   and `GOMEMLIMIT=1GiB` for its many short go-task processes.
-- The lane `slow` runs the collect mode at opt-level 1 too, except for the stack tests: in
-  `slow-tests`, `taskfiles/realm-room-tests.awk -v rule=stack` prints a test of `swell::main`
+- The lane `slow` runs at opt-level 1 every run that can move
+  (`story:slow-lane-holds-its-bound-on-the-slower-runner`, step 2), in the profile `collect`
+  and with `SWELL_NO_STACK_TESTS=1`; the stack tests and the tests of `swell-syntax` stay at
+  opt-level 0. `taskfiles/realm-room-tests.awk -v rule=stack` prints a test of `swell::main`
   "stack" when its text, a function nested in it, or a function it calls or names as a value
-  reaches `stack_with_room(` or `.stack_size(`. The tests printed "other" run in the profile
-  `collect` (`--test main`); every other test of the same modules (the stack tests and the
-  tests a macro writes, which the rule does not see) and the library's unit tests run in the
-  test profile at opt-level 0. Since item 5 of
-  `story:gate-test-steps-hold-the-budget-on-the-slower-runner` the 17 tests of
-  `round_trip_planes!` are printed "other" and run in its part at opt-level 1, and
+  reaches `stack_with_room(` or `.stack_size(`. Then:
+  - `slow-tests`, default mode: the tests of `swell::main` the stack rule prints "other",
+    the library's unit tests (`swell`), `swell-num` and the test `TEST_OPT1_PROFILE_TEST`
+    run with `TEST_OPT1_ARGS`, `SWELL_FULL_COUNTS=1`; the stack tests and `swell-syntax`
+    run in the test profile. `test-split` splits the run's filter
+    (`.out/slow-tests.filter`) into the two parts and prints `slow-tests: <a> tests at
+    opt-level 1, <b> at opt-level 0` (977 and 116; `swell::main` 621 and 45).
+  - `slow-tests`, collect mode (`collect-every-safe-point`): the library's unit tests run
+    in the profile `collect` (`COLLECT_MAIN` with `--lib` for `--test main`;
+    `slow-tests collect-every-safe-point library: <n> tests at opt-level 1, 0 at opt-level
+    0`), the stack tests in the test profile, the tests printed "other" in the profile
+    `collect` (`--test main`), as before.
+  - `test-realm-sizes`, default mode: the tests that read the realm's room
+    (`taskfiles/realm-room-tests.awk`) and are printed "other" by the stack rule run with
+    `TEST_OPT1_ARGS --test main`, the stack tests among them in the test profile; the
+    profile test runs in the part at opt-level 1. Each size prints `realm-sizes <k> default:
+    <a> tests at opt-level 1, <b> at opt-level 0` (314 and 50). The collect mode is
+    unchanged.
+
+  Each moved run counts a cargo `Compiling` line in its list or its run as a failure, naming
+  its log and the build that should have made it. `SWELL_FULL_COUNTS` is read through
+  `option_env!` only in `#[cfg(test)]` code of `crates/swell/src`, so only the library's
+  unit-test binary changes with it; `test-realm-sizes` reads the build `opt1` without it.
+  Since item 5 of `story:gate-test-steps-hold-the-budget-on-the-slower-runner` the 17 tests
+  of `round_trip_planes!` are printed "other" and run in the part at opt-level 1, and
   `test-realm-sizes` no longer runs them at each size of the realm.
 - The guard of that split: the run at opt-level 1 sets `SWELL_NO_STACK_TESTS=1`
   (`NO_STACK_TESTS` at the top of `Taskfile.yml`; it and `COLLECT_MAIN`, `COLLECT_RUSTFLAGS`
@@ -486,13 +508,16 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   whose stack-bound tests read unoptimized frames and have no rule and no guard) runs at
   opt-level 0 with `TEST_NEXTEST_ARGS` unchanged. Each run's filter is a `default-filter`
   line in a copy of `.config/nextest.toml` (`.out/test-opt1-nextest.toml`,
-  `.out/test-opt0-nextest.toml`; the 1,664 names do not fit one command-line argument):
+  `.out/test-opt0-nextest.toml`; the 1,699 names do not fit one command-line argument):
   `(binary_id(swell::main) & (test(=...) | ...)) | ((package(=swell) | ...) & not
   binary_id(=swell::main) & not (binary_id(=<b>) & test(=<t>)) ...)` and its `not (...)`.
   The steps `test` and `build-tests` refuse a caller's value of `TEST_OPT1_ARGS`,
   `NO_STACK_TESTS`, `TEST_OPT1_PROFILE_TEST` and `TEST_OPT0_TESTS` (task
-  `test-opt1-vars-check`), as `test-vars-check` refuses one of `TEST_RUSTFLAGS`; the lane's
-  tasks do not call it. A macro that writes tests writes each as `#[test]` and `fn <name> =
+  `test-opt1-vars-check`), as `test-vars-check` refuses one of `TEST_RUSTFLAGS`; the lane
+  `slow` calls it and `test-opt1-profile-check` with `STEP slow` right after `gate-vars`,
+  before its clock and its builds
+  (`tests/gate/slow-refuses-a-caller-value-of-its-runs-at-opt-level-1.sh`). A macro that
+  writes tests writes each as `#[test]` and `fn <name> =
   <part>;` (`language_parts!`, `round_trip_planes!`), so the rule sees it; one whose name
   only the macro writes runs at opt-level 0 and at every size of the realm. A new test of a
   moved binary lands in the run at opt-level 1 by the package term; one that needs
@@ -512,10 +537,10 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   That check counts spellings: a second package part written with another matcher passes
   it and the split, and the guard stops it only when the tests run
   (`story:test-split-holds-the-stack-tests-of-swell-main-by-its-lists`, backlog). It
-  prints `test: swell::main <a> at opt-level 1, <b> at opt-level 0` (1664 and 106) and
-  `test: <n> tests at opt-level 1, <m> at opt-level 0` (2187 and 345). The lists hold the
+  prints `test: swell::main <a> at opt-level 1, <b> at opt-level 0` (1699 and 106) and
+  `test: <n> tests at opt-level 1, <m> at opt-level 0` (2222 and 345). The lists hold the
   tests that run, an ignored test is in neither: n plus m is p plus f of the summed line
-  (2532), and p plus f plus i is the count of tests of the list without a filter (2533).
+  (2567), and p plus f plus i is the count of tests of the list without a filter (2568).
   It fails, naming the test, when the list of the run at opt-level 1 does not hold
   `TEST_OPT1_PROFILE_TEST`, the profile's test (a test the rule prints "stack", one in a
   nested `mod` or one a macro writes would run at opt-level 0), and with a line of its own
@@ -530,7 +555,7 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `test-sum` runs `nextest-report` on each run into a file (by `TASK_EXE`, made absolute
   from `USER_WORKING_DIR` when it names a directory: the command runs in the directory of
   `Taskfile.yml`) and prints one line for both, `<b> test binaries: <p> passed, <f> failed,
-  <i> ignored`: b and the count of tests from `.out/test-list-all.count` (19 and 2533), p
+  <i> ignored`: b and the count of tests from `.out/test-list-all.count` (19 and 2568), p
   and f the sums, i the tests less p and f, the tests neither run ran (1). The ten
   `gate-slowest test` lines are taken over both runs. Planted scripts under `tests/gate/`:
   `test-runs-each-test-once-at-one-opt-level.sh` (with a failing run at opt-level 1 and a
@@ -544,6 +569,28 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh`,
   `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh` and
   `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh`.
+- `test-split` takes a run of the lane too: `SPLIT_RUN` (`slow-tests`, `realm-sizes`) names
+  the run and its files (`.out/<run>-opt1-nextest.toml`, `.out/<run>-opt0-nextest.toml`,
+  `.out/<run>-list-*.txt`), `SPLIT_FILTER` its `-E` filter, `SPLIT_ARGS` its arguments at
+  opt-level 0, `SPLIT_OPT1_TARGETS` the targets added to `TEST_OPT1_ARGS`, `SPLIT_EXCLUDE`
+  a room-rule list whose "other" tests the run leaves out, `SPLIT_FULL_COUNTS=1` exports
+  `SWELL_FULL_COUNTS` and `SPLIT_BUILT_BY` names the build its lists read. A test of the run
+  in neither part or in both fails it by name; a list that compiles fails it. The lane calls
+  it through `TASK_EXE` (as `test-sum` does), so the filters it computes pass as values;
+  every call passes all seven `SPLIT_` variables, the gate's empty, and
+  `test-opt1-vars-check` (called by `test`, `build-tests`, `slow`, `slow-tests` and
+  `test-realm-sizes`) refuses one a caller gives on the command line or in the environment;
+  `GATE_VARIABLES` lists them. An exclusion list with no "other" line adds no term
+  (`all()`). Without `SPLIT_RUN` the gate's call prints what it printed
+  (`tests/gate/slow-split-refuses-a-test-in-neither-part-or-in-both.sh`,
+  `tests/gate/slow-refuses-a-moved-run-that-compiles.sh`,
+  `tests/gate/test-split-takes-no-caller-value-of-a-split.sh`,
+  `tests/gate/test-realm-sizes-counts-only-the-parts-it-ran.sh`).
+- The task runner's shell (task 3.54) does not stop a block at a `continue` or `break`
+  inside an `if`, a `case` clause or a brace group: the commands after it in that block
+  still run. In a task's shell a `continue` stands at the level of its loop's body or as the
+  last command of its block (found in `test-realm-sizes`, where `[ "$n" -gt 0 ] || continue`
+  inside a `case` clause did not skip an empty part).
 - The profile `collect` keeps debug assertions and overflow checks (it inherits `test`,
   where `Cargo.toml` sets `overflow-checks = true`), held by
   `realm_padding::the_profile_keeps_debug_assertions_and_overflow_checks_on`. That test reads
@@ -565,16 +612,42 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `build-tests` ran 824 s before item 5 and 814 s with it, its build at opt-level 1 5 min
   29 s and 5 min 45 s; after a change of swell's tests that build took 5 min 12 s to 8 min
   44 s there. The forge's job `check` has 30 minutes for build and tests.
-- The lane builds the profile `collect` in the background from its start, beside
-  `slow-test262` (`slow-collect-start`; `COLLECT_MAIN` and `COLLECT_RUSTFLAGS` at the top of
-  `Taskfile.yml` are the one definition of its arguments and flags, read by the runs on it
-  too). `slow-tests` waits for it at most `SLOW_COLLECT_WAIT` (400 s) and prints
-  `slow-build collect <s> s, exit <n>, waited <s> s: ...`, a line of its own beside the
-  `slow-time` lines. The build runs in a process group of its own (`setsid`);
-  `slow-collect-stop` (deferred) and a watcher end that group by its number when the lane
-  ends, and the stop ends only a group whose command line names this tree's
-  `.out/slow-collect`. Run alone, a part builds what it needs itself.
-- Each crate has one integration-test binary, `tests/main.rs`, generated by
+- The lane builds at opt-level 1 in the background from its start, beside `slow-test262`
+  (`slow-collect-start`): three builds one after the other, in the order the runs read them,
+  each `SWELL_FULL_COUNTS=1 cargo nextest run --no-run` with `COLLECT_RUSTFLAGS`: `opt1`
+  (`TEST_OPT1_ARGS`), `lib` (`COLLECT_MAIN` with `--lib` for `--test main`) and `collect`
+  (`COLLECT_MAIN`). `COLLECT_MAIN`, `COLLECT_RUSTFLAGS` and `TEST_OPT1_ARGS` at the top of
+  `Taskfile.yml` are the one definition of their arguments and flags, read by the runs on
+  them too. Each build writes `.out/slow-collect/<build>.{log,start,end,status}`.
+  `slow-tests` waits for them at most `SLOW_COLLECT_WAIT` (400 s, under the part's 600) in
+  sum (`.out/slow-tests-waited`) and prints `slow-build <build> <s> s, exit <n>, waited <s>
+  s: ...`, a line of its own beside the `slow-time` lines. The builds run in a process group
+  of their own (`setsid`); `slow-collect-stop` (deferred) and a watcher end that group by its
+  number when the lane ends, and the stop ends only a group whose command line names this
+  tree's `.out/slow-collect`. Run alone, `slow-tests` builds what it needs itself, and
+  `build-realm-sizes` builds what `test-realm-sizes` runs (the test profile,
+  `TEST_OPT1_ARGS --test main` and `COLLECT_MAIN`). On the build node (32 cores) the lane
+  read 383.8 s before the three builds and 312.5 s with them (`slow-tests` 63.4 and 20.8,
+  `test-realm-sizes` 49.1 and 32.1, `slow-test262` 245.8 and 258.9; `slow-build opt1` 71.1 s,
+  `lib` 34.0 s, `collect` 1.0 s against `collect` 57.1 s).
+- `crates/swell/tests/` holds three types that implement `Host`
+  (`story:slow-lane-holds-its-bound-on-the-slower-runner`, step 1). The engine is generic
+  over its host, so each such type compiles the engine once more inside `swell::main`: with
+  19 types the unit `main` took 311 to 358 s at opt-level 1 on the build node, with three it
+  takes 54.9 s in the collect build and 72.2 s with `TEST_OPT1_ARGS`. A test whose host
+  answers hooks of its own writes no type: it gives `Scripted`
+  (`tests/support/scripted.rs`) its state and a table of function pointers, `const HOOKS:
+  Hooks = Hooks { <its hooks>, ..Hooks::PROVIDED }`, and reads the state through
+  `state::<T>()` and `state_mut::<T>()`. `Hooks::PROVIDED` holds copies of the trait's
+  provided defaults and, for the five required hooks, a panic that names the hook.
+  `TestHost` and `ProvidedHost` of `tests/support/host.rs` keep the trait's own defaults and
+  so test them. The module `host_types` of `swell::main` reads the sources and refuses,
+  naming file and line, an `impl` of `Host` without the marker `// host-type: <reason>` on
+  the line before it (`scripted` once; `provided-defaults` for the two types of
+  `support/host.rs`, once each; `own-constant` for a type that defines
+  `SUPPORTED_IMPORT_ATTRIBUTES` as a list literal of its own with one element or more), one
+  with a type parameter, `Host` renamed in a `use`, and a macro that could write such an
+  `impl`; the module's comment lists each rule, and each has a case on planted text.
   `sh taskfiles/test-main.sh write` (task `test-main`) and never edited by hand; a manifest
   has `autotests = false` and one `[[test]]` named `main`, and `test-binaries-check` runs the
   layout check first (`sh taskfiles/test-main.sh check`, no build) and fails on a second test
@@ -598,8 +671,9 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   module's line to `STACK_MODULE_LIST` and its own line to `STACK_TEST_LIST`;
   `stack-modules-check` refuses a listed test whose module the list does not name and a test
   the list names twice. One more module costs the release build about 0.6 s when its tests
-  use the shared `TestHost`, about 15 s when it declares a `Host` of its own (each host type
-  is a monomorphized copy of the engine in the test binary).
+  use the shared `TestHost`; it cost about 15 s when a module declared a `Host` of its own
+  (each host type is a monomorphized copy of the engine in the test binary), which the
+  module `host_types` now refuses.
 - The repository's `.cargo/config.toml` builds the dev and test profiles without debug
   information (`debug = false`, `strip = "debuginfo"`), on the forge and here alike;
   `test-binaries-check` shows it with `readelf -S` on every test executable. A stack bound is
@@ -692,7 +766,12 @@ the clock of the test steps (the line `build-tests opt-level 1`). On the forge's
 4 cores (`gate-runner: 4 cores, AMD EPYC 7763 64-Core Processor`) the first attempt of
 `check` on `5ab9f8e5`, before item 5, took 117.6 s of the 120 (407.6 CPU seconds, yardstick
 3.9 s; run 46069632845); a runner of the same yardstick took 147.6 s on the head of the
-wave's first pull request. The forge reads item 5 on the wave's third pull request. On
+wave's first pull request. With item 5 the first attempt of `check` on `f962c324` took
+84.8 s (284.1 CPU seconds, yardstick 3.2 s, 26.5 yardsticks against the bound of 29.5; run
+46091909500, `gate-runner: 4 cores, INTEL(R) XEON(R) PLATINUM 8573C`). The lane `slow` on
+that head read 1123.4 s of its 900 on an AMD EPYC 7763 and 843.8 s on an AMD EPYC 9V74 (run
+46091909506, attempts 1 and 2): `story:slow-lane-holds-its-bound-on-the-slower-runner` comes
+before any further feature unit (`docs/plan/wave-big-2.md`, the fourth part, "The forge"). On
 `wave/big-2` at `5aaeb6e8`, the head with slice 8 delivered, the node took 46.9 s at load
 22 (360.5 CPU seconds, of them `test` 164.8). On
 `impl/lanefix` at `e3c97c4`, the head of the wave's first pull request but for the planning
@@ -708,7 +787,7 @@ On the code of release `0.8.0` with the gate change of
 94.3 s at load 34 (312.1 CPU seconds) and the forge's runner of 4 cores 127.9 s (448.5 CPU
 seconds). The planted scripts' single `ok` lines, the ten slowest tests of each step and the
 slice lines after slice 10 are left out (`conformance/test262/expected.txt` has every slice
-line). The fault step's line counts the 1,770 tests its filter leaves out as ignored:
+line). The fault step's line counts the 1,805 tests its filter leaves out as ignored:
 
 
 ```
@@ -731,9 +810,9 @@ unicode-tables: 16 table(s) equal the generator output
 swell v1 — 2 file(s), 10 scenario(s), valid
 60 scenario(s) (10 authored), 41 refusal(s), written to .out/suite.json
   60 scenarios: 60 passed, 0 failed, 0 error, 0 unsupported
-host-requirements: 223 requirement(s), 223 line(s): 174 test, 49 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
-host-requirements: pending by slice: 11:32 12:3 13:2 14:6 16:5 18:1
-host-surface: 19 change(s) since 0.12.0, each named
+host-requirements: 224 requirement(s), 224 line(s): 174 test, 50 pending, 0 omitted; 53 UNMAPPED marker(s), each naming a HOST-<n> or ESS limit
+host-requirements: pending by slice: 11:33 12:3 13:2 14:6 16:5 18:1
+host-surface: 20 change(s) since 0.12.0, each named
 site-data-check: website/data/status.json equals its regeneration from conformance/test262/expected.txt, conformance/slices-delivered.txt, conformance/host/requirements.txt, conformance/test262/moves.tsv, docs/design/engine.md, Cargo.toml, Cargo.lock and the crate roots under crates
 site-data-check: website/data/engines.json equals its regeneration from bench/engines.jsonl, bench/published/*.tsv (held by its SHA256SUMS), bench/results/*.json, conformance/test262/expected.txt, conformance/test262/PIN, Cargo.toml, conformance/host/requirements.txt, crates/swell/src/host/limits.rs, crates/swell/src/host/interrupt.rs and the status file
 test-main: 9 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
@@ -747,16 +826,16 @@ build-conform-engine: Finished `test` profile [unoptimized] target(s) in 0.10s
 build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.04s
 build-test262-runner: Finished `release` profile [optimized] target(s) in 0.01s
 gate-runner: 32 cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash
-test: swell::main 1664 at opt-level 1, 106 at opt-level 0
-test: 2187 tests at opt-level 1, 345 at opt-level 0
-19 test binaries: 2532 passed, 0 failed, 1 ignored
+test: swell::main 1699 at opt-level 1, 106 at opt-level 0
+test: 2222 tests at opt-level 1, 345 at opt-level 0
+19 test binaries: 2567 passed, 0 failed, 1 ignored
 gate-time test 8.6
 test-doc: 8 test suites: 19 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 19 passed, 0 failed, 0 ignored
 gate-time test-doc 4.6
-test-collect: 2 test binaries: 2029 passed, 0 failed, 1 ignored
+test-collect: 2 test binaries: 2064 passed, 0 failed, 1 ignored
 gate-time test-collect 5.2
-test-faults: 1 test binaries: 1 passed, 0 failed, 1770 ignored
+test-faults: 1 test binaries: 1 passed, 0 failed, 1805 ignored
 gate-time test-faults 0.2
 conform-engine: 3 test binaries: 16 passed, 0 failed, 0 ignored
   60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported
@@ -780,7 +859,7 @@ test262: 287 lines of conformance/test262/expected.txt; sources digest 0e48037b2
 gate-time test262-check 0.1
 test262-moves: 2031 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:378 9:29 10:83 11:4 12:64 13:22 18:4; slices 1 to 19: 44931 85794
 gate-time test262-moves-check 2.0
-gate-selftest: 114 passed, 0 failed
+gate-selftest: 119 passed, 0 failed
 gate-time gate-selftest 15.9
 gate-time test-steps 38.3 of 120, cpu 283.6, load 13.22 on 32 cores
 gate-time yardstick 3.7 s: conform-engine 1.7 and test262-moves-check 2.0
@@ -805,11 +884,18 @@ coordinating session (not heard in the coordinating session itself): "A. Yes, bo
 replaced by one bot-made first commit, as surf)". Published on 2026-11-21 at the close of wave 2
 of slice 1: https://github.com/beyond10x/swell, `main` starts at `8945d64`, made by the bot.
 
-- **Who does what.** The session that decides for the operator does the whole forge side: the
-  bot-made first commit of `main`'s tree, the policy entry, audit, `check`, `verify`,
-  `publish`. The coordinating session and its units make no call to a forge, add no remote
-  and push nothing. At each wave boundary the coordinator sends that session `main`'s commit
-  and the gate's numbers and waits for its answer before the next wave opens.
+- **Who does what.** Units push nothing and make no call to the forge. The coordinating
+  session merges finished unit branches into one integration branch per batch (the wave
+  branch), runs the gate on it, and pushes that branch through the gates
+  (`b10x-gates ... check --receipt <file>`, then `b10x-gates ... bot -- push origin
+  <branch>`): one push per batch, not per commit, since the organization's runner pool is
+  shared. It opens one pull request for the branch (`b10x-gates ... gh -- pr create`), whose
+  body lists the units it carries, reads the forge's runs, and sends the session that
+  decides for the operator one line with the pull request's number and full head commit
+  when the checks are green. That session scans the head and merges it. `main` is never
+  pushed by the coordinating session, no branch is force-pushed, and a tag, a release or
+  another publication is that session's, on the operator's word. (Until 2026-11-23 the
+  deciding session did the whole forge side.)
 - **A pull request is opened for its checks, not to be merged on the forge.** `main`'s rules
   restrict updates and require the bot as committer, and a merge made on the forge has the
   forge's committer, so the forge refuses it ("the base branch policy prohibits the merge").
@@ -1060,9 +1146,11 @@ session coordinates; this section is its procedure, taken from how surf is run
   that read the realm's room (`taskfiles/realm-room-tests.awk`) in the default mode and the
   collect mode at every size (`REALM_COLLECT=all`; the collect mode found seven of the eight
   size-red tests of `story:tests-hold-at-any-size-of-the-realm` alone, each at one size):
-  the default mode on the test-profile build and the collect mode on the `collect` build
-  (opt-level 1; `story:realm-size-lane-within-its-share`). The `collect` build runs beside
-  `slow-test262` and has no `slow-time` line of its own. `test-realm-sizes`
+  the default mode at opt-level 1 (`TEST_OPT1_ARGS --test main`, `SWELL_NO_STACK_TESTS=1`)
+  but for its stack tests, which run on the test-profile build, and the collect mode on the
+  `collect` build (opt-level 1; `story:realm-size-lane-within-its-share`). The background
+  builds run beside `slow-test262` and have no `slow-time` line of their own.
+  `test-realm-sizes`
   hands nextest the tests it does not run in a generated file,
   `.out/realm-sizes-nextest.toml` (a copy of `.config/nextest.toml` with one `default-filter`
   line), given with `--config-file`, never on the command line

@@ -15,9 +15,10 @@
 use crate::support;
 
 use support::host::{limits, seeds};
+use support::scripted::{Hooks, Scripted};
 use swell::{
-    Agent, HookCx, Host, HostError, Job, LoadRequest, ObjectRef, Outcome, Parsed, PromiseState,
-    Realm, RealmRef, RejectionOperation, Root, Script, Source, Value, ValueKind,
+    Agent, HookCx, HostError, Job, LoadRequest, ObjectRef, Outcome, Parsed, PromiseState, Realm,
+    RealmRef, RejectionOperation, Root, Script, Source, Value, ValueKind,
 };
 
 /// One call of `host_promise_rejection_tracker`: the operation, a root of the promise, and what
@@ -46,66 +47,97 @@ fn shown(state: Result<PromiseState, HostError>, read: impl Fn(&Root) -> Value) 
     }
 }
 
-impl Host for ReadsHost {
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<swell::HostDefined> {
-        cx.host_mut().hooks += 1;
-        None
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, _realm: RealmRef) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        _result: Result<(), Value>,
-    ) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        promise: ObjectRef,
-        operation: RejectionOperation,
-    ) {
-        let promise = cx.root(Value::Object(promise)).unwrap();
-        let state = cx.promise_state(&promise);
-        let state = match state {
-            Ok(PromiseState::Rejected(result)) => format!("Rejected({:?})", cx.get(&result)),
-            other => format!("{other:?}"),
-        };
-        let read = format!("{state} {:?}", cx.promise_is_handled(&promise));
-        cx.host_mut().tracked.push(Tracked {
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<swell::HostDefined> {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+    None
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, _realm: Option<RealmRef>) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, _realm: RealmRef) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    _result: Result<(), Value>,
+) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    promise: ObjectRef,
+    operation: RejectionOperation,
+) {
+    let promise = cx.root(Value::Object(promise)).unwrap();
+    let state = cx.promise_state(&promise);
+    let state = match state {
+        Ok(PromiseState::Rejected(result)) => format!("Rejected({:?})", cx.get(&result)),
+        other => format!("{other:?}"),
+    };
+    let read = format!("{state} {:?}", cx.promise_is_handled(&promise));
+    cx.host_mut()
+        .state_mut::<ReadsHost>()
+        .tracked
+        .push(Tracked {
             operation,
             promise,
             read,
         });
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, _request: LoadRequest) {
-        cx.host_mut().hooks += 1;
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        cx.host_mut().hooks += 1;
-        0
-    }
 }
 
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    cx.host_mut().state_mut::<ReadsHost>().hooks += 1;
+    0
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`ReadsHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_make_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_system_utc_epoch_nanoseconds,
+    ..Hooks::PROVIDED
+};
+
 /// An agent of the test host with a realm.
-fn agent() -> (Agent<ReadsHost>, Realm) {
-    let mut agent = Agent::new(ReadsHost::default(), limits(), seeds()).unwrap();
+fn agent() -> (Agent<Scripted>, Realm) {
+    let mut agent = Agent::new(
+        Scripted::new(ReadsHost::default(), HOOKS),
+        limits(),
+        seeds(),
+    )
+    .unwrap();
     let realm = match support::host::create_realm(&mut agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -114,7 +146,7 @@ fn agent() -> (Agent<ReadsHost>, Realm) {
 }
 
 /// `parse_script` of `source`, which must parse.
-fn parse(agent: &mut Agent<ReadsHost>, realm: &Realm, source: &str) -> Script {
+fn parse(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -125,7 +157,7 @@ fn parse(agent: &mut Agent<ReadsHost>, realm: &Realm, source: &str) -> Script {
 }
 
 /// The completion value of the script `source`, which must complete normally.
-fn run(agent: &mut Agent<ReadsHost>, realm: &Realm, source: &str) -> Root {
+fn run(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Root {
     let script = parse(agent, realm, source);
     match agent.evaluate_script(&script).unwrap() {
         Outcome::Normal(root) => root,
@@ -134,24 +166,24 @@ fn run(agent: &mut Agent<ReadsHost>, realm: &Realm, source: &str) -> Root {
 }
 
 /// A root of `value`.
-fn root(agent: &mut Agent<ReadsHost>, realm: &Realm, value: Value) -> Root {
+fn root(agent: &mut Agent<Scripted>, realm: &Realm, value: Value) -> Root {
     agent.with_cx(realm, |cx| cx.root(value).unwrap()).unwrap()
 }
 
 /// The value `root` holds.
-fn value(agent: &mut Agent<ReadsHost>, realm: &Realm, root: &Root) -> Value {
+fn value(agent: &mut Agent<Scripted>, realm: &Realm, root: &Root) -> Value {
     agent.with_cx(realm, |cx| cx.get(root).unwrap()).unwrap()
 }
 
 /// Whether two roots hold the same value.
-fn same(agent: &mut Agent<ReadsHost>, realm: &Realm, a: &Root, b: &Root) -> bool {
+fn same(agent: &mut Agent<Scripted>, realm: &Realm, a: &Root, b: &Root) -> bool {
     agent
         .with_cx(realm, |cx| cx.get(a).unwrap() == cx.get(b).unwrap())
         .unwrap()
 }
 
 /// What `Agent::promise_state` of `promise` answers, shown.
-fn state(agent: &mut Agent<ReadsHost>, realm: &Realm, promise: &Root) -> String {
+fn state(agent: &mut Agent<Scripted>, realm: &Realm, promise: &Root) -> String {
     let answer = agent.promise_state(promise);
     let results = match &answer {
         Ok(PromiseState::Fulfilled(result) | PromiseState::Rejected(result)) => {
@@ -163,9 +195,10 @@ fn state(agent: &mut Agent<ReadsHost>, realm: &Realm, promise: &Root) -> String 
 }
 
 /// The calls of the tracker, as (operation, what the hook read) pairs.
-fn tracked(agent: &Agent<ReadsHost>) -> Vec<(RejectionOperation, String)> {
+fn tracked(agent: &Agent<Scripted>) -> Vec<(RejectionOperation, String)> {
     agent
         .host()
+        .state::<ReadsHost>()
         .tracked
         .iter()
         .map(|call| (call.operation, call.read.clone()))
@@ -173,16 +206,16 @@ fn tracked(agent: &Agent<ReadsHost>) -> Vec<(RejectionOperation, String)> {
 }
 
 /// Whether call `i` of the tracker was given the promise `promise` holds.
-fn tracked_promise(agent: &mut Agent<ReadsHost>, realm: &Realm, i: usize, promise: &Root) -> bool {
-    let mut held = std::mem::take(&mut agent.host_mut().tracked);
+fn tracked_promise(agent: &mut Agent<Scripted>, realm: &Realm, i: usize, promise: &Root) -> bool {
+    let mut held = std::mem::take(&mut agent.host_mut().state_mut::<ReadsHost>().tracked);
     let answer = same(agent, realm, &held[i].promise, promise);
-    held.append(&mut agent.host_mut().tracked);
-    agent.host_mut().tracked = held;
+    held.append(&mut agent.host_mut().state_mut::<ReadsHost>().tracked);
+    agent.host_mut().state_mut::<ReadsHost>().tracked = held;
     answer
 }
 
 /// A checkpoint that must answer `Normal`.
-fn checkpoint(agent: &mut Agent<ReadsHost>) {
+fn checkpoint(agent: &mut Agent<Scripted>) {
     match agent.perform_microtask_checkpoint().unwrap() {
         Outcome::Normal(_) => {}
         other => panic!("the checkpoint answered {other:?}"),
@@ -217,7 +250,7 @@ fn host_46_promise_state_of_a_value_that_is_no_promise_is_wrong_kind() {
         .iter()
         .map(|source| run(&mut agent, &realm, source))
         .collect();
-    let hooks = agent.host().hooks;
+    let hooks = agent.host().state::<ReadsHost>().hooks;
     for (source, value) in sources.iter().zip(&values) {
         assert!(
             matches!(agent.promise_state(value), Err(WRONG_KIND)),
@@ -248,8 +281,15 @@ fn host_46_promise_state_of_a_value_that_is_no_promise_is_wrong_kind() {
             "the reads of Cx of {source}"
         );
     }
-    assert_eq!(agent.host().hooks, hooks, "no hook was called");
-    assert!(agent.host().tracked.is_empty(), "nothing was tracked");
+    assert_eq!(
+        agent.host().state::<ReadsHost>().hooks,
+        hooks,
+        "no hook was called"
+    );
+    assert!(
+        agent.host().state::<ReadsHost>().tracked.is_empty(),
+        "nothing was tracked"
+    );
 }
 
 /// HOST-100: a promise of `Cx::new_promise_capability` reads `Pending` and not handled; after
@@ -366,10 +406,14 @@ fn host_101_a_promise_marked_as_handled_is_not_tracked_again() {
     assert_eq!(tracked(&agent).len(), 1);
     assert_eq!(tracked(&agent)[0].0, RejectionOperation::Reject);
     assert_eq!(agent.promise_is_handled(&p), Ok(false));
-    let hooks = agent.host().hooks;
+    let hooks = agent.host().state::<ReadsHost>().hooks;
     assert_eq!(agent.mark_promise_as_handled(&p), Ok(()));
     assert_eq!(agent.promise_is_handled(&p), Ok(true));
-    assert_eq!(agent.host().hooks, hooks, "the mark called no hook");
+    assert_eq!(
+        agent.host().state::<ReadsHost>().hooks,
+        hooks,
+        "the mark called no hook"
+    );
     assert_eq!(tracked(&agent).len(), 1, "the mark called no tracker");
     run(&mut agent, &realm, "p.then(undefined, function () {}); 0");
     run(&mut agent, &realm, "p.catch(function () {}); 0");
@@ -571,7 +615,7 @@ fn the_reads_call_no_hook_and_change_no_reading() {
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     let bytes = agent.heap_bytes().unwrap();
     let live = agent.live_bytes().unwrap();
-    let hooks = agent.host().hooks;
+    let hooks = agent.host().state::<ReadsHost>().hooks;
     let tracked_before = tracked(&agent).len();
 
     let mut first = Vec::new();
@@ -616,7 +660,11 @@ fn the_reads_call_no_hook_and_change_no_reading() {
             assert_eq!(answers, again, "the reads answer the same");
         }
     }
-    assert_eq!(agent.host().hooks, hooks, "no hook was called");
+    assert_eq!(
+        agent.host().state::<ReadsHost>().hooks,
+        hooks,
+        "no hook was called"
+    );
     assert_eq!(tracked(&agent).len(), tracked_before, "no tracker call");
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(agent.heap_bytes(), Ok(bytes));
@@ -635,7 +683,10 @@ fn a_read_of_a_foreign_root_is_foreign_handle() {
     let (mut a, realm_a) = agent();
     let (mut b, realm_b) = agent();
     let p = run(&mut a, &realm_a, "new Promise(function () {})");
-    let hooks = (a.host().hooks, b.host().hooks);
+    let hooks = (
+        a.host().state::<ReadsHost>().hooks,
+        b.host().state::<ReadsHost>().hooks,
+    );
     let foreign = HostError::ForeignHandle;
     assert!(matches!(b.promise_state(&p), Err(HostError::ForeignHandle)));
     assert_eq!(b.promise_is_handled(&p), Err(foreign));
@@ -657,9 +708,15 @@ fn a_read_of_a_foreign_root_is_foreign_handle() {
     );
     assert_eq!(state(&mut a, &realm_a, &p), "Pending");
     assert_eq!(
-        (a.host().hooks, b.host().hooks),
+        (
+            a.host().state::<ReadsHost>().hooks,
+            b.host().state::<ReadsHost>().hooks
+        ),
         hooks,
         "no hook was called"
     );
-    assert!(a.host().tracked.is_empty() && b.host().tracked.is_empty());
+    assert!(
+        a.host().state::<ReadsHost>().tracked.is_empty()
+            && b.host().state::<ReadsHost>().tracked.is_empty()
+    );
 }

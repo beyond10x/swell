@@ -18,11 +18,12 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use support::host::{limits, seeds};
+use support::scripted::{Hooks, Scripted};
 use swell::{
     Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, ErrorKind, GlobalObjects,
-    Handled, HookCx, Host, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job,
-    LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PropertyDescriptor, PropertyKey, Prototype,
-    Realm, RealmRef, RejectionOperation, Root, Script, ScriptRef, Source, StringRef, Termination,
+    Handled, HookCx, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job, LoadRequest,
+    ModuleRef, ObjectRef, Outcome, Parsed, PropertyDescriptor, PropertyKey, Prototype, Realm,
+    RealmRef, RejectionOperation, Root, Script, ScriptRef, Source, StringRef, Termination,
     TimeZoneIdentifier, Tracer, Value,
 };
 
@@ -37,161 +38,270 @@ struct Recorder {
     answer: Option<Completion<Value>>,
 }
 
-impl Host for Recorder {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        _request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        cx.host_mut().calls.push("host_ensure_can_compile_strings");
-        Ok(())
-    }
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        cx.host_mut().calls.push("host_get_code_for_eval");
-        None
-    }
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        _obj: ObjectRef,
-    ) -> Completion<()> {
-        cx.host_mut()
-            .calls
-            .push("host_ensure_can_add_private_element");
-        Ok(())
-    }
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool {
-        cx.host_mut().calls.push("host_has_source_text_available");
-        true
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<swell::HostDefined> {
-        cx.host_mut().calls.push("host_make_job_callback");
-        None
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        _host_defined: Option<&swell::HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        cx.host_mut().calls.push("host_call_job_callback");
-        cx.call(Value::Object(callback), this, args)
-            .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>) {
-        cx.host_mut().calls.push("host_enqueue_promise_job");
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, _realm: RealmRef) {
-        cx.host_mut().calls.push("host_prepare_to_run_job");
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        _result: Result<(), Value>,
-    ) {
-        cx.host_mut().calls.push("host_clean_up_after_job");
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        cx.host_mut().calls.push("host_enqueue_generic_job");
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {
-        cx.host_mut().calls.push("host_enqueue_timeout_job");
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        cx.host_mut()
-            .calls
-            .push("host_enqueue_finalization_registry_cleanup_job");
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        _promise: ObjectRef,
-        _operation: RejectionOperation,
-    ) {
-        cx.host_mut().calls.push("host_promise_rejection_tracker");
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, _request: LoadRequest) {
-        cx.host_mut().calls.push("host_load_imported_module");
-    }
-    fn host_get_import_meta_properties(
-        cx: &mut HookCx<'_, Self>,
-        _module: ModuleRef,
-    ) -> Completion<Vec<(PropertyKey, Value)>> {
-        cx.host_mut().calls.push("host_get_import_meta_properties");
-        Ok(Vec::new())
-    }
-    fn host_finalize_import_meta(
-        cx: &mut HookCx<'_, Self>,
-        _import_meta: ObjectRef,
-        _module: ModuleRef,
-    ) {
-        cx.host_mut().calls.push("host_finalize_import_meta");
-    }
-    fn host_resize_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        cx.host_mut().calls.push("host_resize_array_buffer");
-        Ok(Handled::Unhandled)
-    }
-    fn host_grow_shared_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        cx.host_mut().calls.push("host_grow_shared_array_buffer");
-        Ok(Handled::Unhandled)
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        cx.host_mut()
-            .calls
-            .push("host_system_utc_epoch_nanoseconds");
-        0
-    }
-    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
-        cx.host_mut().calls.push("system_time_zone_identifier");
-        "UTC".to_string()
-    }
-    fn get_named_time_zone_offset_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _epoch_ns: i128,
-    ) -> i128 {
-        cx.host_mut()
-            .calls
-            .push("get_named_time_zone_offset_nanoseconds");
-        0
-    }
-    fn get_named_time_zone_epoch_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _local: IsoDateTime,
-    ) -> Vec<i128> {
-        cx.host_mut()
-            .calls
-            .push("get_named_time_zone_epoch_nanoseconds");
-        Vec::new()
-    }
-    fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier> {
-        cx.host_mut()
-            .calls
-            .push("available_named_time_zone_identifiers");
-        Vec::new()
-    }
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    _request: &CompileStrings<'_>,
+) -> Completion<()> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_ensure_can_compile_strings");
+    Ok(())
 }
 
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_get_code_for_eval");
+    None
+}
+
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_ensure_can_add_private_element");
+    Ok(())
+}
+
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, _func: ObjectRef) -> bool {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_has_source_text_available");
+    true
+}
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<swell::HostDefined> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_make_job_callback");
+    None
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    _host_defined: Option<&swell::HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_call_job_callback");
+    cx.call(Value::Object(callback), this, args)
+        .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, _realm: Option<RealmRef>) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_enqueue_promise_job");
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, _realm: RealmRef) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_prepare_to_run_job");
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    _result: Result<(), Value>,
+) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_clean_up_after_job");
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_enqueue_generic_job");
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_enqueue_timeout_job");
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_enqueue_finalization_registry_cleanup_job");
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    _promise: ObjectRef,
+    _operation: RejectionOperation,
+) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_promise_rejection_tracker");
+}
+
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_load_imported_module");
+}
+
+fn host_get_import_meta_properties(
+    cx: &mut HookCx<'_, Scripted>,
+    _module: ModuleRef,
+) -> Completion<Vec<(PropertyKey, Value)>> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_get_import_meta_properties");
+    Ok(Vec::new())
+}
+
+fn host_finalize_import_meta(
+    cx: &mut HookCx<'_, Scripted>,
+    _import_meta: ObjectRef,
+    _module: ModuleRef,
+) {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_finalize_import_meta");
+}
+
+fn host_resize_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_resize_array_buffer");
+    Ok(Handled::Unhandled)
+}
+
+fn host_grow_shared_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_grow_shared_array_buffer");
+    Ok(Handled::Unhandled)
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("host_system_utc_epoch_nanoseconds");
+    0
+}
+
+fn system_time_zone_identifier(cx: &mut HookCx<'_, Scripted>) -> String {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("system_time_zone_identifier");
+    "UTC".to_string()
+}
+
+fn get_named_time_zone_offset_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _epoch_ns: i128,
+) -> i128 {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("get_named_time_zone_offset_nanoseconds");
+    0
+}
+
+fn get_named_time_zone_epoch_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _local: IsoDateTime,
+) -> Vec<i128> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("get_named_time_zone_epoch_nanoseconds");
+    Vec::new()
+}
+
+fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Scripted>) -> Vec<TimeZoneIdentifier> {
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .calls
+        .push("available_named_time_zone_identifiers");
+    Vec::new()
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`Recorder`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_ensure_can_add_private_element,
+    host_has_source_text_available,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_get_import_meta_properties,
+    host_finalize_import_meta,
+    host_resize_array_buffer,
+    host_grow_shared_array_buffer,
+    host_system_utc_epoch_nanoseconds,
+    system_time_zone_identifier,
+    get_named_time_zone_offset_nanoseconds,
+    get_named_time_zone_epoch_nanoseconds,
+    available_named_time_zone_identifiers,
+};
+
 /// A host function that counts its calls and answers `undefined`.
-fn counted(cx: &mut Cx<'_, Recorder>, _call: HostCall<'_>) -> Completion<Value> {
-    cx.host_mut().host_fn += 1;
+fn counted(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().state_mut::<Recorder>().host_fn += 1;
     Ok(Value::Undefined)
 }
 
 /// A host function that counts its calls and returns what the host's `answer` holds.
-fn answer(cx: &mut Cx<'_, Recorder>, _call: HostCall<'_>) -> Completion<Value> {
-    cx.host_mut().host_fn += 1;
-    cx.host_mut().answer.take().unwrap_or(Ok(Value::Undefined))
+fn answer(cx: &mut Cx<'_, Scripted>, _call: HostCall<'_>) -> Completion<Value> {
+    cx.host_mut().state_mut::<Recorder>().host_fn += 1;
+    cx.host_mut()
+        .state_mut::<Recorder>()
+        .answer
+        .take()
+        .unwrap_or(Ok(Value::Undefined))
 }
 
 /// Host data that holds nothing.
@@ -202,12 +312,12 @@ impl HostData for Nothing {
 }
 
 /// An agent with the recording host and the test limits.
-fn agent() -> Agent<Recorder> {
-    Agent::new(Recorder::default(), limits(), seeds()).unwrap()
+fn agent() -> Agent<Scripted> {
+    Agent::new(Scripted::new(Recorder::default(), HOOKS), limits(), seeds()).unwrap()
 }
 
 /// A realm with no setup closure.
-fn realm(agent: &mut Agent<Recorder>) -> Realm {
+fn realm(agent: &mut Agent<Scripted>) -> Realm {
     match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(realm) => realm,
         other => panic!("create_realm answered {other:?}"),
@@ -215,7 +325,7 @@ fn realm(agent: &mut Agent<Recorder>) -> Realm {
 }
 
 /// `parse_script` of `source`, which must parse.
-fn parse(agent: &mut Agent<Recorder>, realm: &Realm, source: &str) -> Script {
+fn parse(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> Script {
     match agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
@@ -226,7 +336,7 @@ fn parse(agent: &mut Agent<Recorder>, realm: &Realm, source: &str) -> Script {
 }
 
 /// Define the host function `steps` as the global `name` of `realm`.
-fn define(agent: &mut Agent<Recorder>, realm: &Realm, name: &str, steps: swell::HostFn<Recorder>) {
+fn define(agent: &mut Agent<Scripted>, realm: &Realm, name: &str, steps: swell::HostFn<Scripted>) {
     let global = agent.global_object(realm).unwrap();
     agent
         .with_cx(realm, |cx| {
@@ -265,7 +375,7 @@ struct Good {
 }
 
 /// The live values of `good`, read in `cx`.
-fn good_values(cx: &mut Cx<'_, Recorder>, good: &Good) -> (ObjectRef, Value, PropertyKey) {
+fn good_values(cx: &mut Cx<'_, Scripted>, good: &Good) -> (ObjectRef, Value, PropertyKey) {
     let Ok(Value::Object(object)) = cx.get(&good.object) else {
         panic!("the good object");
     };
@@ -277,7 +387,7 @@ fn good_values(cx: &mut Cx<'_, Recorder>, good: &Good) -> (ObjectRef, Value, Pro
 }
 
 /// Make the live handles of `agent`.
-fn good(agent: &mut Agent<Recorder>, realm: &Realm) -> Good {
+fn good(agent: &mut Agent<Scripted>, realm: &Realm) -> Good {
     agent
         .with_cx(realm, |cx| {
             let realm_ref = cx.realm_ref(realm).unwrap();
@@ -298,7 +408,7 @@ fn good(agent: &mut Agent<Recorder>, realm: &Realm) -> Good {
 
 /// Stale handles of `agent`: an object whose root was released, a String, a realm and a script
 /// whose scopes ended, each freed by a collection, which each is checked to be.
-fn stale(agent: &mut Agent<Recorder>, realm: &Realm) -> Bad {
+fn stale(agent: &mut Agent<Scripted>, realm: &Realm) -> Bad {
     let doomed = match support::host::create_realm(agent, None, None).unwrap() {
         Outcome::Normal(doomed) => doomed,
         other => panic!("{other:?}"),
@@ -352,7 +462,7 @@ fn stale(agent: &mut Agent<Recorder>, realm: &Realm) -> Bad {
 }
 
 /// Handles of `other`, an agent that is not the one under test.
-fn foreign(other: &mut Agent<Recorder>) -> (Bad, Realm, Root, Script) {
+fn foreign(other: &mut Agent<Scripted>) -> (Bad, Realm, Root, Script) {
     let realm = realm(other);
     let script = parse(other, &realm, "1;");
     let (bad, root) = other
@@ -448,7 +558,7 @@ macro_rules! scoped_answers {
 /// Every method of `Cx` that takes a handle, each given one bad handle in one place while the
 /// others are `good`'s, as (name, answer) pairs.
 fn cx_answers(
-    cx: &mut Cx<'_, Recorder>,
+    cx: &mut Cx<'_, Scripted>,
     bad: Bad,
     good: &Good,
 ) -> Vec<(&'static str, Result<(), HostError>)> {
@@ -568,7 +678,7 @@ fn all_answer(answers: &[(&'static str, Result<(), HostError>)], expected: HostE
 /// the same bytes, the last entry the same steps, the host function never ran, no property
 /// was made, no hook was called and the agent stays `Alive`.
 fn misuse_changes_nothing(
-    agent: &mut Agent<Recorder>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     good: &Good,
     bad: Bad,
@@ -601,7 +711,7 @@ fn misuse_changes_nothing(
     // The scoped methods of `HookCx`, in a setup closure.
     let mut answers = Vec::new();
     let mut setup =
-        |cx: &mut HookCx<'_, Recorder>, _realm: RealmRef| -> Completion<GlobalObjects> {
+        |cx: &mut HookCx<'_, Scripted>, _realm: RealmRef| -> Completion<GlobalObjects> {
             scoped_answers!(cx, bad, answers);
             let global = cx
                 .new_host_object(HostObjectSpec {
@@ -650,8 +760,16 @@ fn misuse_changes_nothing(
         })
         .unwrap();
     assert!(!defined, "no script ran");
-    assert_eq!(agent.host().host_fn, 0, "no host function ran");
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert_eq!(
+        agent.host().state::<Recorder>().host_fn,
+        0,
+        "no host function ran"
+    );
+    assert!(
+        agent.host().state::<Recorder>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<Recorder>().calls
+    );
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
@@ -686,7 +804,7 @@ fn host_30_a_realm_create_realm_did_not_make_is_stale() {
         let mut agent = agent();
         let realm = realm(&mut agent);
         let mut kept: Option<RealmRef> = None;
-        let mut setup = |_cx: &mut HookCx<'_, Recorder>, made: RealmRef| {
+        let mut setup = |_cx: &mut HookCx<'_, Scripted>, made: RealmRef| {
             kept = Some(made);
             ending()
         };
@@ -746,13 +864,13 @@ fn host_31_handles_of_another_agent() {
     );
     // The other agent is untouched.
     assert_eq!(other.state(), AgentState::Alive);
-    assert!(other.host().calls.is_empty());
+    assert!(other.host().state::<Recorder>().calls.is_empty());
 }
 
 /// The entry points and reads of `Agent` given a `Realm`, `Root` or `Script` of another agent:
 /// each answers `Err(ForeignHandle)`, runs no closure and no function, and changes nothing.
 fn agent_entries_refuse_foreign(
-    agent: &mut Agent<Recorder>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     good: &Good,
     other_realm: &Realm,
@@ -828,7 +946,7 @@ fn agent_entries_refuse_foreign(
             "queue_microtask",
             shape(agent.queue_microtask(
                 other_realm,
-                Box::new(move |_cx: &mut Cx<'_, Recorder>| queued.set(true)),
+                Box::new(move |_cx: &mut Cx<'_, Scripted>| queued.set(true)),
             )),
         ),
         ("promise_state", shape(agent.promise_state(other_root))),
@@ -871,11 +989,19 @@ fn agent_entries_refuse_foreign(
         !ran.get(),
         "the closure of with_cx and the microtask did not run"
     );
-    assert_eq!(agent.host().host_fn, 0, "no function ran");
+    assert_eq!(
+        agent.host().state::<Recorder>().host_fn,
+        0,
+        "no function ran"
+    );
     assert!(matches!(agent.collect(), Ok(Outcome::Normal(_))));
     assert_eq!(agent.heap_bytes(), Ok(bytes));
     assert_eq!(agent.last_entry_steps(), Ok(steps));
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert!(
+        agent.host().state::<Recorder>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<Recorder>().calls
+    );
     assert_eq!(agent.state(), AgentState::Alive);
 }
 
@@ -919,10 +1045,10 @@ fn host_45_realm_root_and_script_of_another_agent() {
 
 /// Make `agent` fault: a script calls a host function that returns a stale handle (decision 6,
 /// HOST-160).
-fn fault(agent: &mut Agent<Recorder>, realm: &Realm) {
+fn fault(agent: &mut Agent<Scripted>, realm: &Realm) {
     let stale = stale(agent, realm);
     define(agent, realm, "answer", answer);
-    agent.host_mut().answer = Some(Ok(Value::Object(stale.object)));
+    agent.host_mut().state_mut::<Recorder>().answer = Some(Ok(Value::Object(stale.object)));
     let script = parse(agent, realm, "answer();");
     assert!(matches!(
         agent.evaluate_script(&script),
@@ -946,17 +1072,17 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
     agent
         .queue_microtask(
             &realm,
-            Box::new(move |_cx: &mut Cx<'_, Recorder>| early.set(true)),
+            Box::new(move |_cx: &mut Cx<'_, Scripted>| early.set(true)),
         )
         .unwrap();
     fault(&mut agent, &realm);
     assert_eq!(agent.state(), AgentState::Faulted);
-    let calls_before = agent.host().host_fn;
+    let calls_before = agent.host().state::<Recorder>().host_fn;
 
     let ran = Rc::new(Cell::new(0));
     let (flag, setup_flag, queued) = (Rc::clone(&ran), Rc::clone(&ran), Rc::clone(&ran));
     let mut setup =
-        move |_cx: &mut HookCx<'_, Recorder>, _realm: RealmRef| -> Completion<GlobalObjects> {
+        move |_cx: &mut HookCx<'_, Scripted>, _realm: RealmRef| -> Completion<GlobalObjects> {
             setup_flag.set(setup_flag.get() + 1);
             Err(Abrupt::Throw(Value::Undefined))
         };
@@ -1001,7 +1127,7 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
             "queue_microtask",
             shape(agent.queue_microtask(
                 &realm,
-                Box::new(move |_cx: &mut Cx<'_, Recorder>| queued.set(1)),
+                Box::new(move |_cx: &mut Cx<'_, Scripted>| queued.set(1)),
             )),
         ),
         ("pending_microtasks", shape(agent.pending_microtasks())),
@@ -1028,8 +1154,16 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
         !queued_before.get(),
         "the microtask queued before the fault did not run"
     );
-    assert_eq!(agent.host().host_fn, calls_before, "no host function ran");
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert_eq!(
+        agent.host().state::<Recorder>().host_fn,
+        calls_before,
+        "no host function ran"
+    );
+    assert!(
+        agent.host().state::<Recorder>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<Recorder>().calls
+    );
     assert_eq!(agent.state(), AgentState::Faulted);
     // The interrupt handle of a faulted agent is a store nobody reads.
     agent.interrupt_handle().interrupt();
@@ -1044,7 +1178,7 @@ fn host_48_a_faulted_agent_answers_faulted_everywhere() {
 /// collection, the third String grows it by 53,248 bytes, and a String made here moved
 /// `heap_bytes()` from 550,495 to 603,743.
 fn reads(
-    agent: &mut Agent<Recorder>,
+    agent: &mut Agent<Scripted>,
     realm: &Realm,
     script: &Script,
     root: &Root,
@@ -1133,7 +1267,7 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
     ));
     // A microtask queued, so that `pending_microtasks` reads 1 and must keep reading it.
     agent
-        .queue_microtask(&realm, Box::new(|_cx: &mut Cx<'_, Recorder>| {}))
+        .queue_microtask(&realm, Box::new(|_cx: &mut Cx<'_, Scripted>| {}))
         .unwrap();
     let steps = agent.last_entry_steps().unwrap();
     assert!(steps > 0);
@@ -1152,11 +1286,15 @@ fn host_102_reads_change_nothing_and_call_no_hook() {
     assert_eq!(agent.heap_bytes(), Ok(bytes));
     assert_eq!(agent.live_bytes(), Ok(live));
     let _ = agent.interrupt_handle();
-    let _ = agent.host();
+    let _ = agent.host().state::<Recorder>();
     assert_eq!(agent.last_entry_steps(), Ok(steps));
     assert_eq!(agent.heap_bytes(), Ok(bytes));
     assert_eq!(agent.live_bytes(), Ok(live));
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert!(
+        agent.host().state::<Recorder>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<Recorder>().calls
+    );
 }
 
 /// Host data that counts how often a collection traced it.
@@ -1209,7 +1347,7 @@ fn host_129_collect_runs_no_code_and_calls_no_hook() {
         })
         .unwrap();
     let steps = agent.last_entry_steps().unwrap();
-    let host_fn = agent.host().host_fn;
+    let host_fn = agent.host().state::<Recorder>().host_fn;
     for _ in 0..3 {
         let Ok(Outcome::Normal(report)) = agent.collect() else {
             panic!("collect did not answer Normal");
@@ -1218,8 +1356,16 @@ fn host_129_collect_runs_no_code_and_calls_no_hook() {
     }
     assert!(traced.get() >= 3, "each collection traced the host data");
     assert_eq!(agent.last_entry_steps(), Ok(steps), "no step was spent");
-    assert_eq!(agent.host().host_fn, host_fn, "no host function ran");
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert_eq!(
+        agent.host().state::<Recorder>().host_fn,
+        host_fn,
+        "no host function ran"
+    );
+    assert!(
+        agent.host().state::<Recorder>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<Recorder>().calls
+    );
     let global = agent.global_object(&realm).unwrap();
     let after = agent
         .with_cx(&realm, |cx| {
@@ -1239,7 +1385,7 @@ fn host_129_collect_runs_no_code_and_calls_no_hook() {
 }
 
 /// The entry points that answer `Err(Faulted)` after HOST-160's fault, with valid arguments.
-fn refuses_after_fault(agent: &mut Agent<Recorder>, realm: &Realm) {
+fn refuses_after_fault(agent: &mut Agent<Scripted>, realm: &Realm) {
     assert_eq!(agent.state(), AgentState::Faulted);
     assert!(matches!(
         agent.with_cx(realm, |_| ()),
@@ -1251,7 +1397,11 @@ fn refuses_after_fault(agent: &mut Agent<Recorder>, realm: &Realm) {
     ));
     assert!(matches!(agent.collect(), Err(HostError::Faulted)));
     assert!(matches!(agent.heap_bytes(), Err(HostError::Faulted)));
-    assert!(agent.host().calls.is_empty(), "{:?}", agent.host().calls);
+    assert!(
+        agent.host().state::<Recorder>().calls.is_empty(),
+        "{:?}",
+        agent.host().state::<Recorder>().calls
+    );
 }
 
 /// HOST-160: a host function whose `Ok` value holds a stale handle, one whose `Abrupt::Throw`
@@ -1273,7 +1423,7 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
             define(&mut agent, &realm, "answer", answer);
             let (stale_value, foreign_value) =
                 (Value::Object(stale.object), Value::String(foreign.string));
-            agent.host_mut().answer = Some(match case {
+            agent.host_mut().state_mut::<Recorder>().answer = Some(match case {
                 0 => Ok(stale_value),
                 1 => Err(Abrupt::Throw(foreign_value)),
                 2 => Ok(foreign_value),
@@ -1358,7 +1508,11 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
                 }
             };
             assert!(ended, "case {case}, site {site}");
-            assert_eq!(agent.host().host_fn, 1, "case {case}, site {site}");
+            assert_eq!(
+                agent.host().state::<Recorder>().host_fn,
+                1,
+                "case {case}, site {site}"
+            );
             refuses_after_fault(&mut agent, &realm);
         }
     }
@@ -1370,7 +1524,7 @@ fn host_160_a_handle_returned_by_the_host_faults_the_agent() {
         let stale = stale(&mut agent, &realm);
         let mut calls = 0;
         let mut setup =
-            |cx: &mut HookCx<'_, Recorder>, _realm: RealmRef| -> Completion<GlobalObjects> {
+            |cx: &mut HookCx<'_, Scripted>, _realm: RealmRef| -> Completion<GlobalObjects> {
                 calls += 1;
                 let good = cx
                     .new_host_object(HostObjectSpec {

@@ -28,10 +28,11 @@
 
 use crate::support;
 
+use support::scripted::{Hooks, Scripted};
 use support::stack::{TestPath, test_path};
 use swell::{
     Abrupt, Agent, AgentState, Brand, CompileStrings, Completion, Cx, ErrorKind, GlobalObjects,
-    Handled, HookCx, Host, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job, Limits,
+    Handled, HookCx, HostCall, HostData, HostError, HostObjectSpec, IsoDateTime, Job, Limits,
     LoadRequest, ModuleRef, ObjectRef, Outcome, Parsed, PreferredType, PromiseState,
     PropertyDescriptor, PropertyKey, Prototype, Realm, RealmRef, RejectionOperation, Root, Script,
     ScriptRef, Seeds, Source, StringRef, Termination, TimeZoneIdentifier, Tracer, Value,
@@ -178,139 +179,232 @@ impl FuzzHost {
     }
 }
 
-impl Host for FuzzHost {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        _request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        cx.host_mut().hook("host_ensure_can_compile_strings");
-        Ok(())
-    }
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        cx.host_mut().hook("host_get_code_for_eval");
-        None
-    }
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        _obj: ObjectRef,
-    ) -> Completion<()> {
-        cx.host_mut().hook("host_ensure_can_add_private_element");
-        Ok(())
-    }
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool {
-        cx.host_mut().hook("host_has_source_text_available");
-        true
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<swell::HostDefined> {
-        cx.host_mut().hook("host_make_job_callback");
-        None
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        _host_defined: Option<&swell::HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        cx.host_mut().hook("host_call_job_callback");
-        cx.call(Value::Object(callback), this, args)
-            .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>) {
-        cx.host_mut().hook("host_enqueue_promise_job");
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, _realm: RealmRef) {
-        cx.host_mut().hook("host_prepare_to_run_job");
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        _result: Result<(), Value>,
-    ) {
-        cx.host_mut().hook("host_clean_up_after_job");
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        cx.host_mut().hook("host_enqueue_generic_job");
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {
-        cx.host_mut().hook("host_enqueue_timeout_job");
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        cx.host_mut()
-            .hook("host_enqueue_finalization_registry_cleanup_job");
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        _promise: ObjectRef,
-        _operation: RejectionOperation,
-    ) {
-        cx.host_mut().hook("host_promise_rejection_tracker");
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, _request: LoadRequest) {
-        cx.host_mut().hook("host_load_imported_module");
-    }
-    fn host_get_import_meta_properties(
-        cx: &mut HookCx<'_, Self>,
-        _module: ModuleRef,
-    ) -> Completion<Vec<(PropertyKey, Value)>> {
-        cx.host_mut().hook("host_get_import_meta_properties");
-        Ok(Vec::new())
-    }
-    fn host_finalize_import_meta(
-        cx: &mut HookCx<'_, Self>,
-        _import_meta: ObjectRef,
-        _module: ModuleRef,
-    ) {
-        cx.host_mut().hook("host_finalize_import_meta");
-    }
-    fn host_resize_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        cx.host_mut().hook("host_resize_array_buffer");
-        Ok(Handled::Unhandled)
-    }
-    fn host_grow_shared_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        cx.host_mut().hook("host_grow_shared_array_buffer");
-        Ok(Handled::Unhandled)
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        cx.host_mut().hook("host_system_utc_epoch_nanoseconds");
-        0
-    }
-    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
-        cx.host_mut().hook("system_time_zone_identifier");
-        "UTC".to_string()
-    }
-    fn get_named_time_zone_offset_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _epoch_ns: i128,
-    ) -> i128 {
-        cx.host_mut().hook("get_named_time_zone_offset_nanoseconds");
-        0
-    }
-    fn get_named_time_zone_epoch_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _local: IsoDateTime,
-    ) -> Vec<i128> {
-        cx.host_mut().hook("get_named_time_zone_epoch_nanoseconds");
-        Vec::new()
-    }
-    fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier> {
-        cx.host_mut().hook("available_named_time_zone_identifiers");
-        Vec::new()
-    }
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    _request: &CompileStrings<'_>,
+) -> Completion<()> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_ensure_can_compile_strings");
+    Ok(())
 }
+
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_get_code_for_eval");
+    None
+}
+
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_ensure_can_add_private_element");
+    Ok(())
+}
+
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, _func: ObjectRef) -> bool {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_has_source_text_available");
+    true
+}
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<swell::HostDefined> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_make_job_callback");
+    None
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    _host_defined: Option<&swell::HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_call_job_callback");
+    cx.call(Value::Object(callback), this, args)
+        .unwrap_or(Err(Abrupt::Terminated(Termination::EngineFault)))
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, _realm: Option<RealmRef>) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_enqueue_promise_job");
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, _realm: RealmRef) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_prepare_to_run_job");
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    _result: Result<(), Value>,
+) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_clean_up_after_job");
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_enqueue_generic_job");
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_enqueue_timeout_job");
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_enqueue_finalization_registry_cleanup_job");
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    _promise: ObjectRef,
+    _operation: RejectionOperation,
+) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_promise_rejection_tracker");
+}
+
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_load_imported_module");
+}
+
+fn host_get_import_meta_properties(
+    cx: &mut HookCx<'_, Scripted>,
+    _module: ModuleRef,
+) -> Completion<Vec<(PropertyKey, Value)>> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_get_import_meta_properties");
+    Ok(Vec::new())
+}
+
+fn host_finalize_import_meta(
+    cx: &mut HookCx<'_, Scripted>,
+    _import_meta: ObjectRef,
+    _module: ModuleRef,
+) {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_finalize_import_meta");
+}
+
+fn host_resize_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_resize_array_buffer");
+    Ok(Handled::Unhandled)
+}
+
+fn host_grow_shared_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_grow_shared_array_buffer");
+    Ok(Handled::Unhandled)
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("host_system_utc_epoch_nanoseconds");
+    0
+}
+
+fn system_time_zone_identifier(cx: &mut HookCx<'_, Scripted>) -> String {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("system_time_zone_identifier");
+    "UTC".to_string()
+}
+
+fn get_named_time_zone_offset_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _epoch_ns: i128,
+) -> i128 {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("get_named_time_zone_offset_nanoseconds");
+    0
+}
+
+fn get_named_time_zone_epoch_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _local: IsoDateTime,
+) -> Vec<i128> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("get_named_time_zone_epoch_nanoseconds");
+    Vec::new()
+}
+
+fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Scripted>) -> Vec<TimeZoneIdentifier> {
+    cx.host_mut()
+        .state_mut::<FuzzHost>()
+        .hook("available_named_time_zone_identifiers");
+    Vec::new()
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`FuzzHost`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_ensure_can_add_private_element,
+    host_has_source_text_available,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_get_import_meta_properties,
+    host_finalize_import_meta,
+    host_resize_array_buffer,
+    host_grow_shared_array_buffer,
+    host_system_utc_epoch_nanoseconds,
+    system_time_zone_identifier,
+    get_named_time_zone_offset_nanoseconds,
+    get_named_time_zone_epoch_nanoseconds,
+    available_named_time_zone_identifiers,
+};
 
 /// Host data that holds the values it was made with and lists them to the collector.
 struct Holds(Vec<Value>);
@@ -904,14 +998,14 @@ fn keep_completion(pool: &mut Pool, me: usize, completion: &Completion<Value>) {
 /// The pool of the running host.
 macro_rules! pool {
     ($cx:expr) => {
-        $cx.host_mut().pool
+        $cx.host_mut().state_mut::<FuzzHost>().pool
     };
 }
 
 /// One of the operations `Cx` and `HookCx` share, chosen by `$choice` (0 to 12), as text.
 macro_rules! scoped_op {
     ($cx:expr, $choice:expr) => {{
-        let me = $cx.host().index;
+        let me = $cx.host().state::<FuzzHost>().index;
         match $choice {
             0 => {
                 let (origin, v) = value(&mut pool!($cx));
@@ -1033,7 +1127,7 @@ macro_rules! scoped_op {
                 let brand = Brand(u32::try_from(pool!($cx).rng.below(3)).unwrap_or(0));
                 let data: Option<Box<dyn HostData>> = if pool!($cx).rng.chance(50) {
                     if held.iter().any(|&v| bad!($cx, v)) {
-                        $cx.host_mut().poisoned = true;
+                        $cx.host_mut().state_mut::<FuzzHost>().poisoned = true;
                     }
                     Some(Box::new(Holds(held.clone())))
                 } else {
@@ -1144,14 +1238,14 @@ macro_rules! scoped_op {
 }
 
 /// One operation of a setup closure's `HookCx`.
-fn hook_op(cx: &mut HookCx<'_, FuzzHost>) -> String {
-    let choice = cx.host_mut().pool.rng.below(12);
+fn hook_op(cx: &mut HookCx<'_, Scripted>) -> String {
+    let choice = cx.host_mut().state_mut::<FuzzHost>().pool.rng.below(12);
     scoped_op!(cx, choice)
 }
 
 /// One operation of a `Cx`: the shared ones, and those that run code.
-fn cx_op(cx: &mut Cx<'_, FuzzHost>) -> String {
-    let me = cx.host().index;
+fn cx_op(cx: &mut Cx<'_, Scripted>) -> String {
+    let me = cx.host().state::<FuzzHost>().index;
     let choice = pool!(cx).rng.below(36);
     if choice < 12 {
         return scoped_op!(cx, choice);
@@ -1160,7 +1254,7 @@ fn cx_op(cx: &mut Cx<'_, FuzzHost>) -> String {
         34 => {
             // A host microtask that makes one operation of its own `Cx` when a checkpoint
             // runs it, in the current realm of this `Cx`.
-            let answer = cx.queue_microtask(Box::new(|cx: &mut Cx<'_, FuzzHost>| {
+            let answer = cx.queue_microtask(Box::new(|cx: &mut Cx<'_, Scripted>| {
                 let line = cx_op(cx);
                 pool!(cx).log.push(format!("  microtask {line}"));
             }));
@@ -1178,7 +1272,7 @@ fn cx_op(cx: &mut Cx<'_, FuzzHost>) -> String {
             let i = pool!(cx).rng.index(count);
             let (origin, r) = pool!(cx).realm_refs[i];
             let which = pool!(cx).rng.below(3);
-            let steps: swell::HostFn<FuzzHost> = [h0, h1, h2][usize::try_from(which).unwrap_or(0)];
+            let steps: swell::HostFn<Scripted> = [h0, h1, h2][usize::try_from(which).unwrap_or(0)];
             let constructor = pool!(cx).rng.chance(50);
             let answer = cx.new_host_function(r, "h", 1, steps, constructor, None);
             if is_foreign(origin, me) {
@@ -1388,7 +1482,7 @@ fn cx_op(cx: &mut Cx<'_, FuzzHost>) -> String {
 }
 
 /// Up to [`CX_CALLS`] operations of `cx`, written to the transcript.
-fn cx_ops(cx: &mut Cx<'_, FuzzHost>) {
+fn cx_ops(cx: &mut Cx<'_, Scripted>) {
     let count = pool!(cx).rng.below(CX_CALLS + 1);
     for _ in 0..count {
         let line = cx_op(cx);
@@ -1399,7 +1493,7 @@ fn cx_ops(cx: &mut Cx<'_, FuzzHost>) {
 /// What a host function of this test returns: mostly a primitive or an argument; sometimes a
 /// value it has seen (stale or of the other agent ones among them, which fault the agent,
 /// decision 6), a throw of one, or a termination.
-fn host_answer(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value> {
+fn host_answer(cx: &mut Cx<'_, Scripted>, call: &HostCall<'_>) -> Completion<Value> {
     match pool!(cx).rng.below(20) {
         0 => Err(Abrupt::Throw(value(&mut pool!(cx)).1)),
         1 => Ok(value(&mut pool!(cx)).1),
@@ -1411,8 +1505,8 @@ fn host_answer(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Val
 }
 
 /// Enter a host function: its call written down, and whether it may make operations.
-fn enter_host(cx: &mut Cx<'_, FuzzHost>, name: &str, call: &HostCall<'_>) -> bool {
-    let me = cx.host().index;
+fn enter_host(cx: &mut Cx<'_, Scripted>, name: &str, call: &HostCall<'_>) -> bool {
+    let me = cx.host().state::<FuzzHost>().index;
     for &arg in call.args {
         keep_value(&mut pool!(cx), me, arg);
     }
@@ -1422,13 +1516,13 @@ fn enter_host(cx: &mut Cx<'_, FuzzHost>, name: &str, call: &HostCall<'_>) -> boo
         call.this, call.args, call.new_target
     );
     pool!(cx).log.push(line);
-    cx.host().depth < HOST_DEPTH
+    cx.host().state::<FuzzHost>().depth < HOST_DEPTH
 }
 
 /// What a host function returns, checked: an answer the engine must refuse in a live run is
 /// written down as an expected fault.
 fn checked(
-    cx: &mut Cx<'_, FuzzHost>,
+    cx: &mut Cx<'_, Scripted>,
     call: &HostCall<'_>,
     answer: Completion<Value>,
 ) -> Completion<Value> {
@@ -1441,42 +1535,42 @@ fn checked(
         Err(Abrupt::Terminated(_)) => false,
     };
     if live && refused {
-        cx.host_mut().expect_fault = true;
+        cx.host_mut().state_mut::<FuzzHost>().expect_fault = true;
         pool!(cx).log.push("  expect fault".to_string());
     }
     answer
 }
 
 /// The host function `h0`.
-fn h0(cx: &mut Cx<'_, FuzzHost>, call: HostCall<'_>) -> Completion<Value> {
+fn h0(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let answer = h0_steps(cx, &call);
     checked(cx, &call, answer)
 }
 
 /// The host function `h1`.
-fn h1(cx: &mut Cx<'_, FuzzHost>, call: HostCall<'_>) -> Completion<Value> {
+fn h1(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let answer = h1_steps(cx, &call);
     checked(cx, &call, answer)
 }
 
 /// The host function `h2`.
-fn h2(cx: &mut Cx<'_, FuzzHost>, call: HostCall<'_>) -> Completion<Value> {
+fn h2(cx: &mut Cx<'_, Scripted>, call: HostCall<'_>) -> Completion<Value> {
     let answer = h2_steps(cx, &call);
     checked(cx, &call, answer)
 }
 
 /// The steps of `h0`: operations of `cx`, then an answer.
-fn h0_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value> {
+fn h0_steps(cx: &mut Cx<'_, Scripted>, call: &HostCall<'_>) -> Completion<Value> {
     if enter_host(cx, "h0", call) {
-        cx.host_mut().depth += 1;
+        cx.host_mut().state_mut::<FuzzHost>().depth += 1;
         cx_ops(cx);
-        cx.host_mut().depth -= 1;
+        cx.host_mut().state_mut::<FuzzHost>().depth -= 1;
     }
     host_answer(cx, call)
 }
 
 /// The host function `h1`: calls its first argument with the rest through `cx.call`.
-fn h1_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value> {
+fn h1_steps(cx: &mut Cx<'_, Scripted>, call: &HostCall<'_>) -> Completion<Value> {
     if !enter_host(cx, "h1", call) {
         return host_answer(cx, call);
     }
@@ -1484,9 +1578,9 @@ fn h1_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value>
         Some((&function, rest)) => (function, rest),
         None => (Value::Undefined, &[][..]),
     };
-    cx.host_mut().depth += 1;
+    cx.host_mut().state_mut::<FuzzHost>().depth += 1;
     let answer = cx.call(function, call.this, rest);
-    cx.host_mut().depth -= 1;
+    cx.host_mut().state_mut::<FuzzHost>().depth -= 1;
     pool!(cx)
         .log
         .push(format!("  h1 call -> {}", shape(&answer)));
@@ -1497,7 +1591,7 @@ fn h1_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value>
 }
 
 /// The host function `h2`: parses a source in a realm it has seen and evaluates it.
-fn h2_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value> {
+fn h2_steps(cx: &mut Cx<'_, Scripted>, call: &HostCall<'_>) -> Completion<Value> {
     if !enter_host(cx, "h2", call) {
         return host_answer(cx, call);
     }
@@ -1508,7 +1602,7 @@ fn h2_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value>
     let i = pool!(cx).rng.index(count);
     let (_, realm) = pool!(cx).realm_refs[i];
     let text = source(&mut pool!(cx).rng);
-    cx.host_mut().depth += 1;
+    cx.host_mut().state_mut::<FuzzHost>().depth += 1;
     let parsed = cx.parse_script(realm, Source::Utf8(&text), None);
     let answer = match parsed {
         Ok(Parsed::Parsed(script)) => cx.evaluate_script(script),
@@ -1516,7 +1610,7 @@ fn h2_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value>
         Ok(Parsed::Errors(_)) => Ok(Ok(Value::Null)),
         Err(error) => Err(error),
     };
-    cx.host_mut().depth -= 1;
+    cx.host_mut().state_mut::<FuzzHost>().depth -= 1;
     pool!(cx)
         .log
         .push(format!("  h2 {text:?} -> {}", shape(&answer)));
@@ -1532,18 +1626,18 @@ fn h2_steps(cx: &mut Cx<'_, FuzzHost>, call: &HostCall<'_>) -> Completion<Value>
 
 /// Two agents with one pool, which moves into the host of the agent that runs.
 struct World {
-    agents: [Agent<FuzzHost>; 2],
+    agents: [Agent<Scripted>; 2],
     limits: Limits,
     pool: Pool,
 }
 
 impl World {
     /// Run `f` on agent `a` with the pool in its host.
-    fn on<R>(&mut self, a: usize, f: impl FnOnce(&mut Agent<FuzzHost>) -> R) -> R {
+    fn on<R>(&mut self, a: usize, f: impl FnOnce(&mut Agent<Scripted>) -> R) -> R {
         let agent = &mut self.agents[a];
-        agent.host_mut().pool = std::mem::take(&mut self.pool);
+        agent.host_mut().state_mut::<FuzzHost>().pool = std::mem::take(&mut self.pool);
         let result = f(agent);
-        self.pool = std::mem::take(&mut agent.host_mut().pool);
+        self.pool = std::mem::take(&mut agent.host_mut().state_mut::<FuzzHost>().pool);
         result
     }
 
@@ -1603,7 +1697,7 @@ fn random_limits(rng: &mut Rng) -> Limits {
 }
 
 /// Define the host functions `h0`, `h1` and `h2` as globals of `realm`.
-fn define_host_functions(agent: &mut Agent<FuzzHost>, realm: &Realm) -> String {
+fn define_host_functions(agent: &mut Agent<Scripted>, realm: &Realm) -> String {
     let global = match agent.global_object(realm) {
         Ok(global) => global,
         Err(error) => return format!("global_object -> Err({error:?})"),
@@ -1615,12 +1709,12 @@ fn define_host_functions(agent: &mut Agent<FuzzHost>, realm: &Realm) -> String {
         let Ok(realm_ref) = cx.realm_ref(realm) else {
             return Ok(());
         };
-        let me = cx.host().index;
+        let me = cx.host().state::<FuzzHost>().index;
         let pool = &mut pool!(cx);
         keep(&mut pool.rng, &mut pool.realm_refs, (me, realm_ref));
         keep_value(&mut pool!(cx), me, Value::Object(global));
         for (name, steps) in [
-            ("h0", h0 as swell::HostFn<FuzzHost>),
+            ("h0", h0 as swell::HostFn<Scripted>),
             ("h1", h1),
             ("h2", h2),
         ] {
@@ -1643,9 +1737,9 @@ fn op_create_realm(world: &mut World, a: usize) -> String {
     let with_setup = world.pool.rng.chance(50);
     let host_defined = world.pool.rng.chance(30);
     let (line, realm) = world.on(a, |agent| {
-        let me = agent.host().index;
+        let me = agent.host().state::<FuzzHost>().index;
         let mut setup =
-            |cx: &mut HookCx<'_, FuzzHost>, realm: RealmRef| -> Completion<GlobalObjects> {
+            |cx: &mut HookCx<'_, Scripted>, realm: RealmRef| -> Completion<GlobalObjects> {
                 let pool = &mut pool!(cx);
                 keep(&mut pool.rng, &mut pool.realm_refs, (me, realm));
                 for _ in 0..pool!(cx).rng.below(4) {
@@ -1698,7 +1792,7 @@ fn op_create_realm(world: &mut World, a: usize) -> String {
                     Err(Abrupt::Terminated(_)) => false,
                 };
                 if refused {
-                    cx.host_mut().expect_fault = true;
+                    cx.host_mut().state_mut::<FuzzHost>().expect_fault = true;
                     pool!(cx).log.push("  setup expect fault".to_string());
                 }
                 answer
@@ -1714,7 +1808,7 @@ fn op_create_realm(world: &mut World, a: usize) -> String {
         let realm = match answer {
             Ok(Outcome::Normal(realm)) => Some(realm),
             Ok(Outcome::Throw(root)) => {
-                let pool = &mut agent.host_mut().pool;
+                let pool = &mut agent.host_mut().state_mut::<FuzzHost>().pool;
                 keep(&mut pool.rng, &mut pool.roots, (me, root));
                 None
             }
@@ -2072,7 +2166,7 @@ fn check_fault(world: &World, a: usize, was_faulted: bool, line: &str) {
     }
     let agent = &world.agents[a];
     let faulted = agent.state() == AgentState::Faulted;
-    let host = agent.host();
+    let host = agent.host().state::<FuzzHost>();
     let log = &world.pool.log;
     let tail = log
         .get(log.len().saturating_sub(60)..)
@@ -2089,7 +2183,7 @@ fn check_fault(world: &World, a: usize, was_faulted: bool, line: &str) {
 }
 
 /// The key of an agent, as its roots print it.
-fn agent_key(agent: &mut Agent<FuzzHost>) -> Option<String> {
+fn agent_key(agent: &mut Agent<Scripted>) -> Option<String> {
     let realm = match support::host::create_realm(agent, None, None) {
         Ok(Outcome::Normal(realm)) => realm,
         _ => return None,
@@ -2113,13 +2207,21 @@ fn run_sequence(seed: u64) -> String {
     for index in 0..2 {
         // The key is read with the largest limits on an agent of its own made just before,
         // so that it is the agent's key minus one; the fuzzed agents get `limits`.
-        let mut probe = Agent::new(FuzzHost::default(), support::host::limits(), seeds).unwrap();
+        let mut probe = Agent::new(
+            Scripted::new(FuzzHost::default(), HOOKS),
+            support::host::limits(),
+            seeds,
+        )
+        .unwrap();
         let probe_key: u32 = agent_key(&mut probe).and_then(|k| k.parse().ok()).unwrap();
         let agent = Agent::new(
-            FuzzHost {
-                index,
-                ..FuzzHost::default()
-            },
+            Scripted::new(
+                FuzzHost {
+                    index,
+                    ..FuzzHost::default()
+                },
+                HOOKS,
+            ),
             limits,
             seeds,
         )
@@ -2127,7 +2229,7 @@ fn run_sequence(seed: u64) -> String {
         keys.push(probe_key + 1);
         agents.push(agent);
     }
-    let Ok(agents) = <[Agent<FuzzHost>; 2]>::try_from(agents) else {
+    let Ok(agents) = <[Agent<Scripted>; 2]>::try_from(agents) else {
         panic!("two agents");
     };
     let mut world = World {
@@ -2140,7 +2242,10 @@ fn run_sequence(seed: u64) -> String {
     };
     world.log(format!("seed {seed:#x} limits {limits:?}"));
     for a in 0..2 {
-        world.agents[a].host_mut().expect_fault = false;
+        world.agents[a]
+            .host_mut()
+            .state_mut::<FuzzHost>()
+            .expect_fault = false;
         let line = op_create_realm(&mut world, a);
         check_fault(&world, a, false, &line);
         world.log(format!("{a}: {line}"));
@@ -2148,7 +2253,10 @@ fn run_sequence(seed: u64) -> String {
     for _ in 0..CALLS {
         let a = usize::from(world.pool.rng.chance(20));
         let was_faulted = world.agents[a].state() == AgentState::Faulted;
-        world.agents[a].host_mut().expect_fault = false;
+        world.agents[a]
+            .host_mut()
+            .state_mut::<FuzzHost>()
+            .expect_fault = false;
         let line = match world.pool.rng.below(24) {
             0..=2 => op_create_realm(&mut world, a),
             3..=7 => op_with_cx(&mut world, a),

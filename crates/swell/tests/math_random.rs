@@ -15,11 +15,12 @@ use std::time::Instant;
 
 use support::host::{TestHost, create_realm, get, get_object, limits, object, realm, seeds, text};
 use support::script::{Outcome as Shown, eval, eval_text};
+use support::scripted::{Hooks, Scripted};
 use support::stack::test_path;
 use swell::{
-    Abrupt, Agent, CompileStrings, Completion, Cx, GlobalObjects, Handled, HookCx, Host,
-    IsoDateTime, Job, Limits, LoadRequest, ModuleRef, ObjectRef, Outcome, PropertyKey, Realm,
-    RealmRef, RejectionOperation, Seeds, Source, StringRef, TimeZoneIdentifier, Value,
+    Abrupt, Agent, CompileStrings, Completion, Cx, GlobalObjects, Handled, HookCx, IsoDateTime,
+    Job, Limits, LoadRequest, ModuleRef, ObjectRef, Outcome, PropertyKey, Realm, RealmRef,
+    RejectionOperation, Seeds, Source, StringRef, TimeZoneIdentifier, Value,
 };
 
 /// The most calls of `Math.random` one entry makes.
@@ -261,154 +262,202 @@ impl Counting {
     }
 }
 
-impl Host for Counting {
-    fn host_ensure_can_compile_strings(
-        cx: &mut Cx<'_, Self>,
-        _request: &CompileStrings<'_>,
-    ) -> Completion<()> {
-        Self::count(cx.host_mut());
-        Ok(())
-    }
-    fn host_get_code_for_eval(cx: &mut HookCx<'_, Self>, _arg: ObjectRef) -> Option<StringRef> {
-        Self::count(cx.host_mut());
-        None
-    }
-    fn host_ensure_can_add_private_element(
-        cx: &mut HookCx<'_, Self>,
-        _obj: ObjectRef,
-    ) -> Completion<()> {
-        Self::count(cx.host_mut());
-        Ok(())
-    }
-    fn host_has_source_text_available(cx: &mut HookCx<'_, Self>, _func: ObjectRef) -> bool {
-        Self::count(cx.host_mut());
-        true
-    }
-    fn host_make_job_callback(
-        cx: &mut HookCx<'_, Self>,
-        _callback: ObjectRef,
-    ) -> Option<swell::HostDefined> {
-        Self::count(cx.host_mut());
-        None
-    }
-    fn host_call_job_callback(
-        cx: &mut Cx<'_, Self>,
-        callback: ObjectRef,
-        _host_defined: Option<&swell::HostDefined>,
-        this: Value,
-        args: &[Value],
-    ) -> Completion<Value> {
-        Self::count(cx.host_mut());
-        cx.call(Value::Object(callback), this, args).unwrap()
-    }
-    fn host_enqueue_promise_job(cx: &mut HookCx<'_, Self>, _realm: Option<RealmRef>) {
-        Self::count(cx.host_mut());
-    }
-    fn host_prepare_to_run_job(cx: &mut HookCx<'_, Self>, _realm: RealmRef) {
-        Self::count(cx.host_mut());
-    }
-    fn host_clean_up_after_job(
-        cx: &mut HookCx<'_, Self>,
-        _realm: Option<RealmRef>,
-        _result: Result<(), Value>,
-    ) {
-        Self::count(cx.host_mut());
-    }
-    fn host_enqueue_generic_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        Self::count(cx.host_mut());
-    }
-    fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Self>, _job: Job, _milliseconds: f64) {
-        Self::count(cx.host_mut());
-    }
-    fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Self>, _job: Job) {
-        Self::count(cx.host_mut());
-    }
-    fn host_promise_rejection_tracker(
-        cx: &mut HookCx<'_, Self>,
-        _promise: ObjectRef,
-        _operation: RejectionOperation,
-    ) {
-        Self::count(cx.host_mut());
-    }
-    fn host_load_imported_module(cx: &mut HookCx<'_, Self>, _request: LoadRequest) {
-        Self::count(cx.host_mut());
-    }
-    fn host_get_import_meta_properties(
-        cx: &mut HookCx<'_, Self>,
-        _module: ModuleRef,
-    ) -> Completion<Vec<(PropertyKey, Value)>> {
-        Self::count(cx.host_mut());
-        Ok(Vec::new())
-    }
-    fn host_finalize_import_meta(
-        cx: &mut HookCx<'_, Self>,
-        _import_meta: ObjectRef,
-        _module: ModuleRef,
-    ) {
-        Self::count(cx.host_mut());
-    }
-    fn host_resize_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        Self::count(cx.host_mut());
-        Ok(Handled::Unhandled)
-    }
-    fn host_grow_shared_array_buffer(
-        cx: &mut HookCx<'_, Self>,
-        _buffer: ObjectRef,
-        _new_byte_length: u64,
-    ) -> Completion<Handled> {
-        Self::count(cx.host_mut());
-        Ok(Handled::Unhandled)
-    }
-    fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Self>, _global: ObjectRef) -> i128 {
-        Self::count(cx.host_mut());
-        0
-    }
-    fn system_time_zone_identifier(cx: &mut HookCx<'_, Self>) -> String {
-        Self::count(cx.host_mut());
-        "UTC".to_string()
-    }
-    fn get_named_time_zone_offset_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _epoch_ns: i128,
-    ) -> i128 {
-        Self::count(cx.host_mut());
-        0
-    }
-    fn get_named_time_zone_epoch_nanoseconds(
-        cx: &mut HookCx<'_, Self>,
-        _id: &str,
-        _local: IsoDateTime,
-    ) -> Vec<i128> {
-        Self::count(cx.host_mut());
-        Vec::new()
-    }
-    fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Self>) -> Vec<TimeZoneIdentifier> {
-        Self::count(cx.host_mut());
-        Vec::new()
-    }
+fn host_ensure_can_compile_strings(
+    cx: &mut Cx<'_, Scripted>,
+    _request: &CompileStrings<'_>,
+) -> Completion<()> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Ok(())
 }
 
+fn host_get_code_for_eval(cx: &mut HookCx<'_, Scripted>, _arg: ObjectRef) -> Option<StringRef> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    None
+}
+
+fn host_ensure_can_add_private_element(
+    cx: &mut HookCx<'_, Scripted>,
+    _obj: ObjectRef,
+) -> Completion<()> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Ok(())
+}
+
+fn host_has_source_text_available(cx: &mut HookCx<'_, Scripted>, _func: ObjectRef) -> bool {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    true
+}
+
+fn host_make_job_callback(
+    cx: &mut HookCx<'_, Scripted>,
+    _callback: ObjectRef,
+) -> Option<swell::HostDefined> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    None
+}
+
+fn host_call_job_callback(
+    cx: &mut Cx<'_, Scripted>,
+    callback: ObjectRef,
+    _host_defined: Option<&swell::HostDefined>,
+    this: Value,
+    args: &[Value],
+) -> Completion<Value> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    cx.call(Value::Object(callback), this, args).unwrap()
+}
+
+fn host_enqueue_promise_job(cx: &mut HookCx<'_, Scripted>, _realm: Option<RealmRef>) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_prepare_to_run_job(cx: &mut HookCx<'_, Scripted>, _realm: RealmRef) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_clean_up_after_job(
+    cx: &mut HookCx<'_, Scripted>,
+    _realm: Option<RealmRef>,
+    _result: Result<(), Value>,
+) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_enqueue_generic_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_enqueue_timeout_job(cx: &mut HookCx<'_, Scripted>, _job: Job, _milliseconds: f64) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_enqueue_finalization_registry_cleanup_job(cx: &mut HookCx<'_, Scripted>, _job: Job) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_promise_rejection_tracker(
+    cx: &mut HookCx<'_, Scripted>,
+    _promise: ObjectRef,
+    _operation: RejectionOperation,
+) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_load_imported_module(cx: &mut HookCx<'_, Scripted>, _request: LoadRequest) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_get_import_meta_properties(
+    cx: &mut HookCx<'_, Scripted>,
+    _module: ModuleRef,
+) -> Completion<Vec<(PropertyKey, Value)>> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Ok(Vec::new())
+}
+
+fn host_finalize_import_meta(
+    cx: &mut HookCx<'_, Scripted>,
+    _import_meta: ObjectRef,
+    _module: ModuleRef,
+) {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+}
+
+fn host_resize_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Ok(Handled::Unhandled)
+}
+
+fn host_grow_shared_array_buffer(
+    cx: &mut HookCx<'_, Scripted>,
+    _buffer: ObjectRef,
+    _new_byte_length: u64,
+) -> Completion<Handled> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Ok(Handled::Unhandled)
+}
+
+fn host_system_utc_epoch_nanoseconds(cx: &mut HookCx<'_, Scripted>, _global: ObjectRef) -> i128 {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    0
+}
+
+fn system_time_zone_identifier(cx: &mut HookCx<'_, Scripted>) -> String {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    "UTC".to_string()
+}
+
+fn get_named_time_zone_offset_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _epoch_ns: i128,
+) -> i128 {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    0
+}
+
+fn get_named_time_zone_epoch_nanoseconds(
+    cx: &mut HookCx<'_, Scripted>,
+    _id: &str,
+    _local: IsoDateTime,
+) -> Vec<i128> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Vec::new()
+}
+
+fn available_named_time_zone_identifiers(cx: &mut HookCx<'_, Scripted>) -> Vec<TimeZoneIdentifier> {
+    Counting::count(cx.host_mut().state_mut::<Counting>());
+    Vec::new()
+}
+
+/// The hooks of the tests of this module, given to the scripted host with the state
+/// [`Counting`] (`support/scripted.rs`).
+const HOOKS: Hooks = Hooks {
+    host_ensure_can_compile_strings,
+    host_get_code_for_eval,
+    host_ensure_can_add_private_element,
+    host_has_source_text_available,
+    host_make_job_callback,
+    host_call_job_callback,
+    host_enqueue_promise_job,
+    host_prepare_to_run_job,
+    host_clean_up_after_job,
+    host_enqueue_generic_job,
+    host_enqueue_timeout_job,
+    host_enqueue_finalization_registry_cleanup_job,
+    host_promise_rejection_tracker,
+    host_load_imported_module,
+    host_get_import_meta_properties,
+    host_finalize_import_meta,
+    host_resize_array_buffer,
+    host_grow_shared_array_buffer,
+    host_system_utc_epoch_nanoseconds,
+    system_time_zone_identifier,
+    get_named_time_zone_offset_nanoseconds,
+    get_named_time_zone_epoch_nanoseconds,
+    available_named_time_zone_identifiers,
+};
+
 /// The steps and the hook calls of the script `source`, run in `realm` of `agent`.
-fn steps_and_hooks(agent: &mut Agent<Counting>, realm: &Realm, source: &str) -> (u64, u32) {
+fn steps_and_hooks(agent: &mut Agent<Scripted>, realm: &Realm, source: &str) -> (u64, u32) {
     let swell::Parsed::Parsed(script) = agent
         .parse_script(realm, Source::Utf8(source), None)
         .unwrap()
     else {
         panic!("{source} did not parse");
     };
-    let before = agent.host().hooks;
+    let before = agent.host().state::<Counting>().hooks;
     let outcome = agent.evaluate_script(&script).unwrap();
     assert!(
         matches!(outcome, Outcome::Normal(_)),
         "{source}: {outcome:?}"
     );
     let steps = agent.last_entry_steps().unwrap();
-    (steps, agent.host().hooks - before)
+    (steps, agent.host().state::<Counting>().hooks - before)
 }
 
 /// Decision 6, "`Math.random`": a call reads nothing from the host and costs the step of the
@@ -417,7 +466,8 @@ fn steps_and_hooks(agent: &mut Agent<Counting>, realm: &Realm, source: &str) -> 
 /// plus none.
 #[test]
 fn a_call_makes_no_hook_call_and_costs_one_step() {
-    let mut agent = Agent::new(Counting::default(), limits(), seeds()).unwrap();
+    let mut agent =
+        Agent::new(Scripted::new(Counting::default(), HOOKS), limits(), seeds()).unwrap();
     let Outcome::Normal(realm) = create_realm(&mut agent, None, None).unwrap() else {
         panic!("create_realm did not make the realm");
     };

@@ -1,0 +1,381 @@
+test/built-ins/Array/fromAsync/asyncitems-arraylike-length-accessor-throws.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-arraylike-promise.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-asynciterator-exists.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-asynciterator-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-asynciterator-null.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-asynciterator-sync.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-bigint.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/Array/fromAsync/asyncitems-iterator-exists.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-iterator-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-iterator-null.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-iterator-promise.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/asyncitems-operations.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/mapfn-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/mapfn-result-awaited-once-per-iteration.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/fromAsync/thisarg-primitive-sloppy.js	builtin	values slice 12;builtin method of a BigInt;	-	values,builtin	failed
+test/built-ins/Array/fromAsync/thisarg-primitive-strict.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/prototype/sort/call-with-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/Array/prototype/toSorted/comparefn-not-a-function.js	values	values slice 12;	-	values	failed
+test/built-ins/Array/prototype/toString/non-callable-join-string-tag.js	builtin	values slice 12;builtin Object.prototype.toString;	-	values,builtin	failed
+test/built-ins/AsyncIteratorPrototype/Symbol.asyncIterator/return-val.js	values	values slice 12;	-	values	failed
+test/built-ins/BigInt/asIntN/arithmetic.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/asIntN.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bigint-tobigint-errors.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bigint-tobigint-toprimitive.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bigint-tobigint-wrapped-values.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bigint-tobigint.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bits-toindex-errors.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bits-toindex-toprimitive.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bits-toindex-wrapped-values.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/bits-toindex.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/length.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/name.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/not-a-constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asIntN/order-of-steps.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/arithmetic.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/asUintN.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bigint-tobigint-errors.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bigint-tobigint-toprimitive.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bigint-tobigint-wrapped-values.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bigint-tobigint.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bits-toindex-errors.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bits-toindex-toprimitive.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bits-toindex-wrapped-values.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/bits-toindex.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/length.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/name.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/not-a-constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/asUintN/order-of-steps.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/call-value-of-when-to-string-present.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-coercion.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-empty-string.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-from-binary-string.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-from-decimal-string.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-from-hex-string.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-from-octal-string.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-from-string-syntax-errors.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-integer.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/constructor-trailing-leading-spaces.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/infinity-throws-rangeerror.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/is-a-constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/length.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/name.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/nan-throws-rangeerror.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/negative-infinity-throws.rangeerror.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/non-integer-rangeerror.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/parseInt/nonexistent.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prop-desc.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/proto.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/Symbol.toStringTag.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/prop-desc.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/proto.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toLocaleString/not-a-constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/a-z.js	joint	values slice 12;arith operator next to a literal;builtin dir;others JSON or Number;	-	values,arith,builtin,others	failed
+test/built-ins/BigInt/prototype/toString/default-radix.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/length.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/name.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/not-a-constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/prop-desc.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/prototype-call.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/radix-2-to-36.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/radix-err.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/radix-tointegerorinfinity-throws-symbol.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/radix-tointegerorinfinity-throws-toprimitive-or-bigint.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/string-is-code-units-of-decimal-digits-only.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/toString/thisbigintvalue-not-valid-throws.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/cross-realm.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/length.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/name.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/not-a-constructor.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/prop-desc.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/return.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/this-value-invalid-object-throws.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/prototype/valueOf/this-value-invalid-primitive-throws.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/tostring-throws.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/valueof-throws.js	builtin	values slice 12;builtin dir;	-	values,builtin	failed
+test/built-ins/BigInt/wrapper-object-ordinary-toprimitive.js	joint	values slice 12;compare operator next to a literal;arith operator next to a literal;builtin dir;others JSON or Number;	-	values,compare,arith,builtin,others	failed
+test/built-ins/Error/isError/bigints.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/JSON/rawJSON/bigint-raw-json-can-be-stringified.js	joint	values slice 12;arith operator next to a literal;builtin BigInt;others JSON or Number;	-	values,arith,builtin,others	failed
+test/built-ins/JSON/stringify/value-bigint-cross-realm.js	joint	values slice 12;builtin BigInt;others JSON or Number;	-	values,builtin,others	failed
+test/built-ins/JSON/stringify/value-bigint-order.js	joint	values slice 12;builtin BigInt;others JSON or Number;	-	values,builtin,others	failed
+test/built-ins/JSON/stringify/value-bigint-replacer.js	joint	values slice 12;others JSON or Number;	-	values,others	failed
+test/built-ins/JSON/stringify/value-bigint-tojson-receiver.js	joint	values slice 12;builtin BigInt;others JSON or Number;	-	values,builtin,others	failed
+test/built-ins/JSON/stringify/value-bigint-tojson.js	joint	values slice 12;builtin BigInt;others JSON or Number;	-	values,builtin,others	failed
+test/built-ins/JSON/stringify/value-bigint.js	joint	values slice 12;builtin ToObject;others JSON or Number;	-	values,builtin,others	failed
+test/built-ins/Map/bigint-number-same-value.js	values	values slice 12;	-	values	failed
+test/built-ins/Map/prototype/getOrInsertComputed/this-not-object-throw.js	values	values slice 12;	-	values	failed
+test/built-ins/Math/sumPrecise/throws-on-non-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Number/bigint-conversion.js	joint	values slice 12;arith operator next to a literal;others JSON or Number;	-	values,arith,others	failed
+test/built-ins/Number/prototype/toFixed/toFixed-tonumber-throws-typeerror-bigint.js	values	values slice 12;	-	values	failed
+test/built-ins/Object/bigint.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/Object/create/properties-arg-to-object-bigint.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/built-ins/Object/defineProperties/property-description-must-be-an-object-not-bigint.js	values	values slice 12;	-	values	failed
+test/built-ins/Object/defineProperty/property-description-must-be-an-object-not-bigint.js	values	values slice 12;	-	values	failed
+test/built-ins/Object/prototype/toString/Object.prototype.toString.call-bigint.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/Object/prototype/toString/symbol-tag-non-str-bigint.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/Object/prototype/toString/symbol-tag-override-bigint.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/Object/setPrototypeOf/bigint.js	values	values slice 12;	-	values	failed
+test/built-ins/Promise/all/resolve-throws-iterator-return-is-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/Promise/allSettled/resolve-throws-iterator-return-is-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/Promise/any/resolve-throws-iterator-return-is-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/Promise/race/resolve-throws-iterator-return-is-not-callable.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/dotAll/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/flags/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/global/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/hasIndices/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/ignoreCase/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/multiline/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/source/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/sticky/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/unicode/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/RegExp/prototype/unicodeSets/this-val-non-obj.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/bigint-number-same-value.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/difference/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/difference/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/difference/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/intersection/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/intersection/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/intersection/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isDisjointFrom/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isDisjointFrom/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isDisjointFrom/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isSubsetOf/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isSubsetOf/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isSubsetOf/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isSupersetOf/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isSupersetOf/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/isSupersetOf/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/symmetricDifference/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/symmetricDifference/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/symmetricDifference/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/union/called-with-object.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/union/require-internal-slot.js	values	values slice 12;	-	values	failed
+test/built-ins/Set/prototype/union/size-is-a-number.js	values	values slice 12;	-	values	failed
+test/built-ins/String/fromCharCode/touint16-tonumber-throws-bigint.js	values	values slice 12;	-	values	failed
+test/built-ins/String/prototype/indexOf/position-tointeger-bigint.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/built-ins/String/prototype/indexOf/searchstring-tostring-bigint.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/built-ins/String/prototype/isWellFormed/to-string-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/match/cstm-matcher-on-bigint-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/matchAll/cstm-matchall-on-bigint-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/replace/cstm-replace-on-bigint-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/replaceAll/cstm-replaceall-on-bigint-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/search/cstm-search-on-bigint-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/split/cstm-split-on-bigint-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/built-ins/String/prototype/toWellFormed/to-string-primitive.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/harness/compare-array-message.js	values	values slice 12;	-	values	failed
+test/harness/deepEqual-primitives-bigint.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/harness/testIntl-getLocaleBaseName.js	values	values slice 12;	-	values	failed
+test/language/expressions/addition/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/addition/bigint-arithmetic.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/addition/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/addition/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/addition/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/addition/coerce-bigint-to-string.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/assignment/destructuring/default-expr-throws-iterator-return-is-not-callable.js	values	values slice 12;	-	values	failed
+test/language/expressions/assignment/destructuring/target-assign-throws-iterator-return-is-not-callable.js	values	values slice 12;	-	values	failed
+test/language/expressions/bitwise-and/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-and/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-and/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-and/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-and/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-and/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-not/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-not/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-or/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-or/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-or/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-or/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-or/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-or/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-xor/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-xor/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-xor/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-xor/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/bitwise-xor/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/bitwise-xor/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/division/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/division/bigint-arithmetic.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/division/bigint-complex-infinity.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/division/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/division/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/division/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/does-not-equals/bigint-and-bigint.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/does-not-equals/bigint-and-boolean.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/does-not-equals/bigint-and-incomparable-primitive.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/does-not-equals/bigint-and-non-finite.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/does-not-equals/bigint-and-number-extremes.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/does-not-equals/bigint-and-number.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/does-not-equals/bigint-and-object.js	joint	values slice 12;compare dir;builtin ToObject;	-	values,compare,builtin	failed
+test/language/expressions/does-not-equals/bigint-and-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/dynamic-import/import-attributes/2nd-param-non-object.js	slice-11	values slice 12;slice-11 import;	-	values,slice-11	failed
+test/language/expressions/dynamic-import/import-attributes/2nd-param-with-non-object.js	slice-11	values slice 12;slice-11 import;	-	values,slice-11	failed
+test/language/expressions/dynamic-import/import-attributes/2nd-param-with-undefined.js	slice-11	values slice 12;slice-11 import;	-	values,slice-11	failed
+test/language/expressions/dynamic-import/import-attributes/2nd-param-with-value-non-string.js	slice-11	values slice 12;slice-11 import;	-	values,slice-11	failed
+test/language/expressions/equals/bigint-and-bigint.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/equals/bigint-and-boolean.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/equals/bigint-and-incomparable-primitive.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/equals/bigint-and-non-finite.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/equals/bigint-and-number-extremes.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/equals/bigint-and-number.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/equals/bigint-and-object.js	joint	values slice 12;compare dir;builtin ToObject;	-	values,compare,builtin	failed
+test/language/expressions/equals/bigint-and-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/exponentiation/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/exponentiation/bigint-arithmetic.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/exponentiation/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/exponentiation/bigint-negative-exponent-throws.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/exponentiation/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/exponentiation/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/exponentiation/bigint-zero-base-zero-exponent.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/greater-than-or-equal/bigint-and-bigint.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than-or-equal/bigint-and-incomparable-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than-or-equal/bigint-and-non-finite.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than-or-equal/bigint-and-number-extremes.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than-or-equal/bigint-and-number.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than-or-equal/bigint-and-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-bigint.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-boolean.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-incomparable-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-non-finite.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-number-extremes.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-number.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/greater-than/bigint-and-symbol.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/left-shift/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/left-shift/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/left-shift/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/left-shift/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/left-shift/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/left-shift/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/less-than-or-equal/bigint-and-bigint.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than-or-equal/bigint-and-incomparable-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than-or-equal/bigint-and-non-finite.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than-or-equal/bigint-and-number-extremes.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than-or-equal/bigint-and-number.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than-or-equal/bigint-and-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-bigint.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-boolean.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-incomparable-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-non-finite.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-number-extremes.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-number.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-string.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/less-than/bigint-and-symbol.js	compare	values slice 12;compare dir;	-	values,compare	failed
+test/language/expressions/logical-assignment/lgcl-and-assignment-operator-bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/logical-assignment/lgcl-nullish-assignment-operator-bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/logical-assignment/lgcl-or-assignment-operator-bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/logical-not/bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/modulus/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/modulus/bigint-arithmetic.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/modulus/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/modulus/bigint-modulo-zero.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/modulus/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/modulus/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/multiplication/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/multiplication/bigint-arithmetic.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/multiplication/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/multiplication/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/multiplication/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/object/literal-property-name-bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/postfix-decrement/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/postfix-increment/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/prefix-decrement/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/prefix-increment/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/right-shift/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/right-shift/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/right-shift/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/right-shift/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/right-shift/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/right-shift/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/strict-does-not-equals/bigint-and-bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-does-not-equals/bigint-and-boolean.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-does-not-equals/bigint-and-incomparable-primitive.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-does-not-equals/bigint-and-non-finite.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-does-not-equals/bigint-and-number-extremes.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-does-not-equals/bigint-and-number.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-does-not-equals/bigint-and-object.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/language/expressions/strict-does-not-equals/bigint-and-string.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-boolean.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-incomparable-primitive.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-non-finite.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-number-extremes.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-number.js	values	values slice 12;	-	values	failed
+test/language/expressions/strict-equals/bigint-and-object.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/language/expressions/strict-equals/bigint-and-string.js	values	values slice 12;	-	values	failed
+test/language/expressions/subtraction/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/subtraction/bigint-arithmetic.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/subtraction/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/subtraction/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/subtraction/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/typeof/bigint.js	builtin	values slice 12;builtin BigInt;	-	values,builtin	failed
+test/language/expressions/unary-minus/bigint-non-primitive.js	builtin	values slice 12;builtin ToObject;	-	values,builtin	failed
+test/language/expressions/unary-minus/bigint.js	values	values slice 12;	-	values	failed
+test/language/expressions/unary-plus/bigint-throws.js	values	values slice 12;	-	values	failed
+test/language/expressions/unsigned-right-shift/bigint-and-number.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/unsigned-right-shift/bigint-errors.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/unsigned-right-shift/bigint-non-primitive.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/unsigned-right-shift/bigint-toprimitive.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/expressions/unsigned-right-shift/bigint-wrapped-values.js	joint	values slice 12;arith dir;builtin ToObject;	-	values,arith,builtin	failed
+test/language/expressions/unsigned-right-shift/bigint.js	arith	values slice 12;arith dir;	-	values,arith	failed
+test/language/literals/bigint/binary-invalid-digit.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/exponent-part.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/hexadecimal-invalid-digit.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/legacy-octal-like-invalid-00n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/legacy-octal-like-invalid-01n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/legacy-octal-like-invalid-07n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/mv-is-not-integer-dil-dot-dds.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/mv-is-not-integer-dot-dds.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/non-octal-like-invalid-0008n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/non-octal-like-invalid-012348n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/non-octal-like-invalid-08n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/non-octal-like-invalid-09n.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-bd-nsl-bd-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-bd-nsl-bd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-bd-nsl-bds.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-bds-nsl-bd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-bds-nsl-bds.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-nsl-bd-dunder-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-bil-nsl-bd-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-dd-nsl-dd-one-of.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-dd-nsl-dds-dunder-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-dd-nsl-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-dds-nsl-dd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-dds-nsl-dds-dunder-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-dds-nsl-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-hd-nsl-hd-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-hd-nsl-hd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-hd-nsl-hds.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-hds-nsl-hd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-hds-nsl-hds.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-nsl-hd-dunder-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-nsl-hd-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-hil-od-nsl-od-one-of.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-lol-00-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-lol-01-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-lol-07-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-lol-0_0-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-lol-0_1-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-lol-0_7-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nonoctal-08-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nonoctal-09-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nonoctal-0_8-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nonoctal-0_9-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nzd-nsl-dd-one-of.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nzd-nsl-dd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nzd-nsl-dds-dunder-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nzd-nsl-dds-leading-zero-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-nzd-nsl-dds.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-nsl-od-dunder-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-nsl-od-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-od-nsl-od-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-od-nsl-od-one-of.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-od-nsl-od.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-od-nsl-ods.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-ods-nsl-od.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-oil-ods-nsl-ods.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-sign-minus-dds-nsl-dd.js	values	values slice 12;	-	values	failed
+test/language/literals/bigint/numeric-separators/numeric-separator-literal-unicode-err.js	values	values slice 12;	-	values	passed
+test/language/literals/bigint/octal-invalid-digit.js	values	values slice 12;	-	values	passed
+test/language/statements/class/elements/privatefieldget-primitive-receiver.js	values	values slice 12;	-	values	failed
+test/language/statements/class/elements/privatefieldput-primitive-receiver.js	values	values slice 12;	-	values	failed

@@ -1,0 +1,14 @@
+{
+  "at": "2026-11-28T07:36:47Z",
+  "actor": "human:operator",
+  "artifact": "story:slow-lane-holds-its-bound-on-the-slower-runner",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "review_outcome",
+    "source": "review-result:adversary-laneeight-step-2-pass-1",
+    "review": "review-result:adversary-laneeight-step-2-pass-1",
+    "outcome": "fixed"
+  }
+}

@@ -2128,6 +2128,58 @@ with an override table, and nowhere else. The requirement that the story of the 
    22nd entry of `KIND_SITES` (21 today, `heap/collect.rs:351`). No Private Name is a root. It
    lives while a record, a frame, a suspended frame or an object's elements hold it.
 
+**Modules.** Added on 2026-11-28 for slice 11. What a script sees, the standard's
+(`sec-module-semantics`; Cyclic Module Records, `sec-cyclic-module-records`; Source Text Module
+Records, `sec-source-text-module-records`): import and export declarations with live bindings,
+namespace objects, top-level `await`, `import()` and `import.meta`. What a host sees is section 9
+of `host-interface.md`, "Modules, and the load hand-over": it parses a module itself, is asked
+for each load of a graph, and links and evaluates through entry points of the agent. The engine's
+part, decided at the decomposition of the slice: every walk of the draft that recurses over the
+graph runs on an explicit work stack of the agent; a module body runs in a frame of its own
+whose ScriptOrModule component is the module; the payload of a load is a `LoadPayload` of two
+kinds, `LoadPayload::Graph` and `LoadPayload::Dynamic`; and a walk that ends in `Terminated`
+leaves the graph as HOST-74, HOST-75 and HOST-76 say.
+
+1. The walks. InnerModuleLoading, InnerModuleLinking, InnerModuleEvaluation, ResolveExport and
+   GetExportedNames recurse in the draft, to a depth the graph chooses. Each runs here as a loop
+   over a work stack of its own, a list the agent holds: an entry is a module with the place the
+   walk has reached in it (the index of its next request; for ResolveExport the pair of module
+   and name, with the resolveSet beside the stack; for GetExportedNames the module, with the
+   exportStarSet beside it). An entry is charged to the memory budget before it is pushed and
+   credited when it is popped, so the Rust stack does not grow with the graph, and a graph too
+   deep for the budget ends in `Terminated(MemoryBudget)`. Rejected: recursion in Rust, whose
+   depth the graph would choose.
+2. Steps. A walk spends one step per module it visits and one per request or exported name it
+   reads, each charged before the visit or the read; ResolveExport spends one per pair of module
+   and name it visits. That is the rule of this decision for a loop inside one instruction.
+3. The module body's frame. ExecuteModule runs the body as the entry of a frame of its own: its
+   `this` is undefined, its realm is the module's, and its environment is the module environment
+   (decision 4, "Module records"). The ScriptOrModule component of a frame, of a function object,
+   of the slot names of an environment and of a queued job is one handle of two kinds,
+   `ScriptOrModule` (`crates/swell/src/module/mod.rs`): a script or a module. Every place that
+   held a script's handle holds it, and the compiled code and the template objects of a site are
+   read through it from the record of either kind. A handle made for a script, for eval code or
+   for a dynamic function stays of the script kind.
+4. Top-level `await`. Whether a module has one ([[HasTLA]]) is read from its compiled code. Its
+   body's frame is suspended at the `await` and resumed by a promise job, as the activation of an
+   `async` function is (slice 10); the walk of the asynchronous evaluation
+   (`sec-async-module-execution-fulfilled`, `sec-async-module-execution-rejected`) keeps its
+   order in the record's own state (decision 4).
+5. The load payload. `LoadPayload` (`crates/swell/src/module/loading.rs`) is a sum of the two
+   kinds the draft has: `Graph`, the GraphLoadingState Record of `load_requested_modules`, and
+   `Dynamic`, the PromiseCapability Record of an `import()`. `finish_loading_imported_module`
+   first keeps the module in the [[LoadedModules]] of the referrer, by the referrer's kind (a
+   module, a script or a realm; HOST-63), and then chooses its continuation by the payload:
+   ContinueModuleLoading for `Graph`, ContinueDynamicImport for `Dynamic`. The token of a load
+   roots its referrer and its payload until it is consumed or dropped (HOST-67).
+6. Termination (decision 10). A walk that a budget, an interrupt or a fault ends leaves nothing
+   a later call reads as done. A load that ended in `Terminated(MemoryBudget)` leaves the graph's
+   promise pending and its modules `New` (HOST-76). A `link` that ended in `Terminated` puts
+   every module that was `Unlinked` before the call back to `Unlinked` (HOST-75). An evaluation
+   that ended in `Terminated` leaves each module that was evaluating at `Evaluating` with
+   `module_terminated` set, and a later `evaluate_module` of it, or of a module that imports it,
+   answers `Err(HostError::ModuleTerminated)` and runs no code (HOST-74).
+
 ## 4. Values and the heap without unsafe code
 
 **Value.** A Rust enum: `Undefined`, `Null`, `Boolean`, `Number(f64)`, and `String`, `Symbol`,
@@ -2456,6 +2508,51 @@ The mechanism:
    the sweep that frees them; a later evaluation allocates nothing. Steps: the instruction's, and
    at the first evaluation one per element it defines in the two Arrays (an array loop, decision
    3).
+
+**Module records.** Added on 2026-11-28 for slice 11. A module is a record in an arena of its
+own, `Heap.modules`, beside `scripts` (`crates/swell/src/heap/mod.rs`). The host's `Module` is a
+handle into it; the collector reaches it as `Item::Module`, and `ModuleRecord::trace` is an entry
+of `KIND_SITES`. The record and the state of each of its later parts are under
+`crates/swell/src/module/`, each part a type in a file of its own. The module environment is a
+declarative record whose import slots are a slot kind of their own, `SlotKind::Import`, which
+every read goes through to the binding it names. The record, its lists and its compiled code are
+charged to the memory budget when they are made.
+
+1. The arena and the collector. `modules: Arena<ModuleRecord>` is in every sum of the ledger where
+   `scripts` is. The collector gets `Item::Module`, a workspace in `Mark`, a sweep of the arena,
+   and the entry `"module/mod.rs ModuleRecord::trace"` in `KIND_SITES`. A handle the host holds
+   is a root, as a script's is. A module record lives while a root or a traced record holds it,
+   and only the sweep frees it. Rejected: a module as an object record, which a script could be
+   handed and every `match` over object kinds would see.
+2. The record. It holds its [[Realm]], its [[HostDefined]] (the host's value, the same `Rc` the
+   host gave), its compiled code (the module's `Code`, compiled at `parse_module` under the same
+   ledger as a script's, from which the requests and the import and export entries are read),
+   its [[LoadedModules]] and its status. The state of each later part is a field of a type of
+   its own, defined in a file of its own under `crates/swell/src/module/` and traced by a call
+   from `ModuleRecord::trace`: the link and evaluation state (the environment, [[DFSIndex]],
+   [[DFSAncestorIndex]], [[CycleRoot]], [[EvaluationError]], [[TopLevelCapability]],
+   `module_terminated`), the namespace object, the asynchronous evaluation
+   ([[AsyncEvaluationOrder]], [[PendingAsyncDependencies]], [[AsyncParentModules]]), the
+   `import.meta` object, and the default export of a JSON module's synthetic record. Each type
+   is empty, with an empty trace, until the story of its part fills it. That keeps the record's
+   own struct one story's and gives each later part a file no other part writes.
+3. The module environment. The top level of a module is a named declarative environment with its
+   slots in a fixed order: the imports first, then the other names in source order. An import
+   slot has the kind `SlotKind::Import`. InitializeEnvironment fills it with the binding that
+   ResolveExport answered: the target module's environment and the slot in it. A read follows
+   the slot to that binding at the time of the read, on both paths a name is read by: the
+   instructions that read a slot of a named environment, and the lookup by name at run time,
+   which code compiled for a direct `eval` uses for a name the eval code does not bind
+   (`Agent::resolve_name`). A target that is not initialized yet throws the `ReferenceError`
+   of its own binding, and an assignment to an import throws a `TypeError`, as the standard's
+   immutable indirect binding does (`sec-createimportbinding`,
+   `sec-module-environment-records-getbindingvalue-n-s`). Rejected: copying the value into the
+   importing environment at InitializeEnvironment, which is not a live binding and which the
+   lookup by name would read stale.
+4. Charges. The record and each of its lists are charged before they are made, the compiled code
+   with its ledger, the environment when InitializeEnvironment makes it, and each later part's
+   state when its story's code makes it; the sweep that frees the record credits them. The
+   entries of the walks' work stacks are charged as decision 3, "Modules", says.
 
 **Cost.** The arenas cost a bounds check and a generation compare on every access, and plain maps
 cost a search per property access where shapes would cost an offset. How much slower this is than
@@ -3558,8 +3655,10 @@ first.
   is empty without either. No timer is needed: an engine with no clock cannot wait for anything
   but jobs, except `Atomics.waitAsync` timeouts, for which the runner's host answers
   `HostEnqueueTimeoutJob` by running the job when the queue is otherwise empty.
-- **Modules.** A loader over the case's directory: `./name` is the file beside the case, `.json`
-  is a JSON module; `_FIXTURE` files are loaded only as dependencies.
+- **Modules.** A loader over the case's directory: `./name` is resolved against the directory
+  of the referring module's file, within the case's directory; `.json` is a JSON module;
+  `_FIXTURE` files are loaded only as dependencies. There is one module per resolved path in a
+  run, so a cycle loads each file once, and every load is finished inside the hook.
 - **Budgets.** Every run has a step budget and a memory budget, so a hanging case is a failed
   case, printed as `budget`. First values: 2^30 steps and 512 MiB, chosen, not derived; the runner
   prints the twenty most expensive cases by steps so the values can be set from data.
