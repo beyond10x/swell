@@ -30,6 +30,7 @@ session's scratch directory. The stage is kept current by the coordinator.
 | lane | lanefour | `story:realm-size-lane-within-its-share` (fourth unit) | `impl/lanefour`, cut at `158888d9`; dispatched on 2026-11-27, about 03:25 CET, after the forge's run 45925590365 read `slow-time lane 1137.3 of 900` on `158888d9` (parts 419.3, 268.4, 431.2, 18.4); its target is 800 s or less on the forge without a shard, a raised bound, a skipped test or a build cache between runs; green at `826214f` after two adversary passes (`review-result:adversary-lanefour-pass-1`, `review-result:adversary-lanefour-pass-2`) and two corrections: the lane's collect mode at opt-level 1 except the stack tests, held by a guard at run time, the build of the profile `collect` beside `slow-test262`, a character class that keeps its last answer; one cold lane on a build node of 32 cores reads `slow-time lane 444.2 of 900`; estimated for the forge about 848 s of 900; read by the coordinator (`review-result:lanefour-correction-2-coordinator-read`); merged at `1c8d802` on 2026-11-27, 08:41 CET; the forge measured `slow-time lane 882.6 of 900` on `b9adbe35` (run 45963552396, 2026-11-27, 09:09 to 09:24 CET) |
 | lane | lanefive | `story:property-escape-cases-spend-less-in-the-interpreter-loop` | taken into the wave on 2026-11-27 (`approval-record:wave-big-2-lane-unit-5`) after the forge read `slow-time lane 882.6 of 900`; two plan critics read the story once and the coordinator decided their findings (`review-result:lanefive-plan-coordinator-read`); `impl/lanefive`, cut at the commit of this row; its bound is a ratio of at most 0.90 of the CPU seconds of the loop of `buildString` (`task perf-loop`), with no step count, heap reading or stack bound moved; it is in the wave's second pull request; built at `167536e` with three cuts (a replace of the operand stack writes in place, the next instruction is read in the loop's own code, the operands of an instruction and a checked local are read in one borrow of the frame); `sh taskfiles/perf-loop.sh` read a ratio of 0.724 (head 3.76, base 5.19 CPU seconds, median of three runs each, on a workstation of 20 cores), and the property-escape cases of part 1/14 of the test262 run took 0.858 of the base's time with one worker on a build node; the adversary's pass 1 was green with three notes (`review-result:adversary-lanefive-pass-1`: 411 scripts give the same completion, text, steps, heap bytes and peak on the base and on the head); correction 1 at `17593fe1` adds two tests of a write in the temporal dead zone, which no test held; read by the coordinator (`review-result:lanefive-correction-1-coordinator-read`); merged at `8b60a31c` on 2026-11-27, 12:16 CET |
 | lane | lanesix | `story:gate-test-steps-hold-the-budget-on-the-slower-runner` | taken into the wave on 2026-11-27 (`approval-record:wave-big-2-lane-unit-6`) after the forge failed `check` on the first pull request at `fd71252b` with `gate-time: the test steps ran 147.6 s, over the budget of 120 s` (77.2 s on `8d6cfebc`, the same code: the runner took 1.94 times the CPU seconds); two plan critics read the story once and the coordinator decided their findings (`review-result:lanesix-plan-coordinator-read`); `impl/lanesix`, cut at the commit of this row; its bound is the CPU seconds of the test steps at 80 % or less of the base on the build node, with no test, plant or step taken out of the gate, and a line `gate-runner: ...` in the log of `check`; built before the conformance close starts; it is in the wave's second pull request; the unit stopped after its first part (the runner's line `gate-runner: ...` at `92f3d55`, and the lists of the steps' tests by CPU seconds: no cut the second body allowed reached 80 %); the operator decided the cut (`approval-record:wave-big-2-lane-unit-6-cut`): the step `test` runs the tests of `swell::main` that the stack rule prints "other" at opt-level 1 with debug assertions and overflow checks on, the stack tests at opt-level 0 behind the lane's guard; two plan critics read the third body and the coordinator decided their findings (`review-result:lanesix-plan-coordinator-read-2`); built at `1910825c` (1,647 of the 1,770 tests of the binary at opt-level 1); two counting pairs of whole gates on the build node read 416.9 to 315.9 CPU seconds of the test steps (ratio 0.758, loads 36.7 and 38.5) and 314.1 to 245.6 (0.782, loads 16.3 and 19.5), and after the corrections the coordinator read 476.5 to 348.7 on `362b69b1` (0.732, loads 15.4 and 14.1), while one more pair read 294.0 to 338.4 with the untouched step `test-collect` at 64.8 CPU seconds on the base and 121.1 on the head (the node gives two levels of CPU seconds for one code); the bound is 0.80; no entry of the CPU table for 32 cores (an entry needs 0.64); the build of the binary at opt-level 1 runs before the clock and took 5 min 14 s to 8 min 44 s on the build node; two adversary passes were red (`review-result:adversary-lanesix-pass-1`: a caller's value of the run's variables was accepted, the summed line failed with a relative path of `task`, nothing kept the profile's test in the run at opt-level 1; `review-result:adversary-lanesix-pass-2`: an included cargo configuration was not read, `test-split` failed without a line of its own); corrections at `c63040c1` and `362b69b1`, the second read by the coordinator (`review-result:lanesix-correction-2-coordinator-read`); merged at `45c0df95` on 2026-11-27, 21:01 CET; the forge's reading of the test steps is on the wave's second pull request |
+| lane | laneseven | `story:gate-test-steps-hold-the-budget-on-the-slower-runner` (seventh unit) | planned on 2026-11-27 after the forge read the head of the second pull request at 117.6 s of 120 and 30.2 yardsticks against the story's bound of 29.5; inside the cut the operator decided for the sixth unit (`approval-record:wave-big-2-lane-unit-6-cut`); two plan critics read the story's fifth body and the coordinator took their fifteen findings (`review-result:laneseven-plan-coordinator-read`); `impl/laneseven`, cut at `9a8ad008`; dispatched on 2026-11-27; built at `c47fc9e2`: the step `test` runs swell's library tests and the packages `swell-num` and `swell-test262` at opt-level 1 too, but for two tests of `swell-test262::main` at the parser's nesting limit (`TEST_OPT0_TESTS`), and the 17 tests of the macro `round_trip_planes!` stand on a `fn` line each (`0c4df9b7`), so the stack rule places them; `test: swell::main 1664 at opt-level 1, 106 at opt-level 0` and `test: 2187 tests at opt-level 1, 345 at opt-level 0`, the summed line `19 test binaries: 2532 passed, 0 failed, 1 ignored` as before; the 540 moved tests cost 37.16 CPU seconds at opt-level 0 and 6.01 at opt-level 1 on the build node (ratio 0.162, the story's bound 0.40); the build before the clock took 824 s before and 814 s after in a target directory of its own; adversary pass 1 was red (`review-result:adversary-laneseven-pass-1`: a wrong equation in the story, a filter without the exclusion of `swell::main` that every planted script let pass, a pair outside the moved binaries accepted, a summary without the new variable, a report without the scripts' seconds); correction at `971ac76a`; pass 2 is green with one note (`review-result:adversary-laneseven-pass-2`), filed as `story:test-split-holds-the-stack-tests-of-swell-main-by-its-lists` in the backlog; read by the coordinator (`review-result:laneseven-coordinator-read`); merged at `4b1ec2a4` on 2026-11-28, 01:52 CET; the forge's reading of the test steps is on the wave's third pull request |
 | tests | randomcases | none (`story:math-random` is implemented) | `impl/randomcases`, cut at `b9bd2838`; dispatched on 2026-11-26, 21:10 CET: the four cases of `review-result:adversary-random-pass-2`, which passed and were never committed, are taken under the unit's names; tests only; green at `497fa1ff` (2 test files, 271 added lines; swell-num 153 and `math_random::` 15 tests green in both modes), read by the coordinator (`review-result:randomcases-coordinator-read`) and merged in the commit after this one |
 | tests | realmwalk | `story:realm-walk-in-parts-under-the-cpu-bound` | `impl/realmwalk`, cut at `158888d9`; its first unit stopped at the story's stop rule on 2026-11-27 (the list of the realm's 344 functions alone took 2.33 CPU s in the lane's collect build, and every part of the walk would pay it); the story was written again: the places of the functions are a committed file, `crates/swell/tests/fixtures/realm_places.txt`, which the parts read. The form of that file: it carries no digest of its sources; one test in the default build makes the list again at every gate run and compares it with the file line for line (0.05 CPU s). This differs from the two forms the folder's rule "An expensive product is made once" names (a committed file with a digest; a fixture built once per run), so it was put to the operator on 2026-11-27, 03:48 CET, with three options (this form as the default; a digest as form 1; a setup step under `target/`). No answer came within the 15 minutes of the rule "A default proceeds", and the default was taken at 04:04 CET. Three plan critics read the rewritten story twice (acceptance, design, parallel safety); each asked for a revision both times, and the coordinator decided the remaining findings and read the change (`review-result:realmwalk-plan-coordinator-read`, story revision 9); the branch was merged up to `wave/big-2` at `edfd254` (head `557206e2`, source code equal to `6f21df6d`) and the unit was dispatched on 2026-11-27, 04:13 CET; it is merged into `wave/big-2` when it is closed; its second start reported green at `542f9fe` (2 parts, 181 and 163 of 344 places; the equality test 0.061 CPU s alone); pass 1 of the adversary was green with one warning and twelve notes (`review-result:adversary-realmwalk-pass-1`); correction 1 at `fa63ea9` (the two variables of the gate's test build listed and checked by `test-vars-check`, what a part owes, at most 8 parts, one definition of the comment lines, a read-back before a write); read by the coordinator (`review-result:realmwalk-correction-1-coordinator-read`), who ran the whole gate on the head; merged at `1923715` on 2026-11-27, 06:23 CET |
 | 3 | weak | `story:weak-map-and-weak-set` | `impl/weak`, cut at `b9bd2838`, with the base run of `b9bd2838` (`test262 total 53801 8982 7 44812 27747 17062 3`); dispatched on 2026-11-26, 21:10 CET; the list reads `passed 156 bound 156 B 156 F 247 R 247` on the base; green at `7d6e94c5` after one correction (`review-result:adversary-weak-pass-1`, `review-result:weak-correction-1-coordinator-read`); merged at `6e9b7fa` on 2026-11-27, 00:36 CET |
@@ -644,7 +645,143 @@ section and the commit that merged its unit: `story:private-fields-and-private-i
 `story:slice-08-conformance-close`. The acceptance of the two stories of the lane,
 `story:property-escape-cases-spend-less-in-the-interpreter-loop` and
 `story:gate-test-steps-hold-the-budget-on-the-slower-runner`, is read on the forge's runs of
-the pull request's head; each gets its `test_result` from those runs.
+the pull request's head; the subsection "The forge" below gives what they read.
 
 Slice 8 and slice 9 are delivered: ten of nineteen slices. Not in this pull request:
 `story:bench-image-and-first-measurements`, which has a draft pull request of its own.
+
+### The forge
+
+The forge's runs of the head of the pull request (`5ab9f8e5`), 2026-11-27, all green.
+
+The first attempt of `check` (run 46069632845) prints:
+
+```
+gate-runner: 4 cores, AMD EPYC 7763 64-Core Processor, 16366632 kB, sh is dash
+test: swell::main 1647 at opt-level 1, 123 at opt-level 0
+gate-time test 46.6
+gate-time test-collect 33.8
+gate-time gate-selftest 28.0
+gate-time test-steps 117.6 of 120, cpu 407.6, load 4.65 on 4 cores
+gate-time yardstick 3.9 s: conform-engine 1.9 and test262-moves-check 2.0
+```
+
+The test steps hold their budget of 120 s with 2.4 s. They do not hold the bound of
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, 29.5 times the yardstick: that
+is 115.1 s on this runner, and the run read 117.6 s (30.2 yardsticks). The story stays
+active. A runner of the same yardstick (3.8 s) took 147.6 s on the head of the first pull
+request (`fd71252b`, run 45979562872), with the step `test` at 80.6 s, `test-collect` at
+33.1 s and `gate-selftest` at 24.6 s; the unit's cut took the step `test` to 46.6 s while
+the part added 87 tests to it, and it moves no other step. The job `check` took 16 min 29 s
+of its 30 minutes (6 min 49 s in run 45972624878); the build of the run at opt-level 1 took
+5 min 15 s of it. The next cut is a seventh unit of the lane, planned and built before any
+further feature unit.
+
+The lane `slow` (run 46069633020) prints:
+
+```
+slow-runner: 4 cores, AMD EPYC 9V45 96-Core Processor, 16366632 kB, sh is dash
+slow-time slow-test262 359.8
+slow-time slow-tests 145.3
+slow-time test-realm-sizes 149.6
+slow-time stack-profiles 18.3
+slow-time lane 673.0 of 900, longest part slow-test262 359.8 of 600
+```
+
+On the head of the first pull request the lane read 882.6 s with `slow-test262` at 504.8 s
+(run 45963552396). `story:property-escape-cases-spend-less-in-the-interpreter-loop` gets
+this run as its `test_result` and is implemented; the commit that records it is not in the
+head of the second pull request and comes with the next one, so that the head is not built
+on the forge a second time on a margin of 2.4 s. The guard of the sixth unit's story holds:
+`slow-time slow-tests` reads 145.3 s, under its 175.
+
+## The fourth part: the gate's lines, what went wrong, where each finding went
+
+This section is the close of the wave's fourth part: the seventh unit of the lane
+(`laneseven`), and the store's record of the forge's runs of the second pull request. It is
+the wave's third pull request. The second pull request was merged into `main` on its head
+`5ab9f8e5`. No feature unit is in this part: the story of the gate's test steps was still
+open after the second pull request (30.2 yardsticks on the forge against its bound of
+29.5), and a step over its bound is fixed before the next feature.
+
+### The gate
+
+`slot --timeout 30m task check-runner` on `wave/big-2` at `4b1ec2a4`, on the build node,
+2026-11-28, 01:53 to 02:06 CET: exit 0. Its lines are in `AGENTS.md`, "The gate's numbers";
+the ones this part moved:
+
+```
+build-tests opt-level 1: Finished `collect` profile [optimized] target(s) in 5m 12s
+build-collect: 10 test executables in target/collect/deps, none with a .debug_ section
+gate-runner: 32 cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash
+test: swell::main 1664 at opt-level 1, 106 at opt-level 0
+test: 2187 tests at opt-level 1, 345 at opt-level 0
+19 test binaries: 2532 passed, 0 failed, 1 ignored
+gate-time test 8.6
+gate-selftest: 114 passed, 0 failed
+gate-time test-steps 38.3 of 120, cpu 283.6, load 13.22 on 32 cores
+gate-time yardstick 3.7 s: conform-engine 1.7 and test262-moves-check 2.0
+gate-cpu test-steps 283.6, no bound for 32 cores: test 106.7, test-doc 5.4, test-collect 110.4, test-faults 0.2, conform-engine 2.5, test262-check 0.1, test262-moves-check 1.7, gate-selftest 56.6
+```
+
+No conformance line moved: `test262 total 53801 8982 7 44812 37097 7713 2`, and the digest
+of the test262 sources is the one of the second pull request.
+
+The unit's cut is read on one job, not on whole gates: the 540 moved tests, each through a
+runner that reads its process's CPU time, cost 37.16 CPU seconds at opt-level 0 and 6.01 at
+opt-level 1 (ratio 0.162; the story's bound is 0.40). By binary: `swell` 291 tests 16.69 to
+2.33; `swell-test262::main` 62 tests 10.51 to 1.64; `swell-num::main` 153 tests 5.02 to
+1.27; the 17 tests of `round_trip_planes!` 4.49 to 0.61; `swell-num` 8 tests 0.42 to 0.14;
+`swell-test262` 9 tests 0.02 to 0.02.
+
+### What went wrong
+
+- The story's fifth body carried a wrong equation: it said n plus m of the new line `test:
+  <n> tests at opt-level 1, <m> at opt-level 0` is p plus f plus i of the summed line. The
+  lists of the two runs leave the ignored test out, so n plus m is p plus f. Two plan
+  critics read the body and did not see it; the unit and the first adversary pass did. The
+  step was right, the sentence is corrected in the store, and a planted script holds the
+  two sums.
+- The unit as first built let a filter without the exclusion of `swell::main` pass every
+  planted script: with it all 1,770 tests of that binary, the stack tests among them, run
+  at opt-level 1 and each test is still in one run. The first adversary pass planted it;
+  correction 1 requires the exclusion in the written line.
+- For about 40 s two whole gates of the unit's base ran at once on the build node, against
+  the rule of one pool job of a unit at a time. The unit cancelled both and ran the base
+  gate again.
+- The whole gates on the build node do not show the cut: the test steps read 320.4 CPU
+  seconds on the base, 228.5 on the unit's first head and 251.4 on its second, which runs
+  the same lists as the first, and 283.6 in the gate of this section. The node gives two
+  levels of CPU seconds for one code (the third part gives its readings);
+  `story:local-gate-reads-the-cost-of-its-test-steps-on-a-steady-measure` (backlog) holds
+  the gap.
+- The commit that records the forge's runs of the second pull request (`9a8ad008`) was not
+  in that pull request's head: its test steps read 117.6 s of 120 there, and a second
+  build of that head on the forge could have failed on the margin of 2.4 s. It is in this
+  part.
+
+### Where each finding went
+
+- Two adversary passes on the unit (`review-result:adversary-laneseven-pass-1`, red, five
+  findings; `review-result:adversary-laneseven-pass-2`, green, one note). The five findings
+  were corrected by the unit (`971ac76a`) or, the equation, by the coordinator in the
+  story. `review-result:laneseven-coordinator-read` closes the unit after the two passes.
+- Filed in the backlog from this part, a draft that no wave takes before the planned waves
+  are delivered: `story:test-split-holds-the-stack-tests-of-swell-main-by-its-lists` (the
+  check of the written filter counts spellings; a second package part in another spelling
+  passes it and the split, and the guard stops it only when the tests run).
+
+### The stories
+
+`story:property-escape-cases-spend-less-in-the-interpreter-loop` is implemented with this
+pull request: its `test_result` is the forge's run of the lane on the head of the second
+pull request (run 46069633020, "The forge" above).
+
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner` stays active in this head. Its
+acceptance is the forge's own: the test steps of the first attempt of `check` on this pull
+request, at 29.5 yardsticks or less and within 120 s, with the lane's `slow-time
+slow-tests` at 175 s or less. The pull request's text gives what the forge read; the store
+takes the reading with the next commit after it.
+
+Not in this pull request: `story:bench-image-and-first-measurements`, which has a draft
+pull request of its own. Ten of nineteen slices are delivered, as after the third part.

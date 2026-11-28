@@ -37,21 +37,42 @@ fail() {
 [ -f Taskfile.yml ] && [ -f taskfiles/realm-room-tests.awk ] || fail "run it from the repository root"
 
 printf '%s\n' '#!/bin/sh' \
-  'profile=test; prev=""; cfg=""' \
+  'profile=test; prev=""; cfg=""; fmt=""' \
   'for a in "$@"; do' \
   '  [ "$prev" = "--cargo-profile" ] && profile=$a' \
   '  [ "$prev" = "--config-file" ] && cfg=$a' \
+  '  [ "$prev" = "--message-format" ] && fmt=$a' \
   '  prev=$a' \
   'done' \
-  'kind=none; names=""' \
+  'kind=none; names=""; pkgs=""; pairs=""' \
   'if [ -n "$cfg" ]; then' \
   '  if grep -q "^default-filter = .not (" "$cfg"; then kind=not; else kind=only; fi' \
-  '  names=$(grep "^default-filter = " "$cfg" | grep -o "test(=[^)]*)" | sed "s/^test(=//; s/)\$//" | tr "\n" " ")' \
+  '  line=$(grep "^default-filter = " "$cfg")' \
+  '  names=$(printf "%s\n" "$line" | sed "s/binary_id(=[^)]*) & test(=[^)]*)//g" | grep -o "test(=[^)]*)" | sed "s/^test(=//; s/)\$//" | tr "\n" " ")' \
+  '  pkgs=$(printf "%s\n" "$line" | grep -o "package(=[^)]*)" | sed "s/^package(=//; s/)\$//" | tr "\n" " ")' \
+  '  pairs=$(printf "%s\n" "$line" | grep -o "binary_id(=[^)]*) & test(=[^)]*)" | sed "s/^binary_id(=//; s/) & test(=/ /; s/)\$//" | tr "\n" "|")' \
   'fi' \
   'all="swell::main deep::on_any_stack|swell::main deep::on_the_promised_stack|swell::main plain::outside_the_stack"' \
+  'extra=$(sed -n "s/^  TEST_OPT0_TESTS: //p" Taskfile.yml | tr " " "\n" | paste -d " " - - | tr "\n" "|")' \
+  'if [ "$2" = list ] && [ "$fmt" = json-pretty ]; then' \
+  '  printf "{\n  \"test-count\": %s,\n  \"rust-suites\": {\n" "$(printf "%s\n" "$all|$extra" | tr "|" "\n" | grep -c " ")"' \
+  '  printf "%s\n" "$all|$extra" | tr "|" "\n" | while read -r bin test; do' \
+  '    [ -n "$bin" ] || continue' \
+  '    [ "$bin" = "${last:-}" ] || printf "    \"%s\": {\n      \"binary-id\": \"%s\",\n      \"testcases\": {\n" "$bin" "$bin"' \
+  '    last=$bin' \
+  '    printf "        \"%s\": {\n          \"kind\": \"test\",\n          \"ignored\": false,\n          \"filter-match\": {\n            \"status\": \"matches\"\n          }\n        },\n" "$test"' \
+  '  done' \
+  '  exit 0' \
+  'fi' \
   'if [ "$2" = list ]; then' \
-  '  printf "%s\n" "$all" | tr "|" "\n" | while read -r bin test; do' \
-  '    case " $names " in *" $test "*) named=yes ;; *) named=no ;; esac' \
+  '  printf "%s\n" "$all|$extra" | tr "|" "\n" | while read -r bin test; do' \
+  '    [ -n "$bin" ] || continue' \
+  '    if [ "$bin" = swell::main ]; then' \
+  '      case " $names " in *" $test "*) named=yes ;; *) named=no ;; esac' \
+  '    else' \
+  '      case " $pkgs " in *" ${bin%%::*} "*) named=yes ;; *) named=no ;; esac' \
+  '      case "|$pairs" in *"|$bin $test|"*) named=no ;; esac' \
+  '    fi' \
   '    case $kind in' \
   '      none) echo "$bin $test" ;;' \
   '      only) [ "$named" = no ] || echo "$bin $test" ;;' \

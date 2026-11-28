@@ -448,6 +448,41 @@ Every number below comes from the gate, `task check`, on the released commit.
   `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh`,
   `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh` and
   `build-tests-refuses-a-profile-its-profile-test-does-not-see.sh`.
+- The gate's step `test` runs more of its tests at opt-level 1
+  (story gate-test-steps-hold-the-budget-on-the-slower-runner, item 5): besides the tests of
+  `swell::main` the stack rule prints "other", the run in the profile `collect` holds every
+  test of swell's library (the binary `swell`), of `swell-num` (`swell-num`,
+  `swell-num::main`) and of `swell-test262` (`swell-test262`, `swell-test262::main`) but
+  two. `TEST_OPT1_ARGS` is `--locked -p swell -p swell-num -p swell-test262 --config
+  .cargo/collect-profile.toml --cargo-profile collect --profile default`, and the new
+  variable `TEST_OPT0_TESTS` at the top of `Taskfile.yml` names, as pairs `<binary> <test>`,
+  the tests of a moved binary that stay at opt-level 0: two tests of `swell-test262::main`,
+  one for each fixture tree with a case at the parser's nesting limit. The 17 tests of
+  `round_trip_planes!` (`crates/swell/tests/builtins_uri.rs`) are written in the form of
+  `language_parts!`, so the stack rule prints them "other" and they run at opt-level 1 too;
+  the lane's `slow-tests` runs them in its part at opt-level 1, and `test-realm-sizes` no
+  longer runs them at each size of the realm. The step prints `test: swell::main <a> at
+  opt-level 1, <b> at opt-level 0` (1664 and 106; 1647 and 123 before) and a new line
+  `test: <n> tests at opt-level 1, <m> at opt-level 0` (2187 and 345). The summed line reads
+  its count of binaries and of tests from the list of the workspace without a filter, taken
+  as JSON (`.out/test-list-all.count`), since nextest neither counts nor names a binary
+  that a filter leaves out whole; it reads `19 test binaries: 2532 passed, 0 failed, 1
+  ignored` before and after. The 540 moved tests cost 6.01 CPU seconds at opt-level 1
+  against 37.16 at opt-level 0 on a build node of 32 cores (one job, each test through a
+  runner that reads its process's CPU time). `test-split` refuses, naming the pair and
+  before any list, a pair of `TEST_OPT0_TESTS` whose binary is not a moved binary (its
+  package is not one `TEST_OPT1_ARGS` names, or it is `swell::main`) and a pair named a
+  second time, and its check of the written filter line requires the exclusion `& not
+  binary_id(=swell::main)`. `build-tests` builds the binaries of that run before the clock:
+  with a target directory of its own the whole task took 824 s before and 814 s after on
+  that node. Planted scripts under `tests/gate/`:
+  `test-runs-each-test-of-a-moved-binary-once.sh` and
+  `test-lists-and-summed-line-count-the-same-tests.sh` are new (n plus m of the new line is
+  p plus f of the summed line, p plus f plus i the count of tests of the list without a
+  filter); `test-runs-each-test-once-at-one-opt-level.sh`,
+  `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
+  `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh` and
+  `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh` follow the new forms.
 - The gate names the machine its test steps run on: `task check` prints, after
   `gate-time-start` and before its first test step, one line `gate-runner: <n> cores,
   <model name>, <MemTotal> kB, sh is <sh>`, from the task `slow-runner` with the label

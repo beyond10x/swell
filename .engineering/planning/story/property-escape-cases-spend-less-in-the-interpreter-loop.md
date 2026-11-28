@@ -2,13 +2,14 @@
 format: aep.planning-md/3
 id: story:property-escape-cases-spend-less-in-the-interpreter-loop
 kind: story
-status: active
+status: implemented
 title: The property-escape cases spend less in the interpreter loop
 summary: Three quarters of a property-escape case of test262 is the interpreter running the harness loop buildString; those cases are 73 % of the test262 run's test time. The loop's CPU seconds drop to 90 % or less (aim 80 %), with every step count, heap reading and stack bound unchanged. Lane unit 5 of wave big-2.
-revision: 9
+revision: 10
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T08:41:58Z", actor: "human:operator", revision: 6, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T08:41:59Z", actor: "human:operator", revision: 7, executor: "agent:coordinator"}
+- {from: "active", to: "implemented", at: "2026-11-27T22:05:32Z", actor: "human:operator", revision: 10, decided_on: {"recorded":{"test_result":1,"review_outcome":2,"verification":1}}, executor: "agent:coordinator"}
 ---
 ## Context
 

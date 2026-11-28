@@ -448,11 +448,15 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   reaches `stack_with_room(` or `.stack_size(`. The tests printed "other" run in the profile
   `collect` (`--test main`); every other test of the same modules (the stack tests and the
   tests a macro writes, which the rule does not see) and the library's unit tests run in the
-  test profile at opt-level 0.
+  test profile at opt-level 0. Since item 5 of
+  `story:gate-test-steps-hold-the-budget-on-the-slower-runner` the 17 tests of
+  `round_trip_planes!` are printed "other" and run in its part at opt-level 1, and
+  `test-realm-sizes` no longer runs them at each size of the realm.
 - The guard of that split: the run at opt-level 1 sets `SWELL_NO_STACK_TESTS=1`
   (`NO_STACK_TESTS` at the top of `Taskfile.yml`; it and `COLLECT_MAIN`, `COLLECT_RUSTFLAGS`
-  and `SLOW_COLLECT_WAIT` stand in `GATE_VARIABLES`, as `TEST_OPT1_ARGS` and
-  `TEST_OPT1_PROFILE_TEST` do, so the first line of the gate and of the lane shows them). The
+  and `SLOW_COLLECT_WAIT` stand in `GATE_VARIABLES`, as `TEST_OPT1_ARGS`,
+  `TEST_OPT1_PROFILE_TEST` and `TEST_OPT0_TESTS` do, so the first line of the gate and of
+  the lane shows them). The
   two ways of swell's tests to a bounded stack, `stack_with_room` and `stack_thread` of
   `crates/swell/tests/support/host.rs`, panic when it is set, naming the way out and both
   runs at opt-level 1, the gate's (task `test`) and the lane's (task `slow-tests`): the rule
@@ -464,36 +468,79 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   and a function pointer made by a cast (`&(f as fn())`). The gate's `test-collect` and the
   collect runs of `test-realm-sizes` run stack tests at opt-level 1 on purpose and do not
   set the variable.
-- The gate's step `test` splits `swell::main` the same way
-  (`story:gate-test-steps-hold-the-budget-on-the-slower-runner`): the tests the stack rule
-  prints "other" run at opt-level 1 (`TEST_OPT1_ARGS` at the top of `Taskfile.yml`:
-  `--locked -p swell --test main --config .cargo/collect-profile.toml --cargo-profile collect
-  --profile default`, the default mode, no feature), with `SWELL_NO_STACK_TESTS=1`; every
-  other test of the workspace (the stack tests, the tests a macro writes, the library tests
-  of swell and every other crate) runs at opt-level 0 with `TEST_NEXTEST_ARGS` unchanged.
-  Each run's filter is a `default-filter` line in a copy of `.config/nextest.toml`
-  (`.out/test-opt1-nextest.toml`, `.out/test-opt0-nextest.toml`; the 1,647 names do not fit
-  one command-line argument). The steps `test` and `build-tests` refuse a caller's value of
-  `TEST_OPT1_ARGS`, `NO_STACK_TESTS` and `TEST_OPT1_PROFILE_TEST` (task
+- The gate's step `test` splits the workspace the same way
+  (`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, items 3 and 5): at
+  opt-level 1 run the tests of `swell::main` the stack rule prints "other" and every test
+  of the other binaries of the packages `TEST_OPT1_ARGS` names (at the top of
+  `Taskfile.yml`: `--locked -p swell -p swell-num -p swell-test262 --config
+  .cargo/collect-profile.toml --cargo-profile collect --profile default`, the default mode,
+  no feature): swell's library tests (`swell`), `swell-num`, `swell-num::main`,
+  `swell-test262` and `swell-test262::main`, but for the pairs `<binary> <test>` of
+  `TEST_OPT0_TESTS` (one plain line at the top of `Taskfile.yml`; the reason of each pair
+  stands in the summary of the task `test`: today two tests of `swell-test262::main`, one
+  for each fixture tree with a case at the parser's nesting limit, so the runner's worker
+  thread still meets that limit with unoptimized frames). The run sets
+  `SWELL_NO_STACK_TESTS=1`. Every other test of the workspace (the stack tests and the tests
+  of `reaches_the_reentry_limit!` and `chain_test!` in `swell::main`, the pairs, the
+  packages of the parser, the compiler, the regexp and unicode crates and the command line,
+  whose stack-bound tests read unoptimized frames and have no rule and no guard) runs at
+  opt-level 0 with `TEST_NEXTEST_ARGS` unchanged. Each run's filter is a `default-filter`
+  line in a copy of `.config/nextest.toml` (`.out/test-opt1-nextest.toml`,
+  `.out/test-opt0-nextest.toml`; the 1,664 names do not fit one command-line argument):
+  `(binary_id(swell::main) & (test(=...) | ...)) | ((package(=swell) | ...) & not
+  binary_id(=swell::main) & not (binary_id(=<b>) & test(=<t>)) ...)` and its `not (...)`.
+  The steps `test` and `build-tests` refuse a caller's value of `TEST_OPT1_ARGS`,
+  `NO_STACK_TESTS`, `TEST_OPT1_PROFILE_TEST` and `TEST_OPT0_TESTS` (task
   `test-opt1-vars-check`), as `test-vars-check` refuses one of `TEST_RUSTFLAGS`; the lane's
-  tasks do not call it.
+  tasks do not call it. A macro that writes tests writes each as `#[test]` and `fn <name> =
+  <part>;` (`language_parts!`, `round_trip_planes!`), so the rule sees it; one whose name
+  only the macro writes runs at opt-level 0 and at every size of the realm. A new test of a
+  moved binary lands in the run at opt-level 1 by the package term; one that needs
+  unoptimized frames is named in `TEST_OPT0_TESTS` in the same change. The moved tests (540)
+  cost 6.01 CPU seconds at opt-level 1 against 37.16 at opt-level 0 on the build node, each
+  test through a runner that reads its process's CPU time.
 - The internal task `test-split` takes `cargo nextest list` of each run and of the workspace
-  and fails, naming the test, when one is in not exactly one run; it prints `test:
-  swell::main <a> at opt-level 1, <b> at opt-level 0` (1647 and 123 on `362b69b1`). It
-  fails, naming the test, when the list of the run at opt-level 1 does not hold
+  and fails, naming the test, when one is in not exactly one run, and naming the pair when a
+  pair of `TEST_OPT0_TESTS` is not a test of the workspace's list or not in the run at
+  opt-level 0. Before any list it refuses, naming the pair, a pair whose binary is not a
+  moved binary (the binary's package, its id up to `::`, is not one `TEST_OPT1_ARGS` names
+  by `-p`, or the binary is `swell::main`, whose tests the stack rule places) and a pair
+  named a second time: either changes nothing. The check of the written filter line
+  requires the term `binary_id(swell::main) & (` and the exclusion `& not
+  binary_id(=swell::main)` once each: without the exclusion every test of `swell::main`,
+  the stack tests among them, would run at opt-level 1 and still be in exactly one run.
+  That check counts spellings: a second package part written with another matcher passes
+  it and the split, and the guard stops it only when the tests run
+  (`story:test-split-holds-the-stack-tests-of-swell-main-by-its-lists`, backlog). It
+  prints `test: swell::main <a> at opt-level 1, <b> at opt-level 0` (1664 and 106) and
+  `test: <n> tests at opt-level 1, <m> at opt-level 0` (2187 and 345). The lists hold the
+  tests that run, an ignored test is in neither: n plus m is p plus f of the summed line
+  (2532), and p plus f plus i is the count of tests of the list without a filter (2533).
+  It fails, naming the test, when the list of the run at opt-level 1 does not hold
   `TEST_OPT1_PROFILE_TEST`, the profile's test (a test the rule prints "stack", one in a
   nested `mod` or one a macro writes would run at opt-level 0), and with a line of its own
   when `crates/swell/tests/support/` holds no `.rs` file. A task's `env` does not reach the
   tasks it calls: `test-split` sets `RUSTFLAGS` itself, and a list that compiles fails it
-  (`compile-check` on the three list logs). The internal task `test-sum` runs
-  `nextest-report` on each run into a file (by `TASK_EXE`, made absolute from
-  `USER_WORKING_DIR` when it names a directory: the command runs in the directory of
+  (`compile-check` on the three list logs). The list of the workspace is taken as
+  `--message-format json-pretty` (`.out/test-list-all.json`): its matching tests go to
+  `.out/test-list-all.txt`, its count of binaries and of tests, the ignored ones among
+  them, to `.out/test-list-all.count`. nextest skips a binary whose tests a filter leaves
+  out whole ("<n> binaries skipped" on the Starting line) and counts neither it nor its
+  tests, so the run at opt-level 0 no longer counts every binary. The internal task
+  `test-sum` runs `nextest-report` on each run into a file (by `TASK_EXE`, made absolute
+  from `USER_WORKING_DIR` when it names a directory: the command runs in the directory of
   `Taskfile.yml`) and prints one line for both, `<b> test binaries: <p> passed, <f> failed,
-  <i> ignored`: b from the run at opt-level 0, whose Starting line counts every binary of
-  the workspace, p and f the sums, i the tests neither run ran (1). The ten `gate-slowest
-  test` lines are taken over both runs. Planted scripts under `tests/gate/`:
+  <i> ignored`: b and the count of tests from `.out/test-list-all.count` (19 and 2533), p
+  and f the sums, i the tests less p and f, the tests neither run ran (1). The ten
+  `gate-slowest test` lines are taken over both runs. Planted scripts under `tests/gate/`:
   `test-runs-each-test-once-at-one-opt-level.sh` (with a failing run at opt-level 1 and a
-  list that compiles), `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
+  list that compiles), `test-runs-each-test-of-a-moved-binary-once.sh` (a test of a moved
+  binary in neither run and in both, a pair the list does not hold, pairs of binaries that
+  do not move, a pair named twice), `test-lists-and-summed-line-count-the-same-tests.sh`
+  (n plus m against p plus f and p plus f plus i against the list's count, with two ignored
+  tests, a binary without tests, a name shared by the library and `swell::main`, an empty
+  JSON list and an empty list at opt-level 1),
+  `test-refuses-a-caller-value-of-its-run-at-opt-level-1.sh`,
   `test-sums-its-runs-when-task-is-called-by-a-relative-path.sh`,
   `test-keeps-the-profile-test-in-its-run-at-opt-level-1.sh` and
   `test-says-why-it-fails-when-the-stack-rule-has-no-support-file.sh`.
@@ -509,12 +556,15 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
   `build-tests-refuses-a-profile-its-profile-test-does-not-see.sh`). A cargo configuration
   file outside the tree is not read, nor a key written with an escape or an inline table
   over several lines; a change of these files is read in review.
-- `build-tests` builds the binary of the run at opt-level 1 before the clock, after the
+- `build-tests` builds the binaries of the run at opt-level 1 before the clock, after the
   step's build at opt-level 0 and before `build-collect`, whose `.debug_` check of
-  `<target>/collect/deps` covers it (`build-tests opt-level 1: <Finished line>`;
-  `build-collect: 6 test executables in target/collect/deps`). On the build node that build
-  took 5 min 14 s to 8 min 44 s after a change of swell's tests (the binary compiles swell's
-  whole test crate); the forge's job `check` has 30 minutes for build and tests.
+  `<target>/collect/deps` covers them (`build-tests opt-level 1: <Finished line>`;
+  `build-collect: 10 test executables in target/collect/deps`). Since item 5 that build
+  compiles swell's library tests, `swell-num` and `swell-test262` in the profile `collect`
+  too. With a target directory of its own on the build node (32 cores) the whole
+  `build-tests` ran 824 s before item 5 and 814 s with it, its build at opt-level 1 5 min
+  29 s and 5 min 45 s; after a change of swell's tests that build took 5 min 12 s to 8 min
+  44 s there. The forge's job `check` has 30 minutes for build and tests.
 - The lane builds the profile `collect` in the background from its start, beside
   `slow-test262` (`slow-collect-start`; `COLLECT_MAIN` and `COLLECT_RUSTFLAGS` at the top of
   `Taskfile.yml` are the one definition of its arguments and flags, read by the runs on it
@@ -629,14 +679,22 @@ and as secure as possible. "As soon as we mark it complete, it's complete as to 
 
 ## The gate's numbers
 
-`slot --timeout 30m task check-runner` on 2026-11-27, on `wave/big-2` at `5aaeb6e8`, the
-head with slice 8 delivered (the commits after it change documents and the planning store),
-on the pool's build node, load 22 on 32 cores. Every check passed and the run exited 0: the
-test steps took 46.9 s of their 120 (360.5 CPU seconds, of them `test` 164.8 and
-`test-collect` 124.3; 32 cores have no entry in the table of CPU seconds, so the `gate-cpu`
-line prints no bound). The step `test` runs in two runs since
-`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, and the build of the run at
-opt-level 1 is outside the clock of the test steps (the line `build-tests opt-level 1`). On
+
+`slot --timeout 30m task check-runner` on 2026-11-28, on `wave/big-2` at `4b1ec2a4`, the
+head with the seventh unit of the lane merged (the commits after it change documents and
+the planning store), on the pool's build node, load 13 on 32 cores. Every check passed and
+the run exited 0: the test steps took 38.3 s of their 120 (283.6 CPU seconds, of them
+`test` 106.7 and `test-collect` 110.4; 32 cores have no entry in the table of CPU seconds,
+so the `gate-cpu` line prints no bound). The step `test` runs in two runs since
+`story:gate-test-steps-hold-the-budget-on-the-slower-runner`, 2,187 tests at opt-level 1
+and 345 at opt-level 0 since its item 5, and the build of the run at opt-level 1 is outside
+the clock of the test steps (the line `build-tests opt-level 1`). On the forge's runner of
+4 cores (`gate-runner: 4 cores, AMD EPYC 7763 64-Core Processor`) the first attempt of
+`check` on `5ab9f8e5`, before item 5, took 117.6 s of the 120 (407.6 CPU seconds, yardstick
+3.9 s; run 46069632845); a runner of the same yardstick took 147.6 s on the head of the
+wave's first pull request. The forge reads item 5 on the wave's third pull request. On
+`wave/big-2` at `5aaeb6e8`, the head with slice 8 delivered, the node took 46.9 s at load
+22 (360.5 CPU seconds, of them `test` 164.8). On
 `impl/lanefix` at `e3c97c4`, the head of the wave's first pull request but for the planning
 store, the node took 35.3 s at load 12 (429.5 CPU seconds, of them `test` 272.0). On
 `wave/big-2` at `b9adbe35`, the head of the second part of wave big-2, the node took 65.5 s
@@ -652,13 +710,14 @@ seconds). The planted scripts' single `ok` lines, the ten slowest tests of each 
 slice lines after slice 10 are left out (`conformance/test262/expected.txt` has every slice
 line). The fault step's line counts the 1,770 tests its filter leaves out as ignored:
 
+
 ```
 runner-env-check: check-runner sets CI=true GITHUB_ACTIONS=true CARGO_TERM_COLOR=always CARGO_INCREMENTAL=0: CI and GITHUB_ACTIONS as the runner sets them, and the 2 variable(s) .github/workflows/check.yml sets for task check
-python-check: no Python file among 2993 file(s)
-kill-check: no kill with two dashes after its signal operand in 150 file(s)
+python-check: no Python file among 3009 file(s)
+kill-check: no kill with two dashes after its signal operand in 152 file(s)
 forbid-unsafe-check: 10 crate root(s), each with #![forbid(unsafe_code)]
 libm-check: no forbidden call under 229 file(s)
-nostd-build: Finished `dev` profile [unoptimized] target(s) in 7.01s
+nostd-build: Finished `dev` profile [unoptimized] target(s) in 0.03s
 nostd-build: 6 libraries for x86_64-unknown-none: swell swell_compiler swell_num swell_regexp swell_syntax swell_unicode
 nostd-symbols: 6 libraries, 58 object(s), 10315 undefined symbol(s): 10174 Rust's own, 54 memory functions, 87 compiler runtime routines; none from a C library or the system
 Cargo.lock: 9 package(s), none from outside this repository
@@ -680,27 +739,28 @@ site-data-check: website/data/engines.json equals its regeneration from bench/en
 test-main: 9 crate(s) with tests, each with one integration-test binary and its tests/main.rs as generated
 test-binaries-check: 19 test executables, 9 integration-test binaries in 9 packages, none with a .debug_ section
 build-tests: Finished `test` profile [unoptimized] target(s) in 0.01s
-build-tests opt-level 1: Finished `collect` profile [optimized] target(s) in 5m 33s
-build-collect: Finished `collect` profile [optimized] target(s) in 5m 25s
-build-collect: 3 test executables in target/collect/deps, none with a .debug_ section
-build-faults: Finished `test` profile [unoptimized] target(s) in 27.66s
-build-conform-engine: Finished `test` profile [unoptimized] target(s) in 1m 00s
-build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.06s
-build-test262-runner: Finished `release` profile [optimized] target(s) in 16.39s
+build-tests opt-level 1: Finished `collect` profile [optimized] target(s) in 5m 12s
+build-collect: Finished `collect` profile [optimized] target(s) in 5m 26s
+build-collect: 10 test executables in target/collect/deps, none with a .debug_ section
+build-faults: Finished `test` profile [unoptimized] target(s) in 21.78s
+build-conform-engine: Finished `test` profile [unoptimized] target(s) in 0.10s
+build-conform-engine: Finished `dev` profile [unoptimized] target(s) in 0.04s
+build-test262-runner: Finished `release` profile [optimized] target(s) in 0.01s
 gate-runner: 32 cores, Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz, 64772604 kB, sh is bash
-test: swell::main 1647 at opt-level 1, 123 at opt-level 0
+test: swell::main 1664 at opt-level 1, 106 at opt-level 0
+test: 2187 tests at opt-level 1, 345 at opt-level 0
 19 test binaries: 2532 passed, 0 failed, 1 ignored
-gate-time test 14.7
+gate-time test 8.6
 test-doc: 8 test suites: 19 passed, 0 failed, 0 ignored
 test-doc collect-every-safe-point: 2 test suites: 19 passed, 0 failed, 0 ignored
-gate-time test-doc 4.9
+gate-time test-doc 4.6
 test-collect: 2 test binaries: 2029 passed, 0 failed, 1 ignored
-gate-time test-collect 5.3
+gate-time test-collect 5.2
 test-faults: 1 test binaries: 1 passed, 0 failed, 1770 ignored
 gate-time test-faults 0.2
 conform-engine: 3 test binaries: 16 passed, 0 failed, 0 ignored
   60 scenarios: 18 passed, 0 failed, 0 error, 42 unsupported
-gate-time conform-engine 1.9
+gate-time conform-engine 1.7
 test262-refused 3237
 test262 total 53801 8982 7 44812 37097 7713 2
 test262: 221 directory lines sum to the total
@@ -717,15 +777,15 @@ test262-slice 10 3759 7258 0 0 3759 3759 0 0
 test262: 22 slice lines equal the design
 test262-errors 0
 test262: 287 lines of conformance/test262/expected.txt; sources digest 0e48037b2a499061123b175285a79a9530326607607f625e35cc251e7fc956c1 equals conformance/test262/expected.digest
-gate-time test262-check 0.2
+gate-time test262-check 0.1
 test262-moves: 2031 case(s) moved, 3:78 4:337 5:278 6:694 7:60 8:378 9:29 10:83 11:4 12:64 13:22 18:4; slices 1 to 19: 44931 85794
-gate-time test262-moves-check 2.6
-gate-selftest: 112 passed, 0 failed
-gate-time gate-selftest 17.1
-gate-time test-steps 46.9 of 120, cpu 360.5, load 21.72 on 32 cores
-gate-time yardstick 4.5 s: conform-engine 1.9 and test262-moves-check 2.6
-gate-cpu test-steps 360.5, no bound for 32 cores: test 164.8, test-doc 5.8, test-collect 124.3, test-faults 0.2, conform-engine 2.9, test262-check 0.1, test262-moves-check 2.5, gate-selftest 59.9
-gate-time: no file of 400 under target/*/deps changed while the test steps ran
+gate-time test262-moves-check 2.0
+gate-selftest: 114 passed, 0 failed
+gate-time gate-selftest 15.9
+gate-time test-steps 38.3 of 120, cpu 283.6, load 13.22 on 32 cores
+gate-time yardstick 3.7 s: conform-engine 1.7 and test262-moves-check 2.0
+gate-cpu test-steps 283.6, no bound for 32 cores: test 106.7, test-doc 5.4, test-collect 110.4, test-faults 0.2, conform-engine 2.5, test262-check 0.1, test262-moves-check 1.7, gate-selftest 56.6
+gate-time: no file of 417 under target/*/deps changed while the test steps ran
 ```
 
 The refusal ceiling is `SPEC_REFUSALS_MAX` in `taskfiles/spec.yml` (41); a change to `spec/`

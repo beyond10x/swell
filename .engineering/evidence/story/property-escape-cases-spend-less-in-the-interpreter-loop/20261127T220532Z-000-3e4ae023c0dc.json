@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-27T22:05:32Z",
+  "actor": "human:operator",
+  "artifact": "story:property-escape-cases-spend-less-in-the-interpreter-loop",
+  "kind": "story",
+  "revision": 9,
+  "change": {
+    "change": "evidence",
+    "kind": "test_result",
+    "source": "the forge's run 46069633020 of the lane slow on wave/big-2 at 5ab9f8e5 (the head of the wave's second pull request), green, on a runner of 4 cores; and task check-runner on that head, exit 0, on the build node; the unit was merged by commit 8b60a31c, an ancestor of that head",
+    "reference": "slow-time lane 673.0 of 900, longest part slow-test262 359.8 of 600 (882.6 and 504.8 in run 45963552396 before the unit); slow-time slow-tests 145.3; gate-time test-steps 41.6 of 120 on the build node; gate-selftest: 112 passed, 0 failed"
+  }
+}
