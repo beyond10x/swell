@@ -4,11 +4,11 @@ id: story:gate-test-steps-hold-the-budget-on-the-slower-runner
 kind: story
 status: active
 title: The gate's test steps hold 120 s on the forge's slower runner
-summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in 147.6 s of their 120: one runner took 1.94 times the CPU seconds. The steps end within 120 s and within 29.5 yardsticks on that runner with the budget unchanged, the log of check names the runner''s CPU. Lane unit 6 of wave big-2 took the tests of swell::main to opt-level 1 (117.6 s, 30.2 yardsticks on the forge); lane unit 7 takes more of the step test there.'
+summary: 'The forge ran the gate''s test steps on the same code in 77.2 s and in 147.6 s of their 120: one runner took 1.94 times the CPU seconds. The steps end within 120 s and within 29.5 yardsticks on that runner with the budget unchanged, the log of check names the runner''s CPU. Lane unit 6 of wave big-2 took the tests of swell::main to opt-level 1 (117.6 s, 30.2 yardsticks on the forge); lane unit 7 took swell''s library, swell-num and swell-test262 there (the moved tests 6.01 CPU seconds against 37.16); the forge reads it on the wave''s third pull request.'
 relations:
 - informed_by: story:realm-size-lane-within-its-share
 - informed_by: story:slow-lane-holds-its-bound-on-the-slower-runner
-revision: 10
+revision: 12
 transitions:
 - {from: "draft", to: "proposed", at: "2026-11-27T10:38:23Z", actor: "human:operator", revision: 3, executor: "agent:coordinator"}
 - {from: "proposed", to: "active", at: "2026-11-27T10:38:24Z", actor: "human:operator", revision: 4, executor: "agent:coordinator"}
@@ -372,9 +372,11 @@ Checked on the report of the seventh unit (item 5):
   ignored` of `test` is the same on base and head (19, 2532, 0, 1), and so are those of
   `test-collect` and `test-doc`. The line `test: swell::main <a> at opt-level 1, <b> at
   opt-level 0` reads a 17 higher and b 17 lower than on the base (1647 and 123). In the
-  new line `test: <n> tests at opt-level 1, <m> at opt-level 0`, n plus m is p plus f plus
-  i of the summed line (2533), and n is a plus the counts of the other moved binaries
-  given above.
+  new line `test: <n> tests at opt-level 1, <m> at opt-level 0`, n plus m is p plus f of
+  the summed line (2532): the lists of the two runs leave an ignored test out, and p
+  plus f plus i (2533) is the count of tests of the list without a filter. n is a plus
+  the counts of the other moved binaries given above. (Corrected after the first
+  adversary pass on the seventh unit; the sentence read "n plus m is p plus f plus i".)
 - The list holds, for each test t of `TEST_OPT0_TESTS`: `cargo nextest list
   --message-format oneline` with the arguments, the configuration file and the
   environment of the run at opt-level 1 and `-E 'test(=<t>)'` prints no line for it, and
@@ -525,3 +527,61 @@ above, and what was measured:
   45972624878). The guard holds: the lane's `slow-time slow-tests` read 145.3 s (run
   46069633020). What is left of the story is a further cut, built as a seventh unit of the
   lane before any further feature unit.
+
+- The seventh unit of the lane (item 5; branch `impl/laneseven`, `0c4df9b7`, `c47fc9e2` and
+  `971ac76a` on `9a8ad008`, 2026-11-28). The step `test` prints `test: swell::main 1664 at
+  opt-level 1, 106 at opt-level 0` (1647 and 123 before) and the new line `test: 2187 tests
+  at opt-level 1, 345 at opt-level 0`; the summed line reads `19 test binaries: 2532 passed,
+  0 failed, 1 ignored` on base and head, and so do the lines of `test-collect` and
+  `test-doc`. `TEST_OPT0_TESTS` holds two pairs of `swell-test262::main`, one for each
+  fixture tree with a case at the parser's nesting limit. No moved test failed at
+  opt-level 1.
+- The cut, one pool job on the build node, the 540 moved tests once at each opt-level,
+  each through a runner that reads its process's CPU time: 37.16 CPU seconds at
+  opt-level 0, 6.01 at opt-level 1, ratio 0.162 against the bound of 0.40. By binary:
+  `swell` 291 tests 16.69 to 2.33; `swell-test262::main` 62 tests 10.51 to 1.64;
+  `swell-num::main` 153 tests 5.02 to 1.27; the 17 tests of `round_trip_planes!` 4.49 to
+  0.61; `swell-num` 8 tests 0.42 to 0.14; `swell-test262` 9 tests 0.02 to 0.02.
+- Whole gates on the build node (32 cores), each exit 0: the base read `gate-time
+  test-steps 38.4 of 120, cpu 320.4, load 9.16` with the step `test` at 146.8 CPU seconds;
+  the head `c47fc9e2` 39.2 s, cpu 228.5, load 9.76, `test` 76.6; the head `971ac76a` 49.3
+  s, cpu 251.4, load 16.20, `test` 107.4, with the same lists as `c47fc9e2`. The node's two
+  levels of CPU seconds stand between those two heads.
+- Where the delivery differs from item 5:
+  - nextest skips a binary whose tests a filter leaves out whole and counts neither it nor
+    its tests. So `test-split` also takes the list of the workspace as `--message-format
+    json-pretty` and writes its count of binaries and tests (`19 2533`) into
+    `.out/test-list-all.count`; `test-sum` reads b from there, and i is that count of
+    tests less p and f.
+  - n plus m of the new line is p plus f (2532), not p plus f plus i: the lists leave the
+    ignored test out. The sentence of the acceptance is corrected.
+  - `test-split` refuses, before any list and naming the pair, a pair of `TEST_OPT0_TESTS`
+    whose binary is not a moved binary and a pair named a second time; its check of the
+    written filter requires the term of `swell::main` and the exclusion `& not
+    binary_id(=swell::main)` once each.
+  - The summary of `gate-vars` names `TEST_OPT0_TESTS` too.
+- The rules: the stack rule prints 1665 "other" (1648 before) and 73 "stack" as before; the
+  room rule 1415 "other" (1398) and 323 "room" as before; each difference is the 17 lines
+  of the macro's tests. The lane's `slow-tests`: the collect mode's part at opt-level 0
+  went from `391 passed ... 1639 ignored` to `374 passed ... 1656 ignored`, its part at
+  opt-level 1 from `1083 passed ... 660 ignored` to `1100 passed ... 643 ignored`;
+  `test-realm-sizes` no longer runs the 17 at each size of the realm.
+- The build before the clock: `build-tests` with a target directory of its own took 824 s
+  on the base and 814 s on the head, its build at opt-level 1 5 min 29 s and 5 min 45 s;
+  `build-collect` counts 10 test executables instead of 3; seven crates are compiled at
+  opt-level 1 instead of six (`swell-test262`); 1,134,848 and 1,169,544 kB.
+- Scripts under `tests/gate/`: `test-runs-each-test-of-a-moved-binary-once.sh` and
+  `test-lists-and-summed-line-count-the-same-tests.sh` are new, four follow the new forms;
+  each runs 0.85 to 1.51 s alone. `gate-selftest` reads 114 passed.
+- The adversary's first pass (`review-result:adversary-laneseven-pass-1`, red) found the
+  wrong equation, a filter without the exclusion of `swell::main` that every planted
+  script let pass, a pair outside the moved binaries accepted, a summary that did not name
+  the new variable and a report without the scripts' seconds; correction 1 (`971ac76a`)
+  took them. The second pass (`review-result:adversary-laneseven-pass-2`) is green with
+  one note: a second package part written with another matcher passes the checks of the
+  written filter and the split, and only the guard stops it when the tests run. The note
+  is `story:test-split-holds-the-stack-tests-of-swell-main-by-its-lists` in the backlog
+  (`review-result:laneseven-coordinator-read`).
+- The acceptance on the forge (the test steps of the first attempt of `check` against its
+  yardstick and the budget, the duration of the job, the lane's `slow-time slow-tests`) is
+  read on the wave's third pull request.

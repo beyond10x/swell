@@ -1,0 +1,13 @@
+{
+  "at": "2026-11-28T00:52:38Z",
+  "actor": "human:operator",
+  "artifact": "story:gate-test-steps-hold-the-budget-on-the-slower-runner",
+  "kind": "story",
+  "revision": 10,
+  "change": {
+    "change": "evidence",
+    "kind": "verification",
+    "source": "impl/laneseven at 971ac76a, one whole gate on the build node (task check-runner) and the unit's reading of the cut, before the merge into wave/big-2",
+    "reference": "exit 0; test: swell::main 1664 at opt-level 1, 106 at opt-level 0; test: 2187 tests at opt-level 1, 345 at opt-level 0; 19 test binaries: 2532 passed, 0 failed, 1 ignored; gate-selftest: 114 passed, 0 failed; gate-time test-steps 49.3 of 120, cpu 251.4, load 16.20 on 32 cores; the 540 moved tests 37.16 CPU s at opt-level 0 and 6.01 at opt-level 1, ratio 0.162 of a bound of 0.40"
+  }
+}
