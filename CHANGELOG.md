@@ -519,6 +519,28 @@ Every number below comes from the gate, `task check`, on the released commit.
   `slow-tests` counts what runs (a test compiled out of the collect build apart). The
   workflow `slow` also starts on a change of `.cargo/collect-profile.toml`
   (`story:realm-size-lane-within-its-share`).
+- The tests of `swell` hold three types that implement `Host`, where they held 19
+  (`story:slow-lane-holds-its-bound-on-the-slower-runner`). The engine is generic over its
+  host, so each type compiled the engine once more inside the test binary `swell::main`. A
+  test whose host answers hooks of its own now gives the one type `Scripted`
+  (`crates/swell/tests/support/scripted.rs`) its state and a table of function pointers. The
+  module `host_types` of the tests refuses a further type, naming file and line. On a build
+  machine of 32 cores the unit `main` of that binary builds at opt-level 1 in 54.9 s and
+  72.2 s, against 311 to 358 s. No file under `crates/*/src/` changed; `swell::main` has
+  1,805 tests, the 1,770 before and 35 of the guard and the scripted type.
+- The lane `slow` runs at opt-level 1 every run that can move: the default mode of
+  `slow-tests` and of `test-realm-sizes` and the library's unit tests in the collect mode,
+  but for the tests that run on a bounded stack and the tests of `swell-syntax`, which stay
+  at opt-level 0. `test-split` splits a run of the lane as it splits the gate's step `test`
+  and fails, naming the test, when one is in neither part or in both. Each moved run prints
+  its counts (`slow-tests: 977 tests at opt-level 1, 116 at opt-level 0`; `realm-sizes <k>
+  default: 314 tests at opt-level 1, 50 at opt-level 0`) and fails on a cargo `Compiling`
+  line. The lane makes three builds in the background beside `slow-test262` (`slow-build
+  opt1`, `lib`, `collect`), and `slow-tests` waits for them at most 400 s in sum. A caller's
+  value of a `SPLIT_*` variable, on the command line or in the environment, is refused
+  before anything is built. On a build machine of 32 cores the lane read 383.8 s before and
+  312.5 s after (`slow-tests` 63.4 and 20.8, `test-realm-sizes` 49.1 and 32.1). The bounds of
+  900 s and 600 s are unchanged.
 - The realm holds the three functions more: `heap_bytes()` after `create_realm` reads 394,751
   bytes, before 393,818; `live_bytes()` 282,792, before 281,115 (the test
   `realm_padding::a_padded_realm_holds_k_functions_more`, k = 0; at k = 200 645,964 and 428,053,
